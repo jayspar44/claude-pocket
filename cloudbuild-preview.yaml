@@ -1,0 +1,162 @@
+# Cloud Build configuration for PR Preview environments
+# Triggered by: Pull Request against develop branch
+# Deploys: Backend to Cloud Run (tagged, no traffic) + Frontend to Firebase preview channel
+#
+# Substitution variables:
+#   _PR_NUMBER: Pull request number (provided by trigger)
+#
+# Preview URLs:
+#   Backend:  https://pr-{N}---{{BACKEND_SERVICE}}-dev-{{CLOUD_RUN_HASH}}.a.run.app
+#   Frontend: https://{{FIREBASE_PROJECT_ID}}--pr-{N}-{hash}.web.app
+
+substitutions:
+  _PR_NUMBER: ''
+  _REGION: {{GCP_REGION}}
+
+steps:
+  # Step 1: Build and deploy backend to Cloud Run with PR tag (no traffic)
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        cd backend
+        echo "Deploying backend for PR #${_PR_NUMBER}..."
+        gcloud run deploy {{BACKEND_SERVICE}}-dev \
+          --source . \
+          --region ${_REGION} \
+          --allow-unauthenticated \
+          --tag pr-${_PR_NUMBER} \
+          --no-traffic \
+          --set-secrets="FIREBASE_SERVICE_ACCOUNT=FIREBASE_SERVICE_ACCOUNT:latest,GEMINI_API_KEY=GEMINI_API_KEY:latest" \
+          --set-env-vars="NODE_ENV=dev" \
+          --set-env-vars="^@^ALLOWED_ORIGINS=https://{{FIREBASE_SITE_DEV}}.web.app,https://{{FIREBASE_SITE_PROD}}.web.app,capacitor://localhost,https://localhost"
+
+        PREVIEW_URL="https://pr-${_PR_NUMBER}---{{BACKEND_SERVICE}}-dev-{{CLOUD_RUN_HASH}}.a.run.app"
+        echo "Backend preview URL: $${PREVIEW_URL}"
+        echo "$${PREVIEW_URL}" > /workspace/backend-preview-url.txt
+
+  # Step 2: Get Firebase config and create frontend env file
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        BACKEND_URL=$$(cat /workspace/backend-preview-url.txt)
+        FIREBASE_CONFIG=$$(gcloud secrets versions access latest --secret=FIREBASE_CLIENT_CONFIG)
+        echo "VITE_API_URL=$${BACKEND_URL}/api" > /workspace/frontend/.env.production
+        echo "VITE_FIREBASE_CONFIG=$${FIREBASE_CONFIG}" >> /workspace/frontend/.env.production
+        echo "Created .env.production pointing to preview backend:"
+        cat /workspace/frontend/.env.production
+
+  # Step 3: Install frontend dependencies and build
+  - name: 'node:22'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        cd frontend
+        npm ci
+        npm run build
+
+  # Step 4: Deploy frontend to Firebase Hosting preview channel
+  - name: 'node:22'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        npm install -g firebase-tools
+        cd frontend
+        # Use --only dev to target dev site (defined in .firebaserc)
+        firebase hosting:channel:deploy pr-${_PR_NUMBER} \
+          --only dev \
+          --project {{FIREBASE_PROJECT_ID}} \
+          --expires 7d \
+          --json > /workspace/firebase-deploy.json
+
+        # Extract the preview URL and save it
+        FRONTEND_URL=$$(cat /workspace/firebase-deploy.json | node -e "
+          const data = JSON.parse(require('fs').readFileSync('/dev/stdin', 'utf8'));
+          const channels = data.result || {};
+          const channelId = Object.keys(channels)[0];
+          if (channelId && channels[channelId].url) {
+            console.log(channels[channelId].url);
+          }
+        ")
+        echo "$${FRONTEND_URL}" > /workspace/frontend-preview-url.txt
+        echo "Frontend preview URL: $${FRONTEND_URL}"
+
+  # Step 5: Update backend CORS with exact frontend URL
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        FRONTEND_URL=$$(cat /workspace/frontend-preview-url.txt)
+        echo "Updating backend CORS to allow: $${FRONTEND_URL}"
+        gcloud run services update {{BACKEND_SERVICE}}-dev \
+          --region ${_REGION} \
+          --tag pr-${_PR_NUMBER} \
+          --update-env-vars="^@^ALLOWED_ORIGINS=https://{{FIREBASE_SITE_DEV}}.web.app,https://{{FIREBASE_SITE_PROD}}.web.app,capacitor://localhost,https://localhost,$${FRONTEND_URL}"
+
+        echo ""
+        echo "=========================================="
+        echo "PR #${_PR_NUMBER} Preview Environment Ready!"
+        echo "=========================================="
+        echo "Frontend: $${FRONTEND_URL}"
+        echo "Backend:  https://pr-${_PR_NUMBER}---{{BACKEND_SERVICE}}-dev-{{CLOUD_RUN_HASH}}.a.run.app"
+        echo "=========================================="
+
+  # Step 6: Post preview URLs to GitHub PR as comment
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        FRONTEND_URL=$$(cat /workspace/frontend-preview-url.txt)
+        BACKEND_URL="https://pr-${_PR_NUMBER}---{{BACKEND_SERVICE}}-dev-{{CLOUD_RUN_HASH}}.a.run.app"
+
+        # Get GitHub token from Secret Manager
+        GITHUB_TOKEN=$$(gcloud secrets versions access latest --secret=GITHUB_TOKEN --project={{FIREBASE_PROJECT_ID}} 2>/dev/null || echo "")
+
+        if [ -n "$$GITHUB_TOKEN" ]; then
+          echo "Posting preview URLs to GitHub PR #${_PR_NUMBER}..."
+
+          # Create comment body as JSON (properly escaped)
+          COMMENT_BODY="## 🚀 Preview Environment Ready!\n\nYour PR preview has been deployed and is ready for testing.\n\n### Preview URLs\n- **Frontend:** $${FRONTEND_URL}\n- **Backend:** $${BACKEND_URL}\n\n### Testing\n1. Open the frontend URL above\n2. Navigate to **Settings** page\n3. Verify the **Backend version** displays correctly\n\nThe preview will expire in 7 days or when the PR is closed.\n\n---\n<sub>Deployed by Cloud Build</sub>"
+
+          # Post comment to GitHub PR using Python for proper JSON escaping
+          python3 -c "
+        import json
+        import urllib.request
+        import os
+
+        body = '''$${COMMENT_BODY}'''
+        data = json.dumps({'body': body}).encode('utf-8')
+
+        req = urllib.request.Request(
+            'https://api.github.com/repos/{{GITHUB_REPO}}/issues/${_PR_NUMBER}/comments',
+            data=data,
+            headers={
+                'Authorization': 'token $${GITHUB_TOKEN}',
+                'Accept': 'application/vnd.github.v3+json',
+                'Content-Type': 'application/json'
+            },
+            method='POST'
+        )
+
+        try:
+            with urllib.request.urlopen(req) as response:
+                print('✅ Preview URLs posted to GitHub PR #${_PR_NUMBER}')
+        except Exception as e:
+            print(f'❌ Failed to post comment: {e}')
+        "
+        else
+          echo "⚠️  GITHUB_TOKEN secret not found - skipping GitHub comment"
+          echo "   To enable automatic PR comments, create a GitHub token with 'repo' scope"
+          echo "   and store it in Secret Manager as 'GITHUB_TOKEN'"
+        fi
+
+timeout: '1800s'
+options:
+  logging: CLOUD_LOGGING_ONLY

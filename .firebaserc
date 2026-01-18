@@ -1,0 +1,17 @@
+{
+  "projects": {
+    "default": "{{FIREBASE_PROJECT_ID}}"
+  },
+  "targets": {
+    "{{FIREBASE_PROJECT_ID}}": {
+      "hosting": {
+        "dev": [
+          "{{FIREBASE_SITE_DEV}}"
+        ],
+        "prod": [
+          "{{FIREBASE_SITE_PROD}}"
+        ]
+      }
+    }
+  }
+}

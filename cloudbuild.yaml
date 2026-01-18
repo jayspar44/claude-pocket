@@ -1,0 +1,63 @@
+# Cloud Build configuration for Cloud Run (backend) + Firebase Hosting (frontend)
+# Triggered by branch push: develop -> dev, main -> prod
+# Substitution variables: _ENV (dev|prod), _REGION (us-central1)
+
+substitutions:
+  _ENV: dev
+  _REGION: {{GCP_REGION}}
+
+steps:
+  # Step 1: Build and deploy backend to Cloud Run
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        cd backend
+        gcloud run deploy {{BACKEND_SERVICE}}-${_ENV} \
+          --source . \
+          --region ${_REGION} \
+          --allow-unauthenticated \
+          --set-secrets="FIREBASE_SERVICE_ACCOUNT=FIREBASE_SERVICE_ACCOUNT:latest,GEMINI_API_KEY=GEMINI_API_KEY:latest" \
+          --set-env-vars="NODE_ENV=${_ENV}" \
+          --set-env-vars="^@^ALLOWED_ORIGINS=https://{{FIREBASE_SITE_DEV}}.web.app,https://{{FIREBASE_SITE_PROD}}.web.app,capacitor://localhost,https://localhost"
+
+        # Ensure traffic is routed to latest (needed when PR preview tags exist)
+        gcloud run services update-traffic {{BACKEND_SERVICE}}-${_ENV} --region ${_REGION} --to-latest
+
+  # Step 2: Get Cloud Run URL and Firebase config, create frontend env file
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        CLOUD_RUN_URL=$$(gcloud run services describe {{BACKEND_SERVICE}}-${_ENV} --region ${_REGION} --format='value(status.url)')
+        FIREBASE_CONFIG=$$(gcloud secrets versions access latest --secret=FIREBASE_CLIENT_CONFIG)
+        echo "VITE_API_URL=$${CLOUD_RUN_URL}/api" > /workspace/frontend/.env.production
+        echo "VITE_FIREBASE_CONFIG=$${FIREBASE_CONFIG}" >> /workspace/frontend/.env.production
+        echo "Created .env.production with API URL and Firebase config"
+        cat /workspace/frontend/.env.production
+
+  # Step 3: Install frontend dependencies and build
+  - name: 'node:22'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        cd frontend
+        cat .env.production || echo "No .env.production found"
+        npm ci
+        npm run build
+
+  # Step 4: Deploy frontend to Firebase Hosting
+  - name: 'node:22'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        npm install -g firebase-tools
+        firebase deploy --only hosting:${_ENV} --project {{FIREBASE_PROJECT_ID}}
+
+timeout: '1800s'
+options:
+  logging: CLOUD_LOGGING_ONLY

@@ -1,0 +1,20 @@
+{
+  "bumpFiles": [
+    { "filename": "version.json", "type": "json" },
+    { "filename": "package.json", "type": "json" },
+    { "filename": "frontend/package.json", "type": "json" },
+    { "filename": "backend/package.json", "type": "json" }
+  ],
+  "tagPrefix": "v",
+  "types": [
+    { "type": "feat", "section": "Features" },
+    { "type": "fix", "section": "Bug Fixes" },
+    { "type": "chore", "section": "Maintenance", "hidden": true },
+    { "type": "docs", "section": "Documentation", "hidden": true },
+    { "type": "refactor", "section": "Refactoring", "hidden": true },
+    { "type": "perf", "section": "Performance" },
+    { "type": "test", "hidden": true }
+  ],
+  "commitUrlFormat": "https://github.com/{{GITHUB_REPO}}/commit/{{hash}}",
+  "compareUrlFormat": "https://github.com/{{GITHUB_REPO}}/compare/{{previousTag}}...{{currentTag}}"
+}

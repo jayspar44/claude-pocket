@@ -1,0 +1,110 @@
+name: PR Validation
+
+on:
+  pull_request:
+    branches:
+      - develop
+      - main
+    types:
+      - opened
+      - synchronize
+      - reopened
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  validate:
+    name: Validate Changes
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install root dependencies
+        run: npm ci
+
+      - name: Install frontend dependencies
+        run: |
+          cd frontend
+          npm ci
+
+      - name: Install backend dependencies
+        run: |
+          cd backend
+          npm ci
+
+      - name: Run ESLint (Frontend)
+        id: lint-frontend
+        run: |
+          echo "Running ESLint on frontend..."
+          cd frontend
+          npm run lint
+
+      - name: Run ESLint (Backend)
+        id: lint-backend
+        run: |
+          echo "Running ESLint on backend..."
+          cd backend
+          npm run lint
+
+      - name: Build frontend (validation)
+        id: build
+        run: |
+          echo "Building frontend to validate configuration..."
+          cd frontend
+          export VITE_FIREBASE_CONFIG='{"apiKey":"test","authDomain":"test","projectId":"test","storageBucket":"test","messagingSenderId":"test","appId":"test"}'
+          export DISABLE_ESLINT_PLUGIN=true
+          npm run build
+
+      - name: Check for common issues
+        run: |
+          echo "Checking for common issues..."
+          if grep -r "console\.log" frontend/src --include="*.js" --include="*.jsx" | grep -v "node_modules" | grep -v "^\s*//" | grep -v "//.*console\.log"; then
+            echo "::warning::Found console.log statements in frontend code (consider removing for production)"
+          fi
+          if grep -r "TODO" frontend/src backend/src --include="*.js" --include="*.jsx" | grep -v "node_modules"; then
+            echo "::notice::Found TODO comments in code"
+          fi
+          echo "Code checks complete"
+
+      - name: Post validation summary
+        if: always()
+        run: |
+          echo "## PR Validation Results :mag:" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**PR:** #${{ github.event.pull_request.number }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Branch:** \`${{ github.head_ref }}\` → \`${{ github.base_ref }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "**Commit:** \`${{ github.sha }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          if [ "${{ steps.lint-frontend.outcome }}" == "success" ]; then
+            echo ":white_check_mark: **Frontend Lint:** Passed" >> $GITHUB_STEP_SUMMARY
+          else
+            echo ":x: **Frontend Lint:** Failed" >> $GITHUB_STEP_SUMMARY
+          fi
+          if [ "${{ steps.lint-backend.outcome }}" == "success" ]; then
+            echo ":white_check_mark: **Backend Lint:** Passed" >> $GITHUB_STEP_SUMMARY
+          else
+            echo ":x: **Backend Lint:** Failed" >> $GITHUB_STEP_SUMMARY
+          fi
+          if [ "${{ steps.build.outcome }}" == "success" ]; then
+            echo ":white_check_mark: **Build:** Passed" >> $GITHUB_STEP_SUMMARY
+          else
+            echo ":x: **Build:** Failed" >> $GITHUB_STEP_SUMMARY
+          fi
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Note:** This validation does not deploy - it only checks code quality." >> $GITHUB_STEP_SUMMARY
+
+      - name: Fail if critical checks failed
+        if: steps.lint-frontend.outcome != 'success' || steps.lint-backend.outcome != 'success' || steps.build.outcome != 'success'
+        run: |
+          echo "Validation failed. Please fix the errors before merging."
+          exit 1
