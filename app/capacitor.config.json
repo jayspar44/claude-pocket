@@ -1,0 +1,21 @@
+{
+    "appId": "com.claudecode.pocket",
+    "webDir": "dist",
+    "appName": "Claude Pocket",
+    "server": {
+        "androidScheme": "https"
+    },
+    "plugins": {
+        "Keyboard": {
+            "resizeOnFullScreen": true,
+            "style": "dark",
+            "resize": "native"
+        },
+        "StatusBar": {
+            "overlay": true
+        },
+        "SystemBars": {
+            "insetsHandling": "disable"
+        }
+    }
+}

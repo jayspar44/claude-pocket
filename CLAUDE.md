@@ -1,53 +1,64 @@
-# {{PROJECT_TITLE}}
+# Claude Pocket
 
-{{PROJECT_DESCRIPTION}}
+Mobile-first client for Claude Code CLI that connects to a relay server via WebSocket.
 
 **Doc style:** Tables over prose, inline formats (`|`-separated), no duplicate info, bullets not paragraphs.
 
 ## Architecture
 
-**Full-stack monorepo:**
-- **Frontend**: React 19 + Vite 7 + Tailwind CSS 4 + Capacitor 8
-- **Backend**: Node.js 22 + Express 5
-- **Database**: Firebase Firestore | **Auth**: Firebase Auth | **AI**: Gemini (optional)
-- **Hosting**: Cloud Run (backend) + Firebase Hosting (frontend) | **CI/CD**: Cloud Build
+```
+┌─────────────────────┐     WebSocket      ┌─────────────────────┐
+│   Mobile App        │ ◄───────────────► │   Relay Server      │
+│   (Capacitor/React) │    + REST API      │   (Mac Mini)        │
+│                     │   via Tailscale    │                     │
+│ - xterm.js display  │                    │ - node-pty spawn    │
+│ - Native input      │                    │ - Claude Code CLI   │
+│ - Quick actions     │                    │ - File browser      │
+│ - Command palette   │                    │                     │
+└─────────────────────┘                    └─────────────────────┘
+```
+
+**Stack:**
+- **App**: React 19 + Vite 7 + Tailwind CSS 4 + Capacitor 8 + xterm.js
+- **Relay**: Node.js 22 + Express 5 + WebSocket + node-pty
 
 ## Project Structure
 
 ```
-{{PROJECT_NAME}}/
-├── frontend/                 # React + Vite web app
+claude-pocket/
+├── app/                          # Mobile app (Capacitor + React)
 │   ├── src/
-│   │   ├── pages/           # Route pages
-│   │   ├── components/      # UI components (layout/, common/, ui/)
-│   │   ├── contexts/        # AuthContext, UserPreferencesContext, ConnectionContext, ThemeContext
-│   │   ├── api/             # Axios client and API services
-│   │   └── utils/           # Helper functions
-│   └── capacitor.config.json # Mobile app config
-├── backend/                  # Express API server
+│   │   ├── components/
+│   │   │   ├── terminal/        # TerminalView (xterm.js wrapper)
+│   │   │   ├── input/           # InputBar, QuickActions
+│   │   │   ├── command/         # CommandPalette
+│   │   │   ├── files/           # FileBrowser, ImagePicker
+│   │   │   └── ui/              # Button, Card
+│   │   ├── contexts/
+│   │   │   ├── RelayContext.jsx # WebSocket connection state
+│   │   │   └── ThemeContext.jsx
+│   │   ├── hooks/
+│   │   │   ├── useRelay.js
+│   │   │   └── useCommandHistory.js
+│   │   ├── pages/
+│   │   │   ├── Terminal.jsx     # Main terminal page
+│   │   │   └── Settings.jsx     # Configuration page
+│   │   └── api/
+│   │       └── relay-api.js     # Axios client for REST endpoints
+│   └── capacitor.config.json
+├── relay/                        # Relay server (runs on Mac)
 │   ├── src/
-│   │   ├── index.js         # Server entry point
-│   │   ├── routes/api.js    # Route definitions
-│   │   ├── controllers/     # auth, user, notes controllers
-│   │   └── services/        # firebase service
-│   └── Dockerfile           # Cloud Run container config
-├── .claude/commands/         # Claude Code slash commands
-├── .github/workflows/        # GitHub Actions
-├── scripts/                  # Dev tooling
-├── cloudbuild.yaml          # CI/CD pipeline (dev/prod)
-├── cloudbuild-preview.yaml  # PR preview environments
-├── cloud-run.config.json    # Cloud Run service URLs
-└── firebase.json            # Firebase project config
+│   │   ├── index.js             # Express + WebSocket server
+│   │   ├── pty-manager.js       # node-pty process manager
+│   │   ├── websocket-handler.js # WebSocket message protocol
+│   │   ├── config.js            # Server configuration
+│   │   └── routes/
+│   │       ├── commands.js      # List .claude/commands/*.md
+│   │       └── files.js         # File browser + upload
+│   └── package.json
+├── .claude/commands/             # Slash commands
+└── package.json                  # Root monorepo scripts
 ```
-
-## Environments
-
-| Environment | Branch/Trigger | Backend URL | Frontend |
-|-------------|----------------|-------------|----------|
-| Local       | any            | http://localhost:4001 | http://localhost:4000 |
-| Dev (GCP)   | develop        | Cloud Run dev service | Firebase Hosting dev |
-| Prod (GCP)  | main           | Cloud Run prod service | Firebase Hosting prod |
-| PR Preview  | PR to develop  | Cloud Run tagged revision | Firebase preview channel |
 
 ## Local Development
 
@@ -56,161 +67,107 @@
 ```bash
 # Setup
 npm run install-all
-cp backend/.env.example backend/.env
-cp frontend/.env.local.template frontend/.env.local
-# Edit both files with your credentials
+cp relay/.env.example relay/.env
+# Edit relay/.env with your working directory
 
-# Run (http://localhost:4000 frontend, :4001 backend)
+# Run (http://localhost:4500 app, :4501 relay)
 npm run dev:local          # Both servers
-npm run dev:frontend       # Frontend only
-npm run dev:backend        # Backend only
+npm run dev:app            # App only
+npm run dev:relay          # Relay only
 ```
 
 ## Environment Variables
 
-### Backend (`backend/.env`)
+### Relay (`relay/.env`)
 
 | Variable | Description |
 |----------|-------------|
-| `PORT` | Server port (default: 4001) |
-| `FIREBASE_SERVICE_ACCOUNT` | Firebase Admin SDK service account JSON |
-| `GEMINI_API_KEY` | Google Gemini API key (optional) |
-| `NODE_ENV` | Environment (development/production) |
+| `PORT` | Server port (default: 4501) |
+| `HOST` | Bind address (default: 0.0.0.0) |
+| `WORKING_DIR` | Claude Code working directory |
+| `CLAUDE_COMMAND` | Claude CLI command (default: claude) |
 | `ALLOWED_ORIGINS` | CORS allowed origins (comma-separated) |
 
-### Frontend (`frontend/.env.local`)
+### App (`app/.env.local`)
 
 | Variable | Description |
 |----------|-------------|
-| `VITE_API_URL` | Backend API URL (default: /api) |
-| `VITE_FIREBASE_CONFIG` | Firebase client config JSON |
+| `VITE_RELAY_URL` | WebSocket URL (default: ws://localhost:4501/ws) |
+| `VITE_RELAY_API_URL` | REST API URL (default: http://localhost:4501) |
 
 ## API Endpoints
 
-All endpoints (except health) require Firebase Auth token in `Authorization: Bearer <token>` header.
+### REST Endpoints
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| GET | `/api/health` | Health check with version info (public) |
-| POST | `/api/user/profile` | Create/update user profile |
-| GET | `/api/user/profile` | Get user profile |
-| GET | `/api/notes` | Get all notes |
-| GET | `/api/notes/:id` | Get a note by ID |
-| POST | `/api/notes` | Create a new note |
-| PUT | `/api/notes/:id` | Update a note |
-| DELETE | `/api/notes/:id` | Delete a note |
+| GET | `/api/health` | Health check with PTY status |
+| GET | `/api/pty/status` | Get PTY process status |
+| POST | `/api/pty/restart` | Restart Claude Code process |
+| GET | `/api/commands` | List available slash commands |
+| GET | `/api/commands/:name` | Get command file content |
+| GET | `/api/files?path=` | List files in directory |
+| POST | `/api/files/upload` | Upload file (for images) |
+| GET | `/api/files/info` | Get working directory info |
+
+### WebSocket Protocol (`/ws`)
+
+**Client → Server:**
+```json
+{ "type": "input", "data": "text to send" }
+{ "type": "resize", "cols": 80, "rows": 24 }
+{ "type": "interrupt" }
+{ "type": "restart" }
+{ "type": "status" }
+```
+
+**Server → Client:**
+```json
+{ "type": "output", "data": "terminal output" }
+{ "type": "replay", "data": "buffered output" }
+{ "type": "status", "connected": true, "clientId": "..." }
+{ "type": "pty-status", "running": true, "pid": 1234 }
+```
 
 ## Mobile (Android/iOS)
 
-Capacitor for native builds. Three Android flavors with separate app IDs.
-
-### Android Flavors
-
-| Script | App ID | Backend |
-|--------|--------|---------|
-| `android:local` | `{{APP_ID_BASE}}.local` | Local |
-| `android:dev` | `{{APP_ID_BASE}}.dev` | GCP dev |
-| `android` | `{{APP_ID_BASE}}` | GCP prod |
+Capacitor for native builds.
 
 ### Android Commands
 
 ```bash
 # First time setup
-cd frontend && npx cap add android && npx cap open android
+cd app && npx cap add android && npx cap open android
 
 # Build for Android Studio
-npm run android:local              # Local backend
-npm run android:dev                # GCP dev backend
-npm run android                    # GCP prod backend
+npm run android:local              # Local relay
+npm run android                    # Production
 
 # Build APK directly
 npm run apk:local                  # localDebug
-npm run apk:dev                    # devDebug
 npm run apk:prod                   # prodRelease
-```
-
-## GCP Deployment
-
-### CI/CD Triggers
-
-| Trigger | Action | Config |
-|---------|--------|--------|
-| Push to `develop` | Deploy to dev | `cloudbuild.yaml` |
-| Push to `main` | Deploy to prod | `cloudbuild.yaml` |
-| PR to `develop` | Deploy preview | `cloudbuild-preview.yaml` |
-
-### Branch Protection
-
-| Branch | Requires PR | Direct Push | Force Push |
-|--------|-------------|-------------|------------|
-| `main` | Yes | Blocked | Blocked |
-| `develop` | No | Allowed | Blocked |
-
-## Security
-
-### CRITICAL: Never Commit Secrets
-
-**NEVER commit files containing secrets, credentials, or API keys.**
-
-**Protected Files:** All `.env*` files EXCEPT `.env.example` / `.env.template`
-
-**Before Committing:**
-```bash
-git status && git diff --cached   # Review staged changes
-/security-scan                    # Run security scan
-```
-
-**Use `/commit-push` instead of `git commit`** - runs lint and security checks automatically.
-
-## Claude Code Slash Commands
-
-Custom commands in `.claude/commands/`:
-
-| Command | Usage |
-|---------|-------|
-| `/feature-start` | `/feature-start <name> [base-branch]` - Create feature branch |
-| `/commit-push` | `/commit-push [-m "msg"] [--no-push]` - Safe commit (lint + security) |
-| `/security-scan` | `/security-scan [--staged \| --all]` - Scan for secrets |
-| `/lint-check` | `/lint-check [--fix]` - ESLint with optional auto-fix |
-| `/code-review` | `/code-review [pr-number\|branch]` - Multi-agent review |
-| `/pr-flow` | `/pr-flow [--no-fix] [--auto-merge]` - Autonomous PR workflow |
-| `/pr-merge` | `/pr-merge <pr-number> [--no-sync] [--delete-branch]` - Squash merge |
-| `/release` | `/release [--patch\|--minor\|--major]` - Auto-bump version |
-| `/build-app` | `/build-app [local\|dev\|prod]` - Build APK |
-
-### Typical Workflow
-
-```bash
-/feature-start my-feature              # Create branch
-/commit-push -m "feat: Add feature"    # Safe commit (conventional format)
-/pr-flow                               # Create PR, auto-fix, merge
-/release                               # Auto-bump version based on commits
 ```
 
 ## Coding Conventions
 
 ### Naming
-- **Files**: kebab-case (e.g., `user-profile.js`, `api-routes.js`)
-- **React Components**: PascalCase (e.g., `UserProfile.jsx`)
+- **Files**: kebab-case (e.g., `relay-api.js`, `pty-manager.js`)
+- **React Components**: PascalCase (e.g., `TerminalView.jsx`)
 - **Variables/Functions**: camelCase
 - **Directories**: kebab-case
 
-### Frontend Patterns
-- **State**: React Context for global state (Auth, Theme). Local state for components.
-- **API**: Use the `api/` directory for Axios wrappers. Do not make raw fetch calls in components.
-- **Styling**: Tailwind CSS utility classes. Use CSS variables for theming in `index.css`.
-- **Mobile**: Capacitor is used. Avoid browser-only APIs without checks.
+### App Patterns
+- **State**: React Context for global state (Relay, Theme)
+- **API**: Use `api/relay-api.js` for REST calls
+- **Styling**: Tailwind CSS utility classes
+- **Mobile**: Capacitor plugin checks for native features
 
-### Backend Patterns
-- **Structure**: Controller-Service pattern
-  - `routes/`: Express routers
-  - `controllers/`: Request handling logic
-  - `services/`: Business logic, Firebase calls
-- **Logging**: Use `req.log` (Pino) instead of `console.log`
+### Relay Patterns
+- **Logging**: Use Pino logger
+- **WebSocket**: JSON message protocol
+- **PTY**: Single persistent Claude process with buffer replay
 
 ### Git Commits (Conventional Commits)
-
-This project uses [Conventional Commits](https://www.conventionalcommits.org/) for automated versioning.
 
 **Format**: `<type>: <description>`
 
@@ -222,9 +179,5 @@ This project uses [Conventional Commits](https://www.conventionalcommits.org/) f
 | `chore:` | Maintenance, deps | None |
 | `docs:` | Documentation | None |
 | `refactor:` | Code restructuring | None |
-| `perf:` | Performance | None |
-| `test:` | Tests | None |
 
-**Examples:** `feat: add dark mode toggle`, `fix: resolve login redirect bug`, `chore: update deps`
-
-**Commit hooks enforce this format.** Invalid messages are rejected by commitlint. Subject must be lowercase.
+**Examples:** `feat: add command palette`, `fix: reconnection logic`, `chore: update deps`

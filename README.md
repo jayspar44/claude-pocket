@@ -52,7 +52,7 @@ cp frontend/.env.local.template frontend/.env.local
 npm run dev:local
 ```
 
-Open http://localhost:4000
+Open http://localhost:4500
 
 ## Documentation
 
