@@ -7,6 +7,11 @@ const logger = require('./logger');
 // Batch delay for output messages (reduces WebSocket overhead, improves performance)
 const BATCH_DELAY_MS = 50;
 
+// Auto-restart configuration
+const AUTO_RESTART_DELAY_MS = 1000; // Wait before restarting
+const MAX_RESTART_ATTEMPTS = 3; // Max restarts within window
+const RESTART_WINDOW_MS = 30000; // Reset counter after 30s of stability
+
 class PtyManager {
   constructor() {
     this.ptyProcess = null;
@@ -20,6 +25,13 @@ class PtyManager {
     this.batchTimer = null;
     // Persistence state
     this.saveTimer = null;
+    // Auto-restart state
+    this.restartAttempts = 0;
+    this.lastRestartTime = 0;
+    this.intentionalStop = false;
+    // Diagnostics
+    this.processStartTime = 0;
+    this.lastOutputLines = []; // Keep last 10 lines for crash diagnosis
   }
 
   start(workingDir = null) {
@@ -31,6 +43,7 @@ class PtyManager {
     // Use provided workingDir, or fall back to config
     const cwd = workingDir || config.workingDir;
     this.currentWorkingDir = cwd;
+    this.intentionalStop = false;
 
     // Restore buffer from disk if available
     this.loadBuffer();
@@ -48,22 +61,61 @@ class PtyManager {
 
       this.ptyProcess = proc;
       this.isRunning = true;
+      this.processStartTime = Date.now();
+      this.lastOutputLines = [];
 
       proc.onData((data) => {
         // Send raw output to xterm.js (handles all ANSI sequences natively)
         // Use batching to reduce WebSocket overhead (50ms window)
         this.appendToBuffer(data);
         this.queueOutput(data);
+
+        // Track last lines for crash diagnosis (strip ANSI codes for readability)
+        const cleanData = data.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '');
+        const lines = cleanData.split('\n').filter(l => l.trim());
+        for (const line of lines) {
+          this.lastOutputLines.push(line.substring(0, 200)); // Limit line length
+          if (this.lastOutputLines.length > 10) {
+            this.lastOutputLines.shift();
+          }
+        }
       });
 
       proc.onExit(({ exitCode, signal }) => {
-        logger.info({ exitCode, signal }, 'Claude Code process exited');
+        const uptimeMs = Date.now() - this.processStartTime;
+        const exitInfo = {
+          exitCode,
+          signal,
+          pid: proc.pid,
+          uptimeSeconds: Math.round(uptimeMs / 1000),
+          intentionalStop: this.intentionalStop,
+          restartAttempts: this.restartAttempts,
+        };
+
+        // Log with appropriate level based on exit type
+        if (this.intentionalStop) {
+          logger.info(exitInfo, 'Claude Code process stopped intentionally');
+        } else if (exitCode === 0) {
+          logger.info(exitInfo, 'Claude Code process exited normally');
+        } else {
+          // Include last output lines for crash diagnosis
+          logger.error({
+            ...exitInfo,
+            lastOutput: this.lastOutputLines,
+          }, 'Claude Code process crashed');
+        }
+
         // Only clear if this is still the current process (prevents race condition on restart)
         if (this.ptyProcess === proc) {
           this.isRunning = false;
           this.ptyProcess = null;
         }
         this.broadcast({ type: 'pty-status', running: this.isRunning, exitCode, signal });
+
+        // Auto-restart if not intentionally stopped
+        if (!this.intentionalStop) {
+          this.scheduleRestart();
+        }
       });
 
       logger.info({ pid: proc.pid }, 'Claude Code process started');
@@ -73,9 +125,52 @@ class PtyManager {
     }
   }
 
+  scheduleRestart() {
+    const now = Date.now();
+
+    // Reset counter if enough time has passed since last restart
+    if (now - this.lastRestartTime > RESTART_WINDOW_MS) {
+      this.restartAttempts = 0;
+    }
+
+    // Check if we've exceeded max restart attempts
+    if (this.restartAttempts >= MAX_RESTART_ATTEMPTS) {
+      logger.error({ attempts: this.restartAttempts }, 'Max restart attempts exceeded, giving up');
+      this.broadcast({
+        type: 'pty-error',
+        message: 'Claude Code crashed repeatedly. Use restart button to try again.',
+      });
+      return;
+    }
+
+    this.restartAttempts++;
+    this.lastRestartTime = now;
+
+    logger.info(
+      { attempt: this.restartAttempts, maxAttempts: MAX_RESTART_ATTEMPTS, delayMs: AUTO_RESTART_DELAY_MS },
+      'Scheduling auto-restart'
+    );
+
+    // Notify clients of pending restart
+    this.broadcast({ type: 'pty-restarting', attempt: this.restartAttempts });
+
+    setTimeout(() => {
+      if (!this.ptyProcess && !this.intentionalStop) {
+        logger.info('Auto-restarting Claude Code process');
+        this.start(this.currentWorkingDir);
+      }
+    }, AUTO_RESTART_DELAY_MS);
+  }
+
+  resetRestartCounter() {
+    this.restartAttempts = 0;
+    this.lastRestartTime = 0;
+  }
+
   stop() {
     if (this.ptyProcess) {
       logger.info('Stopping Claude Code process');
+      this.intentionalStop = true; // Prevent auto-restart
       // Flush any pending batched output
       if (this.batchTimer) {
         clearTimeout(this.batchTimer);

@@ -49,9 +49,17 @@ export function useTerminalRelay(terminalRef) {
           break;
 
         case 'pty-status':
-          if (!message.running) {
-            terminal.write('\r\n\x1b[31m[Claude Code process not running]\x1b[0m\r\n');
+          if (!message.running && message.exitCode !== undefined) {
+            terminal.write(`\r\n\x1b[33m[Claude Code exited with code ${message.exitCode}]\x1b[0m\r\n`);
           }
+          break;
+
+        case 'pty-restarting':
+          terminal.write(`\r\n\x1b[36m[Auto-restarting Claude Code (attempt ${message.attempt})...]\x1b[0m\r\n`);
+          break;
+
+        case 'pty-error':
+          terminal.write(`\r\n\x1b[31m[${message.message}]\x1b[0m\r\n`);
           break;
       }
     });

@@ -120,17 +120,6 @@ app.post('/api/pty/stop', (req, res) => {
   }
 });
 
-// Debug logging endpoint (for mobile debugging)
-const fs = require('fs');
-const debugLogFile = '/Users/jayspar/Documents/projects/claude-pocket/debug.log';
-app.post('/api/debug', (req, res) => {
-  const { tag, data } = req.body || {};
-  const logLine = `${new Date().toISOString()} [${tag}] ${JSON.stringify(data)}\n`;
-  fs.appendFileSync(debugLogFile, logLine);
-  logger.info({ tag, ...data }, `[DEBUG] ${tag}`);
-  res.json({ ok: true });
-});
-
 // API Routes
 app.use('/api/commands', commandsRouter);
 app.use('/api/files', filesRouter);

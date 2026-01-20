@@ -324,7 +324,6 @@ class TerminalScrollHandler {
 
     this.container.releasePointerCapture(e.pointerId);
 
-    const elapsed = performance.now() - (this.lastTime - (this.velocityTracker.samples.length > 0 ? SCROLL_CONFIG.MAX_SAMPLE_AGE : 0));
     const isTap = this.totalMovement < SCROLL_CONFIG.TAP_THRESHOLD &&
                   (performance.now() - this.lastTime + (this.lastTime - (this.startY !== this.lastY ? 0 : this.lastTime))) < SCROLL_CONFIG.TAP_TIME_THRESHOLD;
 
@@ -343,7 +342,9 @@ class TerminalScrollHandler {
 
     try {
       this.container.releasePointerCapture(e.pointerId);
-    } catch {}
+    } catch {
+      // Ignore - pointer may already be released
+    }
 
     this.pointerId = null;
   }

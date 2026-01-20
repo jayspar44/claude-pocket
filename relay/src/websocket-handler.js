@@ -128,6 +128,7 @@ class WebSocketHandler {
       case 'restart':
         ptyManager.stop();
         ptyManager.clearBuffer();
+        ptyManager.resetRestartCounter(); // Manual restart resets the counter
         ptyManager.start();
         this.send(ws, { type: 'pty-status', ...ptyManager.getStatus() });
         break;
@@ -136,13 +137,14 @@ class WebSocketHandler {
         this.send(ws, { type: 'pty-status', ...ptyManager.getStatus() });
         break;
 
-      case 'replay':
+      case 'replay': {
         // Send buffered output for session resumption
         const bufferedOutput = ptyManager.getBufferedOutput();
         if (bufferedOutput) {
           this.send(ws, { type: 'replay', data: bufferedOutput });
         }
         break;
+      }
 
       case 'submit':
         // Two-phase submission: text first, then Enter after delay
