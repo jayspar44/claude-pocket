@@ -1,4 +1,6 @@
 import { createContext, useContext, useState, useCallback, useRef, useEffect } from 'react';
+import { Capacitor } from '@capacitor/core';
+import { App } from '@capacitor/app';
 
 const RelayContext = createContext(null);
 
@@ -172,9 +174,50 @@ export function RelayProvider({ children }) {
 
   // Auto-connect on mount
   useEffect(() => {
-    connect();
-    return () => disconnect();
+    // Delay connection to handle React StrictMode mount-unmount-remount cycle
+    // Without this delay, the StrictMode guard in connect() blocks the second mount
+    const timer = setTimeout(() => connect(), 150);
+    return () => {
+      clearTimeout(timer);
+      disconnect();
+    };
   }, [connect, disconnect]);
+
+  // Reconnect when app returns from background
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (document.hidden) return;
+
+      // Check if reconnection needed
+      const ws = wsRef.current;
+      const needsReconnect = !ws ||
+        ws.readyState === WebSocket.CLOSED ||
+        ws.readyState === WebSocket.CLOSING;
+
+      if (needsReconnect) {
+        reconnectAttemptRef.current = 0;
+        if (reconnectTimeoutRef.current) {
+          clearTimeout(reconnectTimeoutRef.current);
+        }
+        connect();
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    // Capacitor native app state listener
+    let appStateListener = null;
+    if (Capacitor.isNativePlatform()) {
+      appStateListener = App.addListener('appStateChange', ({ isActive }) => {
+        if (isActive) handleVisibilityChange();
+      });
+    }
+
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      appStateListener?.remove();
+    };
+  }, [connect]);
 
   const value = {
     connectionState,

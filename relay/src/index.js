@@ -120,6 +120,17 @@ app.post('/api/pty/stop', (req, res) => {
   }
 });
 
+// Debug logging endpoint (for mobile debugging)
+const fs = require('fs');
+const debugLogFile = '/Users/jayspar/Documents/projects/claude-pocket/debug.log';
+app.post('/api/debug', (req, res) => {
+  const { tag, data } = req.body || {};
+  const logLine = `${new Date().toISOString()} [${tag}] ${JSON.stringify(data)}\n`;
+  fs.appendFileSync(debugLogFile, logLine);
+  logger.info({ tag, ...data }, `[DEBUG] ${tag}`);
+  res.json({ ok: true });
+});
+
 // API Routes
 app.use('/api/commands', commandsRouter);
 app.use('/api/files', filesRouter);
@@ -149,6 +160,8 @@ server.listen(config.port, config.host, () => {
 // Graceful shutdown
 process.on('SIGINT', () => {
   logger.info('Shutting down relay server');
+  // Save buffer before stopping (stop() also does this, but explicit for safety)
+  ptyManager.saveBuffer();
   ptyManager.stop();
   server.close(() => {
     logger.info('Server closed');
@@ -158,6 +171,8 @@ process.on('SIGINT', () => {
 
 process.on('SIGTERM', () => {
   logger.info('Received SIGTERM, shutting down');
+  // Save buffer before stopping
+  ptyManager.saveBuffer();
   ptyManager.stop();
   server.close(() => {
     process.exit(0);

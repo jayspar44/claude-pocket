@@ -11,6 +11,8 @@ import { FileBrowser, ImagePicker } from '../components/files';
 function Terminal() {
   const terminalRef = useRef(null);
   const containerRef = useRef(null);
+  const prevViewportHeightRef = useRef(null);
+  const wasAtBottomRef = useRef(true);
   const { connectionState, sendInput, sendResize, sendInterrupt, submitInput, clearAndReplay } = useTerminalRelay(terminalRef);
   const viewportHeight = useViewportHeight();
   const [fontSize] = useState(() => {
@@ -21,10 +23,25 @@ function Terminal() {
   // Refit terminal when viewport changes (keyboard show/hide)
   useEffect(() => {
     if (terminalRef.current) {
+      const prevHeight = prevViewportHeightRef.current;
+      const keyboardOpened = prevHeight && viewportHeight < prevHeight;
+
+      // Track if we were at bottom before viewport change
+      if (!keyboardOpened) {
+        wasAtBottomRef.current = terminalRef.current.isAtBottom?.() ?? true;
+      }
+
       // Small delay to let layout settle
       requestAnimationFrame(() => {
         terminalRef.current.fit?.();
+
+        // If keyboard opened and we were at bottom, scroll to bottom
+        if (keyboardOpened && wasAtBottomRef.current) {
+          terminalRef.current.scrollToBottom?.();
+        }
       });
+
+      prevViewportHeightRef.current = viewportHeight;
     }
   }, [viewportHeight]);
 
@@ -33,23 +50,30 @@ function Terminal() {
   const [showFiles, setShowFiles] = useState(false);
   const [showImagePicker, setShowImagePicker] = useState(false);
 
+  // Ctrl modifier state
+  const [ctrlActive, setCtrlActive] = useState(false);
+
   const handleResize = useCallback((cols, rows) => {
     sendResize(cols, rows);
   }, [sendResize]);
 
   const handleSend = useCallback((text) => {
-    // Two-phase submission: text first, then Enter after delay (handled by relay)
-    submitInput(text);
-  }, [submitInput]);
+    if (ctrlActive && text.length > 0) {
+      // Send as ctrl+key (convert first char to control character)
+      const char = text[0].toUpperCase();
+      const ctrlCode = char.charCodeAt(0) - 64;
+      if (ctrlCode >= 1 && ctrlCode <= 26) {
+        sendInput(String.fromCharCode(ctrlCode));
+      }
+      setCtrlActive(false);
+    } else {
+      // Two-phase submission: text first, then Enter after delay (handled by relay)
+      submitInput(text);
+    }
+  }, [submitInput, sendInput, ctrlActive]);
 
   const handleQuickAction = useCallback((action) => {
     switch (action) {
-      case 'yes':
-        submitInput('y');
-        break;
-      case 'no':
-        submitInput('n');
-        break;
       case 'interrupt':
         sendInterrupt();
         break;
@@ -84,7 +108,7 @@ function Terminal() {
       default:
         console.warn('Unknown quick action:', action);
     }
-  }, [sendInput, sendInterrupt, submitInput, clearAndReplay]);
+  }, [sendInput, sendInterrupt, clearAndReplay]);
 
   const handleCommandSelect = useCallback((command) => {
     // Send the slash command via two-phase submission
@@ -125,6 +149,8 @@ function Terminal() {
         onOpenCommands={() => setShowCommands(true)}
         onOpenFiles={() => setShowFiles(true)}
         onOpenCamera={() => setShowImagePicker(true)}
+        ctrlActive={ctrlActive}
+        onCtrlToggle={() => setCtrlActive(prev => !prev)}
         disabled={connectionState !== 'connected'}
       />
 

@@ -23,8 +23,10 @@ const config = {
 
   // Output buffer configuration (for session resumption)
   buffer: {
-    maxLines: 500,
-    maxSize: 1024 * 1024, // 1MB max buffer size
+    maxLines: 4500, // Nearly matches client xterm.js scrollback (5000)
+    maxSize: 5 * 1024 * 1024, // 5MB max buffer size
+    persistPath: '.claude-pocket/output-buffer.json', // Relative to workingDir
+    saveDebounceMs: 500, // Debounce buffer saves
   },
 
   // CORS configuration - allow all origins for development

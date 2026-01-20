@@ -18,6 +18,7 @@ export function useTerminalRelay(terminalRef) {
   } = useRelayContext();
 
   const isSubscribedRef = useRef(false);
+  const hasRequestedReplayRef = useRef(false);
 
   // Handle incoming messages
   // xterm.js handles all terminal state internally - just write data as it arrives
@@ -58,8 +59,26 @@ export function useTerminalRelay(terminalRef) {
     return () => {
       unsubscribe();
       isSubscribedRef.current = false;
+      hasRequestedReplayRef.current = false;
     };
   }, [addMessageListener, terminalRef]);
+
+  // Request replay when connected and listener is subscribed
+  // This fixes the race condition where replay is sent before listener is ready
+  useEffect(() => {
+    if (isConnected && isSubscribedRef.current && !hasRequestedReplayRef.current) {
+      hasRequestedReplayRef.current = true;
+      // Small delay to ensure connection is fully established
+      const timer = setTimeout(() => {
+        requestReplay();
+      }, 50);
+      return () => clearTimeout(timer);
+    }
+    // Reset flag when disconnected so reconnection triggers replay
+    if (!isConnected) {
+      hasRequestedReplayRef.current = false;
+    }
+  }, [isConnected, requestReplay]);
 
   const handleInput = useCallback((data) => {
     sendInput(data);

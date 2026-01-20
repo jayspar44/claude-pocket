@@ -1,4 +1,6 @@
 const pty = require('node-pty');
+const fs = require('fs');
+const path = require('path');
 const config = require('./config');
 const logger = require('./logger');
 
@@ -16,6 +18,8 @@ class PtyManager {
     // Batching state
     this.batchQueue = '';
     this.batchTimer = null;
+    // Persistence state
+    this.saveTimer = null;
   }
 
   start(workingDir = null) {
@@ -27,6 +31,9 @@ class PtyManager {
     // Use provided workingDir, or fall back to config
     const cwd = workingDir || config.workingDir;
     this.currentWorkingDir = cwd;
+
+    // Restore buffer from disk if available
+    this.loadBuffer();
 
     logger.info({ workingDir: cwd }, 'Starting Claude Code process');
 
@@ -74,6 +81,12 @@ class PtyManager {
         clearTimeout(this.batchTimer);
         this.flushBatch();
       }
+      // Flush any pending buffer save
+      if (this.saveTimer) {
+        clearTimeout(this.saveTimer);
+        this.saveTimer = null;
+        this.saveBuffer();
+      }
       this.ptyProcess.kill();
       this.ptyProcess = null;
       this.isRunning = false;
@@ -117,6 +130,9 @@ class PtyManager {
       const removed = this.outputBuffer.shift();
       this.outputBufferSize -= removed.length;
     }
+
+    // Schedule persisting buffer to disk
+    this.scheduleSave();
   }
 
   getBufferedOutput() {
@@ -126,6 +142,8 @@ class PtyManager {
   clearBuffer() {
     this.outputBuffer = [];
     this.outputBufferSize = 0;
+    // Also delete persisted file (session-scoped, not across sessions)
+    this.deletePersistFile();
   }
 
   addListener(callback) {
@@ -173,6 +191,92 @@ class PtyManager {
       bufferLines: this.outputBuffer.join('').split('\n').length,
       workingDir: this.currentWorkingDir,
     };
+  }
+
+  // === Buffer Persistence Methods ===
+
+  getPersistPath() {
+    const baseDir = this.currentWorkingDir || config.workingDir;
+    return path.join(baseDir, config.buffer.persistPath);
+  }
+
+  ensurePersistDir() {
+    const persistPath = this.getPersistPath();
+    const dir = path.dirname(persistPath);
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true });
+      logger.debug({ dir }, 'Created persistence directory');
+    }
+  }
+
+  scheduleSave() {
+    // Debounce saves to avoid excessive disk writes
+    if (this.saveTimer) return;
+
+    this.saveTimer = setTimeout(() => {
+      this.saveTimer = null;
+      this.saveBuffer();
+    }, config.buffer.saveDebounceMs);
+  }
+
+  saveBuffer() {
+    if (!this.currentWorkingDir) return;
+
+    try {
+      this.ensurePersistDir();
+      const persistPath = this.getPersistPath();
+      const data = {
+        timestamp: Date.now(),
+        pid: this.ptyProcess?.pid || null,
+        buffer: this.outputBuffer,
+      };
+      fs.writeFileSync(persistPath, JSON.stringify(data), 'utf8');
+      logger.debug({ path: persistPath, lines: this.outputBuffer.length }, 'Buffer saved to disk');
+    } catch (error) {
+      logger.error({ error: error.message }, 'Failed to save buffer');
+    }
+  }
+
+  loadBuffer() {
+    if (!this.currentWorkingDir) return;
+
+    try {
+      const persistPath = this.getPersistPath();
+      if (!fs.existsSync(persistPath)) {
+        logger.debug('No persisted buffer found');
+        return;
+      }
+
+      const content = fs.readFileSync(persistPath, 'utf8');
+      const data = JSON.parse(content);
+
+      if (data.buffer && Array.isArray(data.buffer)) {
+        this.outputBuffer = data.buffer;
+        this.outputBufferSize = data.buffer.join('').length;
+        logger.info({
+          lines: this.outputBuffer.length,
+          size: this.outputBufferSize,
+          savedAt: new Date(data.timestamp).toISOString(),
+        }, 'Restored buffer from disk');
+      }
+    } catch (error) {
+      logger.error({ error: error.message }, 'Failed to load buffer');
+      // Don't fail - just start with empty buffer
+      this.outputBuffer = [];
+      this.outputBufferSize = 0;
+    }
+  }
+
+  deletePersistFile() {
+    try {
+      const persistPath = this.getPersistPath();
+      if (fs.existsSync(persistPath)) {
+        fs.unlinkSync(persistPath);
+        logger.debug({ path: persistPath }, 'Deleted persisted buffer file');
+      }
+    } catch (error) {
+      logger.error({ error: error.message }, 'Failed to delete buffer file');
+    }
   }
 }
 

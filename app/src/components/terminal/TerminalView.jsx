@@ -28,6 +28,340 @@ const defaultTheme = {
   brightWhite: '#ffffff',
 };
 
+// =============================================================================
+// Scroll System: VelocityTracker, MomentumScroller, TerminalScrollHandler
+// =============================================================================
+
+// Physics parameters (tunable)
+const SCROLL_CONFIG = {
+  // Velocity tracking
+  MAX_SAMPLES: 8,
+  MAX_SAMPLE_AGE: 150, // ms - discard samples older than this
+  VELOCITY_DECAY: 50, // ms - exponential weight decay
+
+  // Momentum physics
+  TIME_CONSTANT_NORMAL: 325, // ms - iOS-like decay
+  TIME_CONSTANT_FAST: 200, // ms - snappier for fast flicks
+  AMPLITUDE_MULTIPLIER: 800, // distance multiplier
+  MIN_VELOCITY: 0.1, // px/ms threshold to trigger momentum
+  FAST_VELOCITY: 2.0, // px/ms threshold for fast time constant
+
+  // Boundaries
+  OVERSCROLL_RESISTANCE: 0.4,
+
+  // Gesture detection
+  TAP_THRESHOLD: 10, // px - max movement to consider a tap
+  TAP_TIME_THRESHOLD: 200, // ms - max time to consider a tap
+};
+
+/**
+ * Time-weighted velocity tracker with outlier filtering
+ */
+class VelocityTracker {
+  constructor() {
+    this.samples = []; // { time, velocity }
+  }
+
+  addSample(velocity) {
+    const now = performance.now();
+    this.samples.push({ time: now, velocity });
+
+    // Keep max samples
+    if (this.samples.length > SCROLL_CONFIG.MAX_SAMPLES) {
+      this.samples.shift();
+    }
+
+    // Remove old samples
+    const cutoff = now - SCROLL_CONFIG.MAX_SAMPLE_AGE;
+    this.samples = this.samples.filter(s => s.time >= cutoff);
+  }
+
+  getVelocity() {
+    if (this.samples.length === 0) return 0;
+
+    const now = performance.now();
+    const cutoff = now - SCROLL_CONFIG.MAX_SAMPLE_AGE;
+    const recentSamples = this.samples.filter(s => s.time >= cutoff);
+
+    if (recentSamples.length === 0) return 0;
+
+    // IQR outlier filtering for 4+ samples
+    let filteredSamples = recentSamples;
+    if (recentSamples.length >= 4) {
+      const velocities = recentSamples.map(s => s.velocity).sort((a, b) => a - b);
+      const q1 = velocities[Math.floor(velocities.length * 0.25)];
+      const q3 = velocities[Math.floor(velocities.length * 0.75)];
+      const iqr = q3 - q1;
+      const lower = q1 - 1.5 * iqr;
+      const upper = q3 + 1.5 * iqr;
+      filteredSamples = recentSamples.filter(s => s.velocity >= lower && s.velocity <= upper);
+      if (filteredSamples.length === 0) filteredSamples = recentSamples;
+    }
+
+    // Exponential time-weighted average (recent samples weighted more)
+    let weightedSum = 0;
+    let totalWeight = 0;
+
+    for (const sample of filteredSamples) {
+      const age = now - sample.time;
+      const weight = Math.exp(-age / SCROLL_CONFIG.VELOCITY_DECAY);
+      weightedSum += sample.velocity * weight;
+      totalWeight += weight;
+    }
+
+    return totalWeight > 0 ? weightedSum / totalWeight : 0;
+  }
+
+  reset() {
+    this.samples = [];
+  }
+}
+
+/**
+ * Physics-based momentum scroller with iOS-like feel
+ */
+class MomentumScroller {
+  constructor(onScroll, getBounds) {
+    this.onScroll = onScroll; // (deltaLines: number) => void
+    this.getBounds = getBounds; // () => { atTop, atBottom }
+    this.animationId = null;
+    this.amplitude = 0;
+    this.startTime = 0;
+    this.timeConstant = SCROLL_CONFIG.TIME_CONSTANT_NORMAL;
+    this.lastDelta = 0;
+    this.accumulatedScroll = 0;
+    this.cellHeight = 14 * 1.2; // default, updated by handler
+  }
+
+  setCellHeight(height) {
+    this.cellHeight = height;
+  }
+
+  start(velocityPxMs) {
+    this.stop();
+
+    if (Math.abs(velocityPxMs) < SCROLL_CONFIG.MIN_VELOCITY) {
+      return;
+    }
+
+    // Negate: positive velocity (finger down) = scroll content up (negative lines)
+    this.amplitude = -velocityPxMs * SCROLL_CONFIG.AMPLITUDE_MULTIPLIER;
+    this.startTime = performance.now();
+    this.lastDelta = this.amplitude;
+    this.accumulatedScroll = 0;
+
+    // Use faster decay for fast flicks
+    this.timeConstant = Math.abs(velocityPxMs) > SCROLL_CONFIG.FAST_VELOCITY
+      ? SCROLL_CONFIG.TIME_CONSTANT_FAST
+      : SCROLL_CONFIG.TIME_CONSTANT_NORMAL;
+
+    this.tick();
+  }
+
+  tick = () => {
+    const elapsed = performance.now() - this.startTime;
+    const delta = this.amplitude * Math.exp(-elapsed / this.timeConstant);
+
+    // Stop when movement is negligible
+    if (Math.abs(delta) < 0.5) {
+      this.animationId = null;
+      return;
+    }
+
+    // Calculate frame delta
+    let frameDelta = this.lastDelta - delta;
+    this.lastDelta = delta;
+
+    // Apply boundary resistance
+    const bounds = this.getBounds();
+    if ((bounds.atTop && frameDelta < 0) || (bounds.atBottom && frameDelta > 0)) {
+      frameDelta *= SCROLL_CONFIG.OVERSCROLL_RESISTANCE;
+    }
+
+    // Accumulate and convert to lines
+    this.accumulatedScroll += frameDelta;
+    const linesToScroll = Math.trunc(this.accumulatedScroll / this.cellHeight);
+
+    if (linesToScroll !== 0) {
+      this.onScroll(linesToScroll);
+      this.accumulatedScroll -= linesToScroll * this.cellHeight;
+    }
+
+    this.animationId = requestAnimationFrame(this.tick);
+  };
+
+  stop() {
+    if (this.animationId) {
+      cancelAnimationFrame(this.animationId);
+      this.animationId = null;
+    }
+    this.accumulatedScroll = 0;
+  }
+
+  isActive() {
+    return this.animationId !== null;
+  }
+}
+
+/**
+ * Get actual cell height from xterm.js internal dimensions
+ */
+const getCellHeight = (terminal, fontSize) => {
+  try {
+    const renderService = terminal._core?._renderService;
+    return renderService?.dimensions?.css?.cell?.height
+      || renderService?.dimensions?.actualCellHeight
+      || fontSize * (terminal.options.lineHeight || 1.0);
+  } catch {
+    return fontSize * 1.2;
+  }
+};
+
+/**
+ * Unified touch/pen scroll handler using Pointer Events API
+ */
+class TerminalScrollHandler {
+  constructor(container, terminal, fontSize) {
+    this.container = container;
+    this.terminal = terminal;
+    this.fontSize = fontSize;
+
+    this.velocityTracker = new VelocityTracker();
+    this.momentumScroller = new MomentumScroller(
+      (lines) => this.terminal.scrollLines(lines),
+      () => this.getBounds()
+    );
+
+    this.pointerId = null;
+    this.startY = 0;
+    this.lastY = 0;
+    this.lastTime = 0;
+    this.totalMovement = 0;
+    this.accumulatedScroll = 0;
+
+    this.updateCellHeight();
+    this.bindEvents();
+  }
+
+  updateCellHeight() {
+    const height = getCellHeight(this.terminal, this.fontSize);
+    this.cellHeight = height;
+    this.momentumScroller.setCellHeight(height);
+  }
+
+  getBounds() {
+    const buffer = this.terminal.buffer.active;
+    return {
+      atTop: buffer.viewportY <= 0,
+      atBottom: buffer.viewportY >= buffer.baseY,
+    };
+  }
+
+  bindEvents() {
+    this.onPointerDown = this.handlePointerDown.bind(this);
+    this.onPointerMove = this.handlePointerMove.bind(this);
+    this.onPointerUp = this.handlePointerUp.bind(this);
+    this.onPointerCancel = this.handlePointerCancel.bind(this);
+
+    this.container.addEventListener('pointerdown', this.onPointerDown);
+    this.container.addEventListener('pointermove', this.onPointerMove);
+    this.container.addEventListener('pointerup', this.onPointerUp);
+    this.container.addEventListener('pointercancel', this.onPointerCancel);
+  }
+
+  handlePointerDown(e) {
+    // Only handle touch/pen, let mouse use native
+    if (e.pointerType === 'mouse') return;
+
+    // Capture pointer for reliable tracking
+    this.container.setPointerCapture(e.pointerId);
+
+    // Stop any ongoing momentum
+    this.momentumScroller.stop();
+
+    this.pointerId = e.pointerId;
+    this.startY = e.clientY;
+    this.lastY = e.clientY;
+    this.lastTime = performance.now();
+    this.totalMovement = 0;
+    this.accumulatedScroll = 0;
+    this.velocityTracker.reset();
+
+    e.preventDefault();
+  }
+
+  handlePointerMove(e) {
+    if (e.pointerId !== this.pointerId) return;
+
+    const now = performance.now();
+    const deltaY = e.clientY - this.lastY;
+    const deltaTime = now - this.lastTime;
+
+    this.totalMovement += Math.abs(deltaY);
+
+    if (deltaTime > 0 && deltaY !== 0) {
+      const velocity = deltaY / deltaTime; // px/ms
+      this.velocityTracker.addSample(velocity);
+
+      // Direct scroll: finger down (positive deltaY) = scroll content up (negative lines)
+      this.accumulatedScroll -= deltaY;
+      const linesToScroll = Math.trunc(this.accumulatedScroll / this.cellHeight);
+
+      if (linesToScroll !== 0) {
+        this.terminal.scrollLines(linesToScroll);
+        this.accumulatedScroll -= linesToScroll * this.cellHeight;
+      }
+    }
+
+    this.lastY = e.clientY;
+    this.lastTime = now;
+
+    e.preventDefault();
+  }
+
+  handlePointerUp(e) {
+    if (e.pointerId !== this.pointerId) return;
+
+    this.container.releasePointerCapture(e.pointerId);
+
+    const elapsed = performance.now() - (this.lastTime - (this.velocityTracker.samples.length > 0 ? SCROLL_CONFIG.MAX_SAMPLE_AGE : 0));
+    const isTap = this.totalMovement < SCROLL_CONFIG.TAP_THRESHOLD &&
+                  (performance.now() - this.lastTime + (this.lastTime - (this.startY !== this.lastY ? 0 : this.lastTime))) < SCROLL_CONFIG.TAP_TIME_THRESHOLD;
+
+    // Start momentum if not a tap and we have velocity
+    if (!isTap && this.totalMovement >= SCROLL_CONFIG.TAP_THRESHOLD) {
+      const velocity = this.velocityTracker.getVelocity();
+      this.momentumScroller.start(velocity);
+    }
+
+    this.pointerId = null;
+    e.preventDefault();
+  }
+
+  handlePointerCancel(e) {
+    if (e.pointerId !== this.pointerId) return;
+
+    try {
+      this.container.releasePointerCapture(e.pointerId);
+    } catch {}
+
+    this.pointerId = null;
+  }
+
+  setFontSize(fontSize) {
+    this.fontSize = fontSize;
+    this.updateCellHeight();
+  }
+
+  destroy() {
+    this.momentumScroller.stop();
+    this.container.removeEventListener('pointerdown', this.onPointerDown);
+    this.container.removeEventListener('pointermove', this.onPointerMove);
+    this.container.removeEventListener('pointerup', this.onPointerUp);
+    this.container.removeEventListener('pointercancel', this.onPointerCancel);
+  }
+}
+
 const TerminalView = forwardRef(function TerminalView(
   { onResize, fontSize = 14, className = '' },
   ref
@@ -35,6 +369,7 @@ const TerminalView = forwardRef(function TerminalView(
   const containerRef = useRef(null);
   const terminalRef = useRef(null);
   const fitAddonRef = useRef(null);
+  const isAtBottomRef = useRef(true);
   const [showScrollButton, setShowScrollButton] = useState(false);
 
   const scrollToBottom = useCallback(() => {
@@ -46,12 +381,32 @@ const TerminalView = forwardRef(function TerminalView(
 
   // Expose terminal methods to parent
   useImperativeHandle(ref, () => ({
-    write: (data) => terminalRef.current?.write(data),
+    write: (data) => {
+      if (terminalRef.current) {
+        const wasAtBottom = isAtBottomRef.current;
+        terminalRef.current.write(data);
+        if (wasAtBottom) {
+          terminalRef.current.scrollToBottom();
+        }
+      }
+    },
     clear: () => terminalRef.current?.clear(),
     focus: () => terminalRef.current?.focus(),
     fit: () => fitAddonRef.current?.fit(),
     getTerminal: () => terminalRef.current,
+    scrollToBottom: () => {
+      terminalRef.current?.scrollToBottom();
+      setShowScrollButton(false);
+    },
+    isAtBottom: () => {
+      if (!terminalRef.current) return true;
+      const buffer = terminalRef.current.buffer.active;
+      return buffer.viewportY >= buffer.baseY;
+    },
   }));
+
+  // Store scroll handler ref for cleanup and font size updates
+  const scrollHandlerRef = useRef(null);
 
   useEffect(() => {
     if (!containerRef.current || terminalRef.current) return;
@@ -62,20 +417,17 @@ const TerminalView = forwardRef(function TerminalView(
       fontSize,
       fontFamily: 'ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace',
       theme: defaultTheme,
-      scrollback: 5000, // Reduced for better mobile performance
+      scrollback: 5000,
       convertEol: true,
-      disableStdin: true, // We handle input separately
+      disableStdin: true,
       allowProposedApi: true,
-      scrollSensitivity: 1, // Finer control for touch scrolling
-      smoothScrollDuration: 150, // Slightly longer for smoother mobile feel
-      // Canvas renderer for 5-45x better performance (VS Code approach)
-      // Note: 'canvas' was renamed to 'webgl' in newer xterm.js
+      scrollSensitivity: 0, // Disable xterm's scroll handling - we manage it
+      smoothScrollDuration: 0,
     });
 
     const fitAddon = new FitAddon();
     terminal.loadAddon(fitAddon);
 
-    // Open terminal synchronously but catch any initialization errors
     try {
       terminal.open(containerRef.current);
       fitAddon.fit();
@@ -86,10 +438,19 @@ const TerminalView = forwardRef(function TerminalView(
     terminalRef.current = terminal;
     fitAddonRef.current = fitAddon;
 
-    // Track scroll position to show/hide scroll button
+    // Initialize custom scroll handler
+    const scrollHandler = new TerminalScrollHandler(
+      containerRef.current,
+      terminal,
+      fontSize
+    );
+    scrollHandlerRef.current = scrollHandler;
+
+    // Track scroll position to show/hide scroll button and for auto-scroll
     terminal.onScroll(() => {
       const buffer = terminal.buffer.active;
       const isAtBottom = buffer.viewportY >= buffer.baseY;
+      isAtBottomRef.current = isAtBottom;
       setShowScrollButton(!isAtBottom);
     });
 
@@ -103,6 +464,8 @@ const TerminalView = forwardRef(function TerminalView(
       requestAnimationFrame(() => {
         if (fitAddonRef.current && containerRef.current) {
           fitAddonRef.current.fit();
+          // Update cell height after resize
+          scrollHandlerRef.current?.updateCellHeight();
           if (onResize && terminalRef.current) {
             onResize(terminalRef.current.cols, terminalRef.current.rows);
           }
@@ -113,6 +476,8 @@ const TerminalView = forwardRef(function TerminalView(
     resizeObserver.observe(containerRef.current);
 
     return () => {
+      scrollHandlerRef.current?.destroy();
+      scrollHandlerRef.current = null;
       resizeObserver.disconnect();
       terminal.dispose();
       terminalRef.current = null;
@@ -125,6 +490,7 @@ const TerminalView = forwardRef(function TerminalView(
     if (terminalRef.current) {
       terminalRef.current.options.fontSize = fontSize;
       fitAddonRef.current?.fit();
+      scrollHandlerRef.current?.setFontSize(fontSize);
     }
   }, [fontSize]);
 
@@ -133,12 +499,14 @@ const TerminalView = forwardRef(function TerminalView(
       <div
         ref={containerRef}
         className="w-full h-full overflow-hidden"
-        style={{ backgroundColor: defaultTheme.background }}
+        style={{ backgroundColor: defaultTheme.background, touchAction: 'none' }}
       />
 
       {/* Floating scroll-to-bottom button */}
       {showScrollButton && (
         <button
+          onMouseDown={(e) => e.preventDefault()}
+          onTouchStart={(e) => e.preventDefault()}
           onClick={scrollToBottom}
           className="absolute bottom-4 right-4 p-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-full shadow-lg transition-all z-10"
           aria-label="Scroll to bottom"
