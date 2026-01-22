@@ -1,3 +1,7 @@
+// Ensure ~/.local/bin is in PATH for claude command
+const HOME = process.env.HOME || '/Users/jayspar';
+const PATH = `${HOME}/.local/bin:${HOME}/.npm-global/bin:/opt/homebrew/bin:/usr/local/bin:${process.env.PATH || ''}`;
+
 module.exports = {
   apps: [
     // PROD relay - port 4501
@@ -8,6 +12,7 @@ module.exports = {
       env: {
         NODE_ENV: 'production',
         PORT: 4501,
+        PATH,
       },
       max_restarts: 10,
       min_uptime: '10s',
@@ -25,6 +30,7 @@ module.exports = {
       env: {
         NODE_ENV: 'production',
         PORT: 4502,
+        PATH,
       },
       max_restarts: 10,
       min_uptime: '10s',
