@@ -13,7 +13,7 @@ function Terminal() {
   const containerRef = useRef(null);
   const prevViewportHeightRef = useRef(null);
   const wasAtBottomRef = useRef(true);
-  const { connectionState, sendInput, sendResize, sendInterrupt, submitInput, clearAndReplay } = useTerminalRelay(terminalRef);
+  const { connectionState, ptyStatus, sendInput, sendResize, sendInterrupt, submitInput, clearAndReplay } = useTerminalRelay(terminalRef);
   const viewportHeight = useViewportHeight();
   const [fontSize] = useState(() => {
     const stored = localStorage.getItem('terminalFontSize');
@@ -132,7 +132,7 @@ function Terminal() {
       style={{ height: viewportHeight ? `${viewportHeight}px` : '100dvh' }}
     >
       {/* Status Bar */}
-      <StatusBar connectionState={connectionState} />
+      <StatusBar connectionState={connectionState} ptyStatus={ptyStatus} />
 
       {/* Terminal - flex-1 with min-h-0 allows it to shrink/grow */}
       <div className="flex-1 min-h-0 overflow-hidden">

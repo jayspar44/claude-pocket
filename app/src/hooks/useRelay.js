@@ -8,6 +8,7 @@ export function useRelay() {
 export function useTerminalRelay(terminalRef) {
   const {
     connectionState,
+    ptyStatus,
     sendInput,
     sendResize,
     sendInterrupt,
@@ -110,6 +111,7 @@ export function useTerminalRelay(terminalRef) {
 
   return {
     connectionState,
+    ptyStatus,
     isConnected,
     sendInput: handleInput,
     sendResize: handleResize,
