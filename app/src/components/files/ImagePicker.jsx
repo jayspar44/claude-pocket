@@ -46,21 +46,27 @@ function ImagePicker({ isOpen, onClose, onUpload }) {
     setError(null);
 
     try {
-      // Read file as ArrayBuffer
-      const arrayBuffer = await preview.file.arrayBuffer();
+      // Use base64 encoding for more reliable upload over unstable connections
+      const base64Data = preview.data.split(',')[1]; // Remove data:image/...;base64, prefix
+      console.log('[ImagePicker] Starting upload:', {
+        filename: preview.name,
+        type: preview.file.type,
+        base64Length: base64Data?.length,
+      });
 
-      const response = await filesApi.upload(
-        arrayBuffer,
-        '', // Upload to working directory
-        preview.name
+      const response = await filesApi.uploadBase64(
+        base64Data,
+        preview.name,
+        preview.file.type
       );
 
+      console.log('[ImagePicker] Upload success:', response.data);
       onUpload(response.data.path);
       onClose();
       setPreview(null);
     } catch (err) {
+      console.error('[ImagePicker] Upload error:', err.message, err.response?.data);
       setError('Failed to upload image');
-      console.error('Upload error:', err);
     } finally {
       setUploading(false);
     }
@@ -91,7 +97,7 @@ function ImagePicker({ isOpen, onClose, onUpload }) {
       onClick={handleClose}
     >
       <div
-        className="w-full max-w-lg bg-gray-800 rounded-t-2xl max-h-[70vh] flex flex-col animate-slide-up"
+        className="w-full max-w-lg bg-gray-800 rounded-t-2xl max-h-[70vh] flex flex-col animate-slide-up safe-area-bottom"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}

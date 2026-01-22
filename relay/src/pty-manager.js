@@ -7,6 +7,9 @@ const logger = require('./logger');
 // Batch delay for output messages (reduces WebSocket overhead, improves performance)
 const BATCH_DELAY_MS = 50;
 
+// Option detection debounce (wait for output to settle before detecting)
+const OPTION_DETECT_DELAY_MS = 100;
+
 // Auto-restart configuration
 const AUTO_RESTART_DELAY_MS = 1000; // Wait before restarting
 const MAX_RESTART_ATTEMPTS = 3; // Max restarts within window
@@ -32,31 +35,36 @@ class PtyManager {
     // Diagnostics
     this.processStartTime = 0;
     this.lastOutputLines = []; // Keep last 10 lines for crash diagnosis
+    // Option detection state
+    this.optionDetectTimer = null;
+    this.lastDetectedOptions = null;
   }
 
-  start(workingDir = null) {
+  start(workingDir) {
     if (this.ptyProcess) {
       logger.warn('PTY process already running');
       return;
     }
 
-    // Use provided workingDir, or fall back to config
-    const cwd = workingDir || config.workingDir;
-    this.currentWorkingDir = cwd;
+    if (!workingDir) {
+      throw new Error('workingDir is required to start PTY');
+    }
+
+    this.currentWorkingDir = workingDir;
     this.intentionalStop = false;
 
     // Restore buffer from disk if available
     this.loadBuffer();
 
-    logger.info({ workingDir: cwd }, 'Starting Claude Code process');
+    logger.info({ workingDir }, 'Starting Claude Code process');
 
     try {
       const proc = pty.spawn(config.claudeCommand, [], {
         name: 'xterm-256color',
         cols: config.pty.cols,
         rows: config.pty.rows,
-        cwd: cwd,
-        env: { ...config.pty.env, PWD: cwd },
+        cwd: workingDir,
+        env: { ...config.pty.env, PWD: workingDir },
       });
 
       this.ptyProcess = proc;
@@ -83,11 +91,12 @@ class PtyManager {
 
       proc.onExit(({ exitCode, signal }) => {
         const uptimeMs = Date.now() - this.processStartTime;
+        const uptimeSeconds = Math.round(uptimeMs / 1000);
         const exitInfo = {
           exitCode,
           signal,
           pid: proc.pid,
-          uptimeSeconds: Math.round(uptimeMs / 1000),
+          uptimeSeconds,
           intentionalStop: this.intentionalStop,
           restartAttempts: this.restartAttempts,
         };
@@ -103,6 +112,15 @@ class PtyManager {
             ...exitInfo,
             lastOutput: this.lastOutputLines,
           }, 'Claude Code process crashed');
+
+          // Broadcast crash details to clients for debugging
+          this.broadcast({
+            type: 'pty-crash',
+            exitCode,
+            signal,
+            uptime: uptimeSeconds,
+            lastOutput: this.lastOutputLines.slice(-5),
+          });
         }
 
         // Only clear if this is still the current process (prevents race condition on restart)
@@ -191,6 +209,10 @@ class PtyManager {
   write(data) {
     if (this.ptyProcess) {
       this.ptyProcess.write(data);
+      // Clear detected options when user sends input
+      if (this.lastDetectedOptions) {
+        this.clearDetectedOptions();
+      }
     }
   }
 
@@ -276,6 +298,77 @@ class PtyManager {
       this.batchQueue = '';
     }
     this.batchTimer = null;
+
+    // Schedule option detection (debounced to wait for output to settle)
+    this.scheduleOptionDetection();
+  }
+
+  scheduleOptionDetection() {
+    // Clear any pending detection
+    if (this.optionDetectTimer) {
+      clearTimeout(this.optionDetectTimer);
+    }
+
+    // Wait for output to settle before detecting options
+    this.optionDetectTimer = setTimeout(() => {
+      this.optionDetectTimer = null;
+      const options = this.detectNumberedOptions();
+
+      // Only broadcast if options changed
+      const optionsKey = options ? options.join(',') : '';
+      const lastKey = this.lastDetectedOptions ? this.lastDetectedOptions.join(',') : '';
+
+      if (optionsKey !== lastKey) {
+        this.lastDetectedOptions = options;
+        this.broadcast({ type: 'options-detected', options: options || [] });
+        if (options) {
+          logger.debug({ options }, 'Detected numbered options');
+        }
+      }
+    }, OPTION_DETECT_DELAY_MS);
+  }
+
+  detectNumberedOptions() {
+    // Get recent buffer content (last ~2000 chars should be enough)
+    const fullBuffer = this.getBufferedOutput();
+    const recentBuffer = fullBuffer.slice(-2000);
+
+    // Strip ANSI codes for clean parsing
+    const clean = recentBuffer.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '');
+
+    // Match patterns: "1.", "1)", "[1]", "(1)" at start of line or after newline
+    // Also match "1:" which Claude sometimes uses
+    const pattern = /(?:^|\n)\s*(?:(\d+)\.|(\d+)\)|(\d+):|^\[(\d+)\]|^\((\d+)\))\s+\S/gm;
+    const numbers = new Set();
+
+    let match;
+    while ((match = pattern.exec(clean)) !== null) {
+      const num = parseInt(match[1] || match[2] || match[3] || match[4] || match[5]);
+      if (num >= 1 && num <= 9) numbers.add(num);
+    }
+
+    // Only return if we found sequential options starting from 1
+    if (numbers.size >= 2 && numbers.has(1)) {
+      const sorted = Array.from(numbers).sort((a, b) => a - b);
+      // Verify they're mostly sequential (allow gaps of 1)
+      let isSequential = true;
+      for (let i = 1; i < sorted.length; i++) {
+        if (sorted[i] - sorted[i - 1] > 2) {
+          isSequential = false;
+          break;
+        }
+      }
+      if (isSequential) {
+        return sorted;
+      }
+    }
+
+    return null;
+  }
+
+  clearDetectedOptions() {
+    this.lastDetectedOptions = null;
+    this.broadcast({ type: 'options-detected', options: [] });
   }
 
   getStatus() {
@@ -291,12 +384,15 @@ class PtyManager {
   // === Buffer Persistence Methods ===
 
   getPersistPath() {
-    const baseDir = this.currentWorkingDir || config.workingDir;
-    return path.join(baseDir, config.buffer.persistPath);
+    if (!this.currentWorkingDir) {
+      return null;
+    }
+    return path.join(this.currentWorkingDir, config.buffer.persistPath);
   }
 
   ensurePersistDir() {
     const persistPath = this.getPersistPath();
+    if (!persistPath) return;
     const dir = path.dirname(persistPath);
     if (!fs.existsSync(dir)) {
       fs.mkdirSync(dir, { recursive: true });
@@ -333,10 +429,10 @@ class PtyManager {
   }
 
   loadBuffer() {
-    if (!this.currentWorkingDir) return;
+    const persistPath = this.getPersistPath();
+    if (!persistPath) return;
 
     try {
-      const persistPath = this.getPersistPath();
       if (!fs.existsSync(persistPath)) {
         logger.debug('No persisted buffer found');
         return;

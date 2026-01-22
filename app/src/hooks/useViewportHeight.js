@@ -17,6 +17,11 @@ export function useViewportHeight() {
     const updateHeight = () => {
       const height = window.visualViewport?.height || window.innerHeight;
       setViewportHeight(height);
+
+      // Set keyboard-visible class when viewport shrinks significantly
+      const fullHeight = window.screen.height;
+      const keyboardVisible = height < fullHeight * 0.75;
+      document.body.classList.toggle('keyboard-visible', keyboardVisible);
     };
 
     // Use Visual Viewport API if available (better keyboard detection)

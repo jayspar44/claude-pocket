@@ -15,8 +15,8 @@ const TerminalOutput = forwardRef(function TerminalOutput(
   const [showScrollButton, setShowScrollButton] = useState(false);
   const shouldAutoScroll = useRef(true);
 
-  // Initialize AnsiUp
-  if (!ansiUpRef.current) {
+  // Initialize AnsiUp (using == null pattern for safe ref initialization)
+  if (ansiUpRef.current == null) {
     ansiUpRef.current = new AnsiUp();
     ansiUpRef.current.use_classes = true;
   }

@@ -1,11 +1,24 @@
-import { useState, useRef, useCallback } from 'react';
+import { useState, useRef, useCallback, forwardRef, useImperativeHandle } from 'react';
 import { Send } from 'lucide-react';
 import { useCommandHistory } from '../../hooks/useCommandHistory';
 
-function InputBar({ onSend, disabled = false, placeholder = 'Type a message...' }) {
+const InputBar = forwardRef(function InputBar({ onSend, disabled = false, placeholder = 'Type a message...' }, ref) {
   const [value, setValue] = useState('');
   const textareaRef = useRef(null);
   const { addToHistory, navigateHistory } = useCommandHistory();
+
+  // Expose insertion API to parent components
+  useImperativeHandle(ref, () => ({
+    insertText: (text) => {
+      setValue(prev => {
+        const needsSpace = prev.length > 0 && !prev.endsWith(' ') && !prev.endsWith('\n');
+        return prev + (needsSpace ? ' ' : '') + text;
+      });
+    },
+    focus: () => textareaRef.current?.focus(),
+    clear: () => setValue(''),
+    getValue: () => value,
+  }), [value]);
 
   const handleSubmit = useCallback(() => {
     const trimmed = value.trim();
@@ -65,7 +78,7 @@ function InputBar({ onSend, disabled = false, placeholder = 'Type a message...' 
   }, []);
 
   return (
-    <div className="flex items-end gap-2 p-3 bg-gray-800 border-t border-gray-700 safe-area-bottom">
+    <div className="flex items-end gap-2 px-3 pt-3 pb-3 bg-gray-800 border-t border-gray-700 safe-area-bottom">
       <textarea
         ref={textareaRef}
         value={value}
@@ -90,6 +103,6 @@ function InputBar({ onSend, disabled = false, placeholder = 'Type a message...' 
       </button>
     </div>
   );
-}
+});
 
 export default InputBar;

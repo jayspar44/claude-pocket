@@ -6,17 +6,26 @@ const RelayContext = createContext(null);
 
 const DEFAULT_RELAY_URL = 'ws://localhost:4501/ws';
 const RECONNECT_DELAYS = [1000, 2000, 4000, 8000, 16000]; // Exponential backoff
+const MAX_RECONNECT_ATTEMPTS = 5; // Stop trying after 5 failed attempts
+const CONNECTION_TIMEOUT = 10000; // 10s timeout for initial connection
+const HEARTBEAT_INTERVAL = 25000; // 25s ping interval
+const HEARTBEAT_TIMEOUT = 5000; // 5s pong timeout
 
 export function RelayProvider({ children }) {
   const [connectionState, setConnectionState] = useState('disconnected'); // disconnected | connecting | connected | reconnecting
   const [ptyStatus, setPtyStatus] = useState(null);
   const [error, setError] = useState(null);
+  const [detectedOptions, setDetectedOptions] = useState([]);
 
   const wsRef = useRef(null);
   const reconnectAttemptRef = useRef(0);
   const reconnectTimeoutRef = useRef(null);
   const listenersRef = useRef(new Set());
   const cleanDisconnectTimeRef = useRef(0);
+  const connectRef = useRef(null); // Ref to store connect function for self-referencing
+  const connectionTimeoutRef = useRef(null);
+  const heartbeatIntervalRef = useRef(null);
+  const pongTimeoutRef = useRef(null);
 
   const getRelayUrl = useCallback(() => {
     const stored = localStorage.getItem('relayUrl');
@@ -36,6 +45,44 @@ export function RelayProvider({ children }) {
         console.error('Error in message listener:', err);
       }
     });
+  }, []);
+
+  // Clean up all connection-related timers
+  const cleanupTimers = useCallback(() => {
+    if (connectionTimeoutRef.current) {
+      clearTimeout(connectionTimeoutRef.current);
+      connectionTimeoutRef.current = null;
+    }
+    if (heartbeatIntervalRef.current) {
+      clearInterval(heartbeatIntervalRef.current);
+      heartbeatIntervalRef.current = null;
+    }
+    if (pongTimeoutRef.current) {
+      clearTimeout(pongTimeoutRef.current);
+      pongTimeoutRef.current = null;
+    }
+  }, []);
+
+  // Start heartbeat ping/pong cycle
+  const startHeartbeat = useCallback((ws) => {
+    // Clear any existing heartbeat
+    if (heartbeatIntervalRef.current) {
+      clearInterval(heartbeatIntervalRef.current);
+    }
+    if (pongTimeoutRef.current) {
+      clearTimeout(pongTimeoutRef.current);
+    }
+
+    heartbeatIntervalRef.current = setInterval(() => {
+      if (ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: 'ping' }));
+        // Set timeout for pong response
+        pongTimeoutRef.current = setTimeout(() => {
+          console.warn('[Relay] Heartbeat timeout - closing connection');
+          ws.close(4000, 'Heartbeat timeout');
+        }, HEARTBEAT_TIMEOUT);
+      }
+    }, HEARTBEAT_INTERVAL);
   }, []);
 
   const connect = useCallback(() => {
@@ -59,14 +106,34 @@ export function RelayProvider({ children }) {
       const ws = new WebSocket(url);
       wsRef.current = ws;
 
+      // Set connection timeout - fail fast if server unreachable
+      connectionTimeoutRef.current = setTimeout(() => {
+        if (ws.readyState === WebSocket.CONNECTING) {
+          console.warn('[Relay] Connection timeout');
+          ws.close(4001, 'Connection timeout');
+        }
+      }, CONNECTION_TIMEOUT);
+
       ws.onopen = () => {
+        // Clear connection timeout
+        if (connectionTimeoutRef.current) {
+          clearTimeout(connectionTimeoutRef.current);
+          connectionTimeoutRef.current = null;
+        }
+
         setConnectionState('connected');
         setError(null);
         reconnectAttemptRef.current = 0;
+
+        // Start heartbeat
+        startHeartbeat(ws);
       };
 
       ws.onclose = (event) => {
         wsRef.current = null;
+
+        // Clean up all timers
+        cleanupTimers();
 
         // Check if this close was from a manual disconnect (StrictMode cleanup)
         // If so, don't attempt to reconnect - the guard in connect() will handle it
@@ -75,13 +142,21 @@ export function RelayProvider({ children }) {
         if (!event.wasClean && !wasManualDisconnect) {
           // Attempt reconnection only for unexpected disconnects
           const attempt = reconnectAttemptRef.current;
-          const delay = RECONNECT_DELAYS[Math.min(attempt, RECONNECT_DELAYS.length - 1)];
 
+          if (attempt >= MAX_RECONNECT_ATTEMPTS) {
+            console.warn(`[Relay] Max reconnect attempts (${MAX_RECONNECT_ATTEMPTS}) reached, giving up`);
+            setConnectionState('disconnected');
+            setError('Connection failed after multiple attempts');
+            return;
+          }
+
+          const delay = RECONNECT_DELAYS[Math.min(attempt, RECONNECT_DELAYS.length - 1)];
+          console.log(`[Relay] Connection closed (code: ${event.code}), reconnecting in ${delay}ms (attempt ${attempt + 1}/${MAX_RECONNECT_ATTEMPTS})`);
           setConnectionState('reconnecting');
           reconnectAttemptRef.current = attempt + 1;
 
           reconnectTimeoutRef.current = setTimeout(() => {
-            connect();
+            connectRef.current?.();
           }, delay);
         } else {
           setConnectionState('disconnected');
@@ -96,6 +171,15 @@ export function RelayProvider({ children }) {
         try {
           const message = JSON.parse(event.data);
 
+          // Handle pong response - clear the heartbeat timeout
+          if (message.type === 'pong') {
+            if (pongTimeoutRef.current) {
+              clearTimeout(pongTimeoutRef.current);
+              pongTimeoutRef.current = null;
+            }
+            return; // Don't notify listeners for internal messages
+          }
+
           // Handle status messages
           if (message.type === 'status') {
             if (message.connected !== undefined) {
@@ -103,6 +187,17 @@ export function RelayProvider({ children }) {
             }
           } else if (message.type === 'pty-status') {
             setPtyStatus(message);
+          } else if (message.type === 'pty-crash') {
+            // Log crash details for debugging
+            console.error('[Claude Crash]', {
+              exitCode: message.exitCode,
+              signal: message.signal,
+              uptime: message.uptime,
+              lastOutput: message.lastOutput,
+            });
+          } else if (message.type === 'options-detected') {
+            // Update detected options from PTY output
+            setDetectedOptions(message.options || []);
           }
 
           // Notify all listeners
@@ -115,13 +210,19 @@ export function RelayProvider({ children }) {
       setError(err.message);
       setConnectionState('disconnected');
     }
-  }, [getRelayUrl, notifyListeners]);
+  }, [getRelayUrl, notifyListeners, cleanupTimers, startHeartbeat]);
+
+  // Keep ref updated for self-referencing in reconnect timeout
+  connectRef.current = connect;
 
   const disconnect = useCallback(() => {
     if (reconnectTimeoutRef.current) {
       clearTimeout(reconnectTimeoutRef.current);
       reconnectTimeoutRef.current = null;
     }
+
+    // Clean up heartbeat and connection timers
+    cleanupTimers();
 
     if (wsRef.current) {
       cleanDisconnectTimeRef.current = Date.now();
@@ -131,7 +232,7 @@ export function RelayProvider({ children }) {
 
     setConnectionState('disconnected');
     reconnectAttemptRef.current = 0;
-  }, []);
+  }, [cleanupTimers]);
 
   const send = useCallback((message) => {
     if (wsRef.current?.readyState === WebSocket.OPEN) {
@@ -164,6 +265,10 @@ export function RelayProvider({ children }) {
   const submitInput = useCallback((data) => {
     return send({ type: 'submit', data });
   }, [send]);
+
+  const clearDetectedOptions = useCallback(() => {
+    setDetectedOptions([]);
+  }, []);
 
   const setRelayUrl = useCallback((url) => {
     localStorage.setItem('relayUrl', url);
@@ -219,10 +324,57 @@ export function RelayProvider({ children }) {
     };
   }, [connect]);
 
+  // Reconnect when network status changes (WiFi/cellular transitions)
+  useEffect(() => {
+    let networkListener = null;
+
+    const setupNetworkListener = async () => {
+      // Only set up network listener on native platforms
+      if (!Capacitor.isNativePlatform()) {
+        return;
+      }
+
+      try {
+        // Dynamic import to avoid issues in web browser
+        const { Network } = await import('@capacitor/network');
+        networkListener = await Network.addListener('networkStatusChange', (status) => {
+          console.log('[Relay] Network status changed:', status);
+
+          if (status.connected) {
+            // Network restored - check if we need to reconnect
+            const ws = wsRef.current;
+            const needsReconnect = !ws ||
+              ws.readyState === WebSocket.CLOSED ||
+              ws.readyState === WebSocket.CLOSING;
+
+            if (needsReconnect) {
+              console.log('[Relay] Network restored, reconnecting...');
+              reconnectAttemptRef.current = 0;
+              if (reconnectTimeoutRef.current) {
+                clearTimeout(reconnectTimeoutRef.current);
+              }
+              connect();
+            }
+          }
+        });
+      } catch (err) {
+        // Network plugin may not be available
+        console.debug('[Relay] Network listener not available:', err.message);
+      }
+    };
+
+    setupNetworkListener();
+
+    return () => {
+      networkListener?.remove();
+    };
+  }, [connect]);
+
   const value = {
     connectionState,
     ptyStatus,
     error,
+    detectedOptions,
     isConnected: connectionState === 'connected',
     isReconnecting: connectionState === 'reconnecting',
     connect,
@@ -234,6 +386,7 @@ export function RelayProvider({ children }) {
     restartPty,
     requestReplay,
     submitInput,
+    clearDetectedOptions,
     addMessageListener,
     getRelayUrl,
     setRelayUrl,

@@ -48,6 +48,11 @@
     padding-bottom: var(--safe-area-bottom);
   }
 
+  /* When keyboard is visible, override safe-area-bottom with explicit padding */
+  body.keyboard-visible .safe-area-bottom {
+    padding-bottom: 0.75rem;
+  }
+
   .safe-area-left {
     padding-left: var(--safe-area-left);
   }

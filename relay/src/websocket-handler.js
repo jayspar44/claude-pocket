@@ -29,6 +29,13 @@ class WebSocketHandler {
       // This prevents duplicates from the 50ms batch window
       let skipUntilReplay = true;
 
+      // Auto-start PTY if not running but we have a saved working directory
+      // (e.g., after relay restart when client reconnects)
+      if (!ptyManager.isRunning && ptyManager.currentWorkingDir) {
+        logger.info({ clientId, workingDir: ptyManager.currentWorkingDir }, 'PTY not running, auto-starting for new client');
+        ptyManager.start(ptyManager.currentWorkingDir);
+      }
+
       // Subscribe to PTY output FIRST (before getting buffer)
       const ptyListener = (message) => {
         if (skipUntilReplay && message.type === 'output') {
@@ -108,6 +115,11 @@ class WebSocketHandler {
     logger.debug({ type, clientId: ws.clientId, dataLength: message.data?.length }, 'Received WebSocket message');
 
     switch (type) {
+      case 'ping':
+        // Respond to client heartbeat
+        this.send(ws, { type: 'pong' });
+        break;
+
       case 'input':
         if (message.data) {
           logger.info({ data: message.data, clientId: ws.clientId }, 'Writing input to PTY');
@@ -129,7 +141,7 @@ class WebSocketHandler {
         ptyManager.stop();
         ptyManager.clearBuffer();
         ptyManager.resetRestartCounter(); // Manual restart resets the counter
-        ptyManager.start();
+        ptyManager.start(ptyManager.currentWorkingDir);
         this.send(ws, { type: 'pty-status', ...ptyManager.getStatus() });
         break;
 

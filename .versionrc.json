@@ -2,8 +2,8 @@
   "bumpFiles": [
     { "filename": "version.json", "type": "json" },
     { "filename": "package.json", "type": "json" },
-    { "filename": "frontend/package.json", "type": "json" },
-    { "filename": "backend/package.json", "type": "json" }
+    { "filename": "app/package.json", "type": "json" },
+    { "filename": "relay/package.json", "type": "json" }
   ],
   "tagPrefix": "v",
   "types": [
@@ -15,6 +15,6 @@
     { "type": "perf", "section": "Performance" },
     { "type": "test", "hidden": true }
   ],
-  "commitUrlFormat": "https://github.com/{{GITHUB_REPO}}/commit/{{hash}}",
-  "compareUrlFormat": "https://github.com/{{GITHUB_REPO}}/compare/{{previousTag}}...{{currentTag}}"
+  "commitUrlFormat": "https://github.com/jayspar44/claude-pocket/commit/{{hash}}",
+  "compareUrlFormat": "https://github.com/jayspar44/claude-pocket/compare/{{previousTag}}...{{currentTag}}"
 }

@@ -33,10 +33,15 @@ app.use((req, res, next) => {
   next();
 });
 
-// Skip JSON parsing for image uploads (handled by route-specific express.raw())
+// Skip body parsing for routes that handle their own parsing
 app.use((req, res, next) => {
   const contentType = req.headers['content-type'] || '';
+  // Skip for image uploads (handled by route-specific express.raw())
   if (contentType.startsWith('image/')) {
+    return next();
+  }
+  // Skip for base64 upload route (has its own 15mb limit)
+  if (req.path === '/api/files/upload-base64') {
     return next();
   }
   express.json()(req, res, next);
@@ -61,7 +66,7 @@ app.get('/api/health', (req, res) => {
     version: process.env.npm_package_version || '0.1.0',
     pty: ptyStatus,
     clients: wsHandler.getConnectedClients(),
-    workingDir: config.workingDir,
+    workingDir: ptyManager.currentWorkingDir,
   });
 });
 
@@ -141,7 +146,6 @@ server.listen(config.port, config.host, () => {
   logger.info({
     host: config.host,
     port: config.port,
-    workingDir: config.workingDir,
     wsPath: config.ws.path,
   }, 'Relay server started');
 });

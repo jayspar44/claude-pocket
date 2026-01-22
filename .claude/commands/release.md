@@ -82,8 +82,8 @@ Creates the first version tag.
 The release process updates these files automatically:
 - `version.json` - Version number
 - `package.json` - Root package version
-- `frontend/package.json` - Frontend version
-- `backend/package.json` - Backend version
+- `app/package.json` - App version
+- `relay/package.json` - Relay version
 - `CHANGELOG.md` - New changelog entry
 
 ## Commit and Tag Created
@@ -111,7 +111,4 @@ feat: another feature
 /release              # Auto-bumps based on commits above
                       # Creates: chore(release): 0.12.0
                       # Creates tag: v0.12.0
-
-# Then optionally
-/upload-play-store    # Upload to Play Store
 ```

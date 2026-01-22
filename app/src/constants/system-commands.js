@@ -1,0 +1,23 @@
+// Claude CLI built-in system commands (alphabetical)
+export const SYSTEM_COMMANDS = [
+  { name: 'bug', description: 'Submit a bug report', type: 'system' },
+  { name: 'clear', description: 'Clear conversation history', type: 'system' },
+  { name: 'compact', description: 'Compact conversation to save context', type: 'system' },
+  { name: 'config', description: 'View or modify configuration', type: 'system' },
+  { name: 'context', description: 'Show conversation context', type: 'system' },
+  { name: 'cost', description: 'Show session cost', type: 'system' },
+  { name: 'doctor', description: 'Check system health', type: 'system' },
+  { name: 'help', description: 'Show available commands', type: 'system' },
+  { name: 'init', description: 'Initialize CLAUDE.md in project', type: 'system' },
+  { name: 'login', description: 'Log in to Anthropic', type: 'system' },
+  { name: 'logout', description: 'Log out of Anthropic', type: 'system' },
+  { name: 'memory', description: 'Edit CLAUDE.md memory file', type: 'system' },
+  { name: 'model', description: 'Switch Claude model', type: 'system' },
+  { name: 'permissions', description: 'View tool permissions', type: 'system' },
+  { name: 'pr-comments', description: 'View PR comments', type: 'system' },
+  { name: 'resume', description: 'Resume a previous conversation', type: 'system' },
+  { name: 'review', description: 'Request code review', type: 'system' },
+  { name: 'status', description: 'Show current session status', type: 'system' },
+  { name: 'terminal-setup', description: 'Configure terminal settings', type: 'system' },
+  { name: 'vim', description: 'Toggle vim mode', type: 'system' },
+];

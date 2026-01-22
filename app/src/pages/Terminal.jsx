@@ -1,19 +1,21 @@
 import { useRef, useCallback, useState, useEffect } from 'react';
 import { TerminalView } from '../components/terminal';
-import { useTerminalRelay } from '../hooks/useRelay';
+import { useTerminalRelay, useRelay } from '../hooks/useRelay';
 import { useViewportHeight } from '../hooks/useViewportHeight';
 import InputBar from '../components/input/InputBar';
 import QuickActions from '../components/input/QuickActions';
 import StatusBar from '../components/StatusBar';
 import { CommandPalette } from '../components/command';
-import { FileBrowser, ImagePicker } from '../components/files';
+import { MobileFilePicker, ImagePicker } from '../components/files';
 
 function Terminal() {
   const terminalRef = useRef(null);
   const containerRef = useRef(null);
+  const inputBarRef = useRef(null);
   const prevViewportHeightRef = useRef(null);
   const wasAtBottomRef = useRef(true);
   const { connectionState, ptyStatus, sendInput, sendResize, sendInterrupt, submitInput, clearAndReplay } = useTerminalRelay(terminalRef);
+  const { connect, detectedOptions } = useRelay();
   const viewportHeight = useViewportHeight();
   const [fontSize] = useState(() => {
     const stored = localStorage.getItem('terminalFontSize');
@@ -78,52 +80,64 @@ function Terminal() {
         sendInterrupt();
         break;
       case 'tab':
-        sendInput('\t');
+        sendInput('\\t');
         break;
       case 'shift-tab':
-        sendInput('\x1b[Z');
+        sendInput('\\x1b[Z');
         break;
       case 'escape':
-        sendInput('\x1b');
+        sendInput('\\x1b');
         break;
       case 'enter':
-        sendInput('\r');
+        sendInput('\\r');
         break;
       case 'arrow-up':
-        sendInput('\x1b[A');
+        sendInput('\\x1b[A');
         break;
       case 'arrow-down':
-        sendInput('\x1b[B');
+        sendInput('\\x1b[B');
         break;
       case 'arrow-left':
-        sendInput('\x1b[D');
+        sendInput('\\x1b[D');
         break;
       case 'arrow-right':
-        sendInput('\x1b[C');
+        sendInput('\\x1b[C');
         break;
-      case 'clear':
+      case 'refresh':
         // Clear xterm display and request buffered output replay
         clearAndReplay();
         break;
       default:
-        console.warn('Unknown quick action:', action);
+        // Handle option-{num} actions
+        if (action.startsWith('option-')) {
+          const num = action.split('-')[1];
+          sendInput(`${num}\\r`);
+        } else {
+          console.warn('Unknown quick action:', action);
+        }
     }
   }, [sendInput, sendInterrupt, clearAndReplay]);
 
   const handleCommandSelect = useCallback((command) => {
-    // Send the slash command via two-phase submission
-    submitInput(command);
-  }, [submitInput]);
+    // Insert command with trailing space for arguments
+    inputBarRef.current?.insertText(`/${command.name} `);
+    inputBarRef.current?.focus();
+    setShowCommands(false);
+  }, []);
 
   const handleFileSelect = useCallback((filePath) => {
-    // Insert the file path into the input
-    sendInput(filePath);
-  }, [sendInput]);
+    // Insert file reference using @path syntax
+    inputBarRef.current?.insertText(`@${filePath}`);
+    inputBarRef.current?.focus();
+    setShowFiles(false);
+  }, []);
 
   const handleImageUpload = useCallback((imagePath) => {
-    // Insert reference to the uploaded image via two-phase submission
-    submitInput(`[Image: ${imagePath}]`);
-  }, [submitInput]);
+    // Insert image reference using @path syntax
+    inputBarRef.current?.insertText(`@${imagePath}`);
+    inputBarRef.current?.focus();
+    setShowImagePicker(false);
+  }, []);
 
   return (
     <div
@@ -132,7 +146,7 @@ function Terminal() {
       style={{ height: viewportHeight ? `${viewportHeight}px` : '100dvh' }}
     >
       {/* Status Bar */}
-      <StatusBar connectionState={connectionState} ptyStatus={ptyStatus} />
+      <StatusBar connectionState={connectionState} ptyStatus={ptyStatus} onReconnect={connect} />
 
       {/* Terminal - flex-1 with min-h-0 allows it to shrink/grow */}
       <div className="flex-1 min-h-0 overflow-hidden">
@@ -152,10 +166,12 @@ function Terminal() {
         ctrlActive={ctrlActive}
         onCtrlToggle={() => setCtrlActive(prev => !prev)}
         disabled={connectionState !== 'connected'}
+        detectedOptions={detectedOptions}
       />
 
       {/* Input Bar */}
       <InputBar
+        ref={inputBarRef}
         onSend={handleSend}
         disabled={connectionState !== 'connected'}
         placeholder={connectionState === 'connected' ? 'Type a message...' : 'Connecting...'}
@@ -168,7 +184,7 @@ function Terminal() {
         onSelect={handleCommandSelect}
       />
 
-      <FileBrowser
+      <MobileFilePicker
         isOpen={showFiles}
         onClose={() => setShowFiles(false)}
         onSelect={handleFileSelect}

@@ -1,98 +1,113 @@
-# React + Express + Firebase Boilerplate
+# Claude Pocket
 
-A production-ready boilerplate for building full-stack web and mobile applications with React, Express, Firebase, and Capacitor.
+Mobile-first client for Claude Code CLI that connects to a relay server via WebSocket.
+
+## Architecture
+
+```
+┌─────────────────────┐     WebSocket      ┌─────────────────────┐
+│   Mobile App        │ ◄───────────────► │   Relay Server      │
+│   (Capacitor/React) │    + REST API      │   (Mac Mini)        │
+│                     │   via Tailscale    │                     │
+│ - xterm.js display  │                    │ - node-pty spawn    │
+│ - Native input      │                    │ - Claude Code CLI   │
+│ - Quick actions     │                    │ - File browser      │
+│ - Command palette   │                    │                     │
+└─────────────────────┘                    └─────────────────────┘
+```
 
 ## Features
 
-- **Frontend**: React 19, Vite 7, Tailwind CSS 4, React Router
-- **Backend**: Express 5, Node.js 22, Pino logging
-- **Database**: Firebase Firestore with security rules
-- **Auth**: Firebase Authentication (Email + Google)
-- **Mobile**: Capacitor 8 for Android/iOS builds
-- **CI/CD**: Cloud Build for GCP deployment
-- **PR Previews**: Automatic preview environments
-- **Versioning**: Conventional commits + standard-version
-- **Claude Code**: Pre-configured slash commands for development workflow
+- **Terminal**: Full xterm.js terminal emulation on mobile
+- **WebSocket**: Real-time bidirectional communication with relay server
+- **Quick Actions**: Common commands at your fingertips
+- **Command Palette**: Access slash commands easily
+- **File Browser**: Browse and upload files to Claude Code
+- **Reconnection**: Auto-reconnect with output buffer replay
+
+## Stack
+
+- **App**: React 19 + Vite 7 + Tailwind CSS 4 + Capacitor 8 + xterm.js
+- **Relay**: Node.js 22 + Express 5 + WebSocket + node-pty
 
 ## Quick Start
 
-### 1. Create from Template
+### Prerequisites
+
+- Node.js 22+
+- npm
+
+### Setup
 
 ```bash
-# Using GitHub CLI
-gh repo create my-app --template jayspar44/boilerplate-react-express-firebase
-cd my-app
+# Install dependencies
+npm run install-all
 
-# Or clone manually
-git clone https://github.com/jayspar44/boilerplate-react-express-firebase.git my-app
-cd my-app
-rm -rf .git && git init
-```
+# Configure relay server
+cp relay/.env.example relay/.env
+# Edit relay/.env with your working directory
 
-### 2. Initialize Project
-
-```bash
-npm install
-npm run init
-```
-
-Follow the prompts to configure your project name, Firebase project ID, etc.
-
-### 3. Set Up Environment
-
-```bash
-cp backend/.env.example backend/.env
-cp frontend/.env.local.template frontend/.env.local
-# Edit both files with your Firebase credentials
-```
-
-### 4. Start Development
-
-```bash
+# Start development servers
 npm run dev:local
 ```
 
-Open http://localhost:4500
+Open http://localhost:4500 (app) - relay runs on :4501
 
-## Documentation
+## Project Structure
 
-- [CLAUDE.md](./CLAUDE.md) - Complete project documentation
-- [SETUP.md](./SETUP.md) - Detailed first-time setup guide
+```
+claude-pocket/
+├── app/                    # Mobile app (Capacitor + React)
+│   ├── src/
+│   │   ├── components/    # UI components
+│   │   ├── contexts/      # React contexts
+│   │   ├── hooks/         # Custom hooks
+│   │   ├── pages/         # Route pages
+│   │   └── api/           # API client
+│   └── capacitor.config.json
+├── relay/                  # Relay server (runs on Mac)
+│   └── src/
+│       ├── index.js       # Express + WebSocket server
+│       ├── pty-manager.js # node-pty process manager
+│       └── routes/        # REST endpoints
+└── .claude/commands/       # Slash commands
+```
 
-## What's Included
+## Environment Variables
 
-### Frontend (`/frontend`)
+### Relay (`relay/.env`)
 
-- React 19 with Vite 7
-- Tailwind CSS 4 with dark mode
-- React Router for navigation
-- Axios API client with auth interceptors
-- Context providers (Auth, Theme, Connection, UserPreferences)
-- Reusable UI components (Button, Card, Layout)
-- Mobile-ready with Capacitor
+| Variable | Description |
+|----------|-------------|
+| `PORT` | Server port (default: 4501) |
+| `HOST` | Bind address (default: 0.0.0.0) |
+| `WORKING_DIR` | Claude Code working directory |
+| `CLAUDE_COMMAND` | Claude CLI command (default: claude) |
+| `ALLOWED_ORIGINS` | CORS allowed origins (comma-separated) |
 
-### Backend (`/backend`)
+### App (`app/.env.local`)
 
-- Express 5 with modern middleware
-- Firebase Admin SDK integration
-- Structured as controller-service pattern
-- Pino logging with pretty print for dev
-- Rate limiting and CORS configuration
-- Health endpoint with version info
+| Variable | Description |
+|----------|-------------|
+| `VITE_RELAY_URL` | WebSocket URL (default: ws://localhost:4501/ws) |
+| `VITE_RELAY_API_URL` | REST API URL (default: http://localhost:4501) |
 
-### CI/CD
+## Mobile Builds
 
-- Cloud Build configuration for dev/prod
-- PR preview environments
-- GitHub Actions for PR validation
-- Automated version bumping
+### Android
 
-### Claude Code Integration
+```bash
+# First time setup
+cd app && npx cap add android && npx cap open android
 
-- Pre-configured slash commands
-- Multi-agent code review
-- Security scanning
-- Conventional commit enforcement
+# Build variants
+npm run android:local    # Local relay
+npm run android          # Production
+
+# Build APK directly
+npm run apk:local        # localDebug
+npm run apk:prod         # prodRelease
+```
 
 ## Slash Commands
 
@@ -104,33 +119,13 @@ Open http://localhost:4500
 | `/security-scan` | Scan for secrets and sensitive data |
 | `/code-review` | Multi-agent code review |
 | `/pr-flow` | Autonomous PR workflow |
+| `/pr-merge` | Squash merge PR with cleanup |
 | `/release` | Auto-bump version based on commits |
 
-## Project Structure
+## Documentation
 
-```
-├── frontend/           # React + Vite app
-│   ├── src/
-│   │   ├── api/       # API client and services
-│   │   ├── components/# UI components
-│   │   ├── contexts/  # React contexts
-│   │   ├── pages/     # Route pages
-│   │   └── utils/     # Utilities
-│   └── scripts/       # Build scripts
-├── backend/           # Express API
-│   └── src/
-│       ├── controllers/
-│       ├── routes/
-│       └── services/
-├── .claude/commands/  # Claude Code slash commands
-├── .github/workflows/ # GitHub Actions
-└── scripts/          # Dev tooling
-```
+See [CLAUDE.md](./CLAUDE.md) for detailed project documentation.
 
 ## License
 
 MIT
-
----
-
-Created with ❤️ using this boilerplate template.
