@@ -1,8 +1,8 @@
 import { useState, useCallback, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ChevronLeft, Server, Type, RefreshCw, Trash2, Info, Check, Play, Square, FolderOpen } from 'lucide-react';
+import { ChevronLeft, Server, Type, RefreshCw, Trash2, Info, Check, Play, Square, FolderOpen, FileX } from 'lucide-react';
 import { useRelay } from '../hooks/useRelay';
-import { healthApi } from '../api/relay-api';
+import { healthApi, filesApi } from '../api/relay-api';
 
 export default function Settings() {
   const navigate = useNavigate();
@@ -19,6 +19,7 @@ export default function Settings() {
   const [saving, setSaving] = useState(false);
   const [starting, setStarting] = useState(false);
   const [stopping, setStopping] = useState(false);
+  const [cleaning, setCleaning] = useState(false);
   const [recentDirs, setRecentDirs] = useState(() => {
     try {
       return JSON.parse(localStorage.getItem('claude-recent-dirs') || '[]');
@@ -112,6 +113,21 @@ export default function Settings() {
     if (confirm('Clear command history?')) {
       localStorage.removeItem('claude-pocket-command-history');
     }
+  }, []);
+
+  const handleCleanupFiles = useCallback(async () => {
+    if (!confirm('Delete all uploaded files in .claude-pocket? This cannot be undone.')) {
+      return;
+    }
+    setCleaning(true);
+    try {
+      const response = await filesApi.cleanup();
+      alert(response.data.message || 'Cleanup complete');
+    } catch (error) {
+      console.error('Failed to cleanup files:', error);
+      alert(error.response?.data?.error || 'Failed to cleanup files');
+    }
+    setCleaning(false);
   }, []);
 
   const handleSelectRecentDir = useCallback((dir) => {
@@ -245,6 +261,38 @@ export default function Settings() {
           {/* Relay URL */}
           <div className="space-y-2">
             <label className="text-sm text-gray-400">Relay URL</label>
+
+            {/* Quick presets - DEV (4502) and PROD (4501) on minibox */}
+            <div className="flex gap-2">
+              <button
+                onClick={() => {
+                  setRelayUrlInput('ws://minibox.rattlesnake-mimosa.ts.net:4502/ws');
+                  setRelayUrl('ws://minibox.rattlesnake-mimosa.ts.net:4502/ws');
+                }}
+                className={`flex-1 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
+                  relayUrlInput.includes(':4502')
+                    ? 'bg-blue-600 text-white'
+                    : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                }`}
+              >
+                DEV (:4502)
+              </button>
+              <button
+                onClick={() => {
+                  setRelayUrlInput('ws://minibox.rattlesnake-mimosa.ts.net:4501/ws');
+                  setRelayUrl('ws://minibox.rattlesnake-mimosa.ts.net:4501/ws');
+                }}
+                className={`flex-1 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
+                  relayUrlInput.includes(':4501')
+                    ? 'bg-orange-600 text-white'
+                    : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                }`}
+              >
+                PROD (:4501)
+              </button>
+            </div>
+
+            {/* Custom URL input */}
             <div className="flex gap-2">
               <input
                 type="text"
@@ -262,7 +310,7 @@ export default function Settings() {
               </button>
             </div>
             <p className="text-xs text-gray-500">
-              WebSocket URL for the relay server (e.g., ws://your-mac:4501/ws)
+              Tap DEV/PROD to switch, or enter a custom URL
             </p>
           </div>
         </div>
@@ -307,6 +355,18 @@ export default function Settings() {
             <Trash2 className="w-5 h-5" />
             <span>Clear Command History</span>
           </button>
+
+          <button
+            onClick={handleCleanupFiles}
+            disabled={cleaning || connectionState !== 'connected' || !ptyRunning}
+            className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-orange-600/20 hover:bg-orange-600/30 disabled:opacity-50 rounded-lg text-orange-400 transition-colors"
+          >
+            <FileX className={`w-5 h-5 ${cleaning ? 'animate-pulse' : ''}`} />
+            <span>{cleaning ? 'Cleaning...' : 'Clean Uploaded Files'}</span>
+          </button>
+          <p className="text-xs text-gray-500">
+            Deletes uploaded images and temp files in .claude-pocket/
+          </p>
         </div>
 
         {/* About */}
