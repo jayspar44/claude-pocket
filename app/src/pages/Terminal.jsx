@@ -80,28 +80,28 @@ function Terminal() {
         sendInterrupt();
         break;
       case 'tab':
-        sendInput('\\t');
+        sendInput('\t');
         break;
       case 'shift-tab':
-        sendInput('\\x1b[Z');
+        sendInput('\x1b[Z');
         break;
       case 'escape':
-        sendInput('\\x1b');
+        sendInput('\x1b');
         break;
       case 'enter':
-        sendInput('\\r');
+        sendInput('\r');
         break;
       case 'arrow-up':
-        sendInput('\\x1b[A');
+        sendInput('\x1b[A');
         break;
       case 'arrow-down':
-        sendInput('\\x1b[B');
+        sendInput('\x1b[B');
         break;
       case 'arrow-left':
-        sendInput('\\x1b[D');
+        sendInput('\x1b[D');
         break;
       case 'arrow-right':
-        sendInput('\\x1b[C');
+        sendInput('\x1b[C');
         break;
       case 'refresh':
         // Clear xterm display and request buffered output replay
@@ -111,7 +111,7 @@ function Terminal() {
         // Handle option-{num} actions
         if (action.startsWith('option-')) {
           const num = action.split('-')[1];
-          sendInput(`${num}\\r`);
+          sendInput(`${num}\r`);
         } else {
           console.warn('Unknown quick action:', action);
         }
