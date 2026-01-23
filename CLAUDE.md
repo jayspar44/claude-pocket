@@ -28,7 +28,8 @@ app/src/                         relay/src/
 ├─ components/                   ├─ index.js (Express + WS)
 │  ├─ terminal/TerminalView      ├─ pty-manager.js
 │  ├─ input/InputBar,QuickActions├─ websocket-handler.js
-│  ├─ command/CommandPalette     └─ routes/commands.js,files.js
+│  ├─ command/CommandPalette     ├─ ansi-preprocessor.js
+│  ├─ status/StatusBar           └─ routes/commands.js,files.js
 │  └─ files/FileBrowser
 ├─ contexts/RelayContext,Theme
 ├─ pages/Terminal,Settings
@@ -47,19 +48,40 @@ npm run dev:local    # app:4500, relay:4501
 | Location | Variable | Default |
 |----------|----------|---------|
 | `relay/.env` | `PORT` | 4501 |
+| | `HOST` | 0.0.0.0 |
 | | `WORKING_DIR` | (required) |
 | | `CLAUDE_COMMAND` | claude |
 | | `ALLOWED_ORIGINS` | * |
+| | `SHELL` | /bin/zsh |
+| | `NODE_ENV` | development |
 | `app/.env.local` | `VITE_RELAY_URL` | ws://localhost:4501/ws |
 | | `VITE_RELAY_API_URL` | http://localhost:4501 |
 
+**Production files:** `relay/.env.production` | `app/.env.production`
+
 ## API
 
-**REST:** `GET /api/health` | `GET /api/pty/status` | `POST /api/pty/restart` | `GET /api/commands` | `GET /api/files?path=`
+**REST:**
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/health` | GET | Health check |
+| `/api/pty/status` | GET | PTY process status |
+| `/api/pty/start` | POST | Start PTY process |
+| `/api/pty/stop` | POST | Stop PTY process |
+| `/api/pty/restart` | POST | Restart PTY process |
+| `/api/pty/buffer` | GET | Get output buffer |
+| `/api/commands` | GET | List available commands |
+| `/api/files?path=` | GET | List files in directory |
+| `/api/files/info?path=` | GET | Get file info |
+| `/api/files/upload` | POST | Upload file (multipart) |
+| `/api/files/upload-base64` | POST | Upload file (base64) |
+| `/api/files/cleanup` | DELETE | Cleanup temp files |
 
 **WebSocket `/ws`:**
-- Client→Server: `input` | `resize` | `interrupt` | `restart` | `status`
-- Server→Client: `output` | `replay` | `status` | `pty-status`
+| Direction | Message Types |
+|-----------|---------------|
+| Client→Server | `input` \| `submit` \| `resize` \| `interrupt` \| `restart` \| `status` \| `ping` |
+| Server→Client | `output` \| `replay` \| `status` \| `pty-status` \| `pty-crash` \| `options-detected` \| `pong` |
 
 ## Android Builds
 

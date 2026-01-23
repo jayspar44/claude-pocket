@@ -25,6 +25,14 @@ const config = {
     saveDebounceMs: 500, // Debounce buffer saves
   },
 
+  // Option detection configuration
+  optionDetection: {
+    idleThresholdMs: 200,    // Wait for output to settle before detecting
+    expiryMs: 30000,         // Auto-clear options after 30s
+    minSubstantiveChars: 20, // Min chars to consider "substantive" output
+    bufferLookback: 1500,    // Chars to scan for options
+  },
+
   // CORS configuration
   cors: {
     // Use callback function to properly reflect origin with credentials

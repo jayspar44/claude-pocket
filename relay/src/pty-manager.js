@@ -7,9 +7,6 @@ const logger = require('./logger');
 // Batch delay for output messages (reduces WebSocket overhead, improves performance)
 const BATCH_DELAY_MS = 50;
 
-// Option detection debounce (wait for output to settle before detecting)
-const OPTION_DETECT_DELAY_MS = 100;
-
 // Auto-restart configuration
 const AUTO_RESTART_DELAY_MS = 1000; // Wait before restarting
 const MAX_RESTART_ATTEMPTS = 3; // Max restarts within window
@@ -36,8 +33,12 @@ class PtyManager {
     this.processStartTime = 0;
     this.lastOutputLines = []; // Keep last 10 lines for crash diagnosis
     // Option detection state
-    this.optionDetectTimer = null;
     this.lastDetectedOptions = null;
+    // Idle state tracking for option detection
+    this.isIdle = false;
+    this.lastOutputTime = 0;
+    this.idleTimer = null;
+    this.optionExpiryTimer = null;
   }
 
   start(workingDir) {
@@ -71,6 +72,9 @@ class PtyManager {
       this.isRunning = true;
       this.processStartTime = Date.now();
       this.lastOutputLines = [];
+
+      // Broadcast updated status to all connected clients (fixes status bar after auto-restart)
+      this.broadcast({ type: 'pty-status', ...this.getStatus() });
 
       proc.onData((data) => {
         // Send raw output to xterm.js (handles all ANSI sequences natively)
@@ -200,6 +204,15 @@ class PtyManager {
         this.saveTimer = null;
         this.saveBuffer();
       }
+      // Clear idle and expiry timers
+      if (this.idleTimer) {
+        clearTimeout(this.idleTimer);
+        this.idleTimer = null;
+      }
+      if (this.optionExpiryTimer) {
+        clearTimeout(this.optionExpiryTimer);
+        this.optionExpiryTimer = null;
+      }
       this.ptyProcess.kill();
       this.ptyProcess = null;
       this.isRunning = false;
@@ -284,6 +297,18 @@ class PtyManager {
   // Batch output messages to reduce WebSocket overhead
   queueOutput(data) {
     this.batchQueue += data;
+    this.lastOutputTime = Date.now();
+    this.isIdle = false;
+
+    // Clear options on substantive new output (user typed, Claude responding)
+    // This prevents stale options from persisting during new conversation flow
+    const cleanData = data.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '');
+    if (cleanData.length >= config.optionDetection.minSubstantiveChars && this.lastDetectedOptions) {
+      this.clearDetectedOptions();
+    }
+
+    // Schedule idle detection (will run option detection when idle)
+    this.scheduleIdleDetection();
 
     // If no timer running, start one
     if (!this.batchTimer) {
@@ -298,52 +323,82 @@ class PtyManager {
       this.batchQueue = '';
     }
     this.batchTimer = null;
-
-    // Schedule option detection (debounced to wait for output to settle)
-    this.scheduleOptionDetection();
+    // Option detection now handled by idle detection in queueOutput()
   }
 
-  scheduleOptionDetection() {
-    // Clear any pending detection
-    if (this.optionDetectTimer) {
-      clearTimeout(this.optionDetectTimer);
+  scheduleIdleDetection() {
+    // Clear any pending idle timer
+    if (this.idleTimer) {
+      clearTimeout(this.idleTimer);
     }
 
-    // Wait for output to settle before detecting options
-    this.optionDetectTimer = setTimeout(() => {
-      this.optionDetectTimer = null;
-      const options = this.detectNumberedOptions();
+    // Schedule idle check after threshold
+    this.idleTimer = setTimeout(() => {
+      this.idleTimer = null;
+      this.isIdle = true;
+      this.checkIdleState();
+    }, config.optionDetection.idleThresholdMs);
+  }
 
-      // Only broadcast if options changed
-      const optionsKey = options ? options.join(',') : '';
-      const lastKey = this.lastDetectedOptions ? this.lastDetectedOptions.join(',') : '';
+  checkIdleState() {
+    // Only detect options when PTY is idle (Claude waiting for input)
+    if (!this.isIdle) return;
 
-      if (optionsKey !== lastKey) {
-        this.lastDetectedOptions = options;
-        this.broadcast({ type: 'options-detected', options: options || [] });
-        if (options) {
-          logger.debug({ options }, 'Detected numbered options');
-        }
+    const options = this.detectNumberedOptions();
+
+    // Only broadcast if options changed
+    const optionsKey = options ? options.join(',') : '';
+    const lastKey = this.lastDetectedOptions ? this.lastDetectedOptions.join(',') : '';
+
+    if (optionsKey !== lastKey) {
+      this.lastDetectedOptions = options;
+      this.broadcast({ type: 'options-detected', options: options || [] });
+      if (options) {
+        logger.debug({ options }, 'Detected numbered options');
+        // Schedule auto-expiry
+        this.scheduleOptionExpiry();
       }
-    }, OPTION_DETECT_DELAY_MS);
+    }
+  }
+
+  scheduleOptionExpiry() {
+    // Clear any pending expiry
+    if (this.optionExpiryTimer) {
+      clearTimeout(this.optionExpiryTimer);
+    }
+
+    // Auto-clear options after timeout (user hasn't interacted)
+    this.optionExpiryTimer = setTimeout(() => {
+      this.optionExpiryTimer = null;
+      if (this.lastDetectedOptions) {
+        logger.debug('Options expired, clearing');
+        this.clearDetectedOptions();
+      }
+    }, config.optionDetection.expiryMs);
   }
 
   detectNumberedOptions() {
-    // Get recent buffer content (last ~2000 chars should be enough)
+    // Get recent buffer content
     const fullBuffer = this.getBufferedOutput();
-    const recentBuffer = fullBuffer.slice(-2000);
+    const recentBuffer = fullBuffer.slice(-config.optionDetection.bufferLookback);
 
     // Strip ANSI codes for clean parsing
     const clean = recentBuffer.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '');
 
-    // Match patterns: "1.", "1)", "[1]", "(1)" at start of line or after newline
-    // Also match "1:" which Claude sometimes uses
-    const pattern = /(?:^|\n)\s*(?:(\d+)\.|(\d+)\)|(\d+):|^\[(\d+)\]|^\((\d+)\))\s+\S/gm;
+    // Skip if inside a code block (odd number of ```)
+    const codeBlockCount = (clean.match(/```/g) || []).length;
+    if (codeBlockCount % 2 === 1) {
+      return null;
+    }
+
+    // Improved pattern: require capital letter after number to filter out code/markdown
+    // Matches: "1.", "1)", "1:", "[1]", "(1)" followed by space and capital letter
+    const pattern = /(?:^|\n)\s*(?:(\d)[.):\]]\s+[A-Z]|\[(\d)\]\s+[A-Z]|\((\d)\)\s+[A-Z])/gm;
     const numbers = new Set();
 
     let match;
     while ((match = pattern.exec(clean)) !== null) {
-      const num = parseInt(match[1] || match[2] || match[3] || match[4] || match[5]);
+      const num = parseInt(match[1] || match[2] || match[3]);
       if (num >= 1 && num <= 9) numbers.add(num);
     }
 
@@ -369,6 +424,11 @@ class PtyManager {
   clearDetectedOptions() {
     this.lastDetectedOptions = null;
     this.broadcast({ type: 'options-detected', options: [] });
+    // Clear expiry timer
+    if (this.optionExpiryTimer) {
+      clearTimeout(this.optionExpiryTimer);
+      this.optionExpiryTimer = null;
+    }
   }
 
   getStatus() {
