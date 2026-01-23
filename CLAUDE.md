@@ -151,6 +151,37 @@ pm2 save       # Save process list
 | `feat:` | MINOR | `fix:` | PATCH |
 | `feat!:` | MAJOR | `chore:/docs:/refactor:` | None |
 
+## Versioning
+
+Uses `standard-version` for semantic versioning based on conventional commits.
+
+**Version files (all kept in sync):**
+| File | Purpose |
+|------|---------|
+| `version.json` | Source of truth, imported by app |
+| `package.json` | Root package |
+| `app/package.json` | App package |
+| `relay/package.json` | Relay package |
+| `CHANGELOG.md` | Auto-generated changelog |
+
+**Release workflow:**
+```bash
+/release              # Auto-bump based on commits (feat→MINOR, fix→PATCH)
+/release --minor      # Force minor bump
+/release --patch      # Force patch bump
+/release --major      # Force major bump
+```
+
+**How it works:**
+1. Analyzes commits since last tag
+2. Determines bump type from commit prefixes
+3. Updates all version files atomically
+4. Creates commit: `chore(release): X.Y.Z`
+5. Creates tag: `vX.Y.Z`
+6. Pushes commit and tag
+
+**Important:** Never manually create version tags. Always use `/release` to keep version files and tags in sync.
+
 ## Slash Commands
 
 ### Development
