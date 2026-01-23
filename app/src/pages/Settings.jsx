@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { ChevronLeft, Server, Type, RefreshCw, Trash2, Info, Check, Play, Square, FolderOpen, FileX } from 'lucide-react';
 import { useRelay } from '../hooks/useRelay';
 import { healthApi, filesApi } from '../api/relay-api';
+import { version } from '../../../version.json';
 
 export default function Settings() {
   const navigate = useNavigate();
@@ -379,7 +380,7 @@ export default function Settings() {
           <div className="space-y-2 text-sm">
             <div className="flex justify-between">
               <span className="text-gray-400">App Version</span>
-              <span className="text-gray-300">0.1.0</span>
+              <span className="text-gray-300">v{version}</span>
             </div>
             {healthInfo && (
               <div className="flex justify-between">
