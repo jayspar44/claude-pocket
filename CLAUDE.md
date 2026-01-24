@@ -21,6 +21,17 @@ Mobile App (Capacitor/React) ◄──WebSocket──► Relay Server (Mac)
 
 **Stack:** App: React 19 + Vite 7 + Tailwind 4 + Capacitor 8 | Relay: Node 22 + Express 5 + node-pty
 
+## Execution Context
+
+Claude Code may run from different locations. Determine where you're running before using SSH:
+
+| Running From | How to Tell | Minibox Commands |
+|--------------|-------------|------------------|
+| Local Mac | `hostname` = local machine name | Use `ssh minibox "..."` |
+| Minibox (via SSH) | `hostname` = `MiniBox.local` | Run directly, no SSH needed |
+
+**Common scenario:** SSH from phone (Termux) → minibox → `claude`. In this case, Claude Code runs on minibox and all commands execute locally. No SSH wrapping needed for PM2, deploy scripts, etc.
+
 ## Project Structure
 
 ```
@@ -112,9 +123,12 @@ npm run apk:prod         # Build prodRelease APK
 /deploy --env prod     # Deploy PROD
 /deploy --env dev      # Deploy DEV
 
-# Or directly on minibox
+# If running on minibox (no SSH needed)
+cd ~/Documents/projects/claude-pocket && ./scripts/deploy.sh
+cd ~/Documents/projects/claude-pocket-dev && ./scripts/deploy.sh
+
+# If running from local Mac (SSH required)
 ssh minibox "cd ~/Documents/projects/claude-pocket && ./scripts/deploy.sh"
-ssh minibox "cd ~/Documents/projects/claude-pocket-dev && ./scripts/deploy.sh"
 ```
 
 **Auto-detection:** Same `deploy.sh` and `ecosystem.config.js` in both folders detect environment from folder name (`-dev` suffix).
