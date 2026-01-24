@@ -43,6 +43,14 @@ echo ""
 echo "Installing dependencies..."
 npm run install-all
 
+# Fix node-pty spawn-helper permissions (npm doesn't preserve executable bit)
+if [ -f relay/node_modules/node-pty/prebuilds/darwin-arm64/spawn-helper ]; then
+  chmod +x relay/node_modules/node-pty/prebuilds/darwin-arm64/spawn-helper
+fi
+if [ -f relay/node_modules/node-pty/prebuilds/darwin-x64/spawn-helper ]; then
+  chmod +x relay/node_modules/node-pty/prebuilds/darwin-x64/spawn-helper
+fi
+
 # Build app
 echo ""
 echo "Building $ENV app..."
