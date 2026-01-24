@@ -25,15 +25,19 @@ Deploy the latest code from the current branch to the DEV instance on minibox.
 ## Target Server
 
 - **Host**: `minibox.rattlesnake-mimosa.ts.net`
-- **Project path**: `~/Documents/projects/claude-pocket`
+- **Project path**: `~/Documents/projects/claude-pocket-dev`
+- **Deploy script**: `./scripts/deploy.sh`
 - **Services**: `claude-pocket-app-dev` (port 4502), `claude-pocket-relay-dev` (port 4503)
 
 ## What Gets Deployed
 
-1. **Git pull**: Fetches latest code from current branch
-2. **Dependencies**: Runs `npm install` for app and relay
-3. **Build**: Builds the React app
-4. **PM2 restart**: Restarts DEV services only
+The deploy script (`scripts/deploy.sh`) performs:
+
+1. **Environment setup**: Copies `.env.production` files
+2. **PM2 install**: Ensures PM2 is installed globally
+3. **Dependencies**: Runs `npm install` for app and relay
+4. **Build**: Builds the React app
+5. **PM2 start/restart**: Starts or restarts DEV services via `ecosystem.config.js`
 
 ## Steps
 
@@ -62,7 +66,7 @@ echo ""
 echo "📡 Remote Status (minibox)"
 echo "─────────────────────────────────────────"
 
-ssh minibox.rattlesnake-mimosa.ts.net "cd ~/Documents/projects/claude-pocket && git fetch && git status -sb"
+ssh minibox.rattlesnake-mimosa.ts.net "cd ~/Documents/projects/claude-pocket-dev && git fetch && git status -sb"
 
 if [[ $? -ne 0 ]]; then
   echo ""
@@ -89,13 +93,7 @@ echo "🚀 Deploying to DEV..."
 echo "─────────────────────────────────────────"
 echo ""
 
-# Pull latest code, install deps, build, and restart DEV services only
-ssh minibox.rattlesnake-mimosa.ts.net "cd ~/Documents/projects/claude-pocket && \
-  git pull && \
-  npm install --prefix app && \
-  npm install --prefix relay && \
-  npm run build --prefix app && \
-  pm2 restart claude-pocket-app-dev claude-pocket-relay-dev"
+ssh minibox.rattlesnake-mimosa.ts.net "cd ~/Documents/projects/claude-pocket-dev && git pull && ./scripts/deploy.sh"
 
 DEPLOY_EXIT=$?
 
@@ -108,7 +106,8 @@ if [[ $DEPLOY_EXIT -ne 0 ]]; then
   echo ""
   echo "Or SSH manually:"
   echo "   ssh minibox.rattlesnake-mimosa.ts.net"
-  echo "   cd ~/Documents/projects/claude-pocket"
+  echo "   cd ~/Documents/projects/claude-pocket-dev"
+  echo "   ./scripts/deploy.sh"
   exit 1
 fi
 ```
@@ -123,7 +122,7 @@ echo ""
 
 # Show PM2 status for DEV services
 echo "📊 DEV Service Status"
-ssh minibox.rattlesnake-mimosa.ts.net "pm2 status | grep -E '(id|claude-pocket-dev)'"
+ssh minibox.rattlesnake-mimosa.ts.net "pm2 status | grep -E '(id|claude-pocket.*-dev)'"
 
 # Health check
 echo ""
@@ -180,15 +179,15 @@ echo "════════════════════════�
 
 📡 Remote Status (minibox)
 ─────────────────────────────────────────
-## feature/multi-instance-notifications...origin/feature/multi-instance-notifications [behind 2]
+## feature/multi-instance-notifications...origin/feature/multi-instance-notifications
 
 🚀 Deploying to DEV...
 ─────────────────────────────────────────
 
 Already up to date.
+=== Claude Pocket DEV Deployment ===
 ...build output...
-[PM2] Applying action restartProcessId on app [claude-pocket-app-dev]...
-[PM2] Applying action restartProcessId on app [claude-pocket-relay-dev]...
+=== DEV Deployment Complete ===
 
 ✅ DEV Deploy Complete
 ─────────────────────────────────────────
@@ -220,15 +219,15 @@ Already up to date.
 
 | Aspect | /prod-deploy | /dev-deploy |
 |--------|--------------|-------------|
-| Services | claude-pocket-app/relay | claude-pocket-app-dev/relay |
+| Folder | `claude-pocket` | `claude-pocket-dev` |
+| Services | claude-pocket-app/relay | claude-pocket-app-dev/relay-dev |
 | Ports | 4500/4501 | 4502/4503 |
 | Branch | Usually main | Current branch |
-| Script | deploy.sh (full) | Git pull + build + restart |
 
 ## Notes
 
-- Deploys from whatever branch is checked out on minibox
-- Does NOT use deploy.sh (which targets PROD)
-- Only restarts DEV services, PROD unaffected
+- Deploys from whatever branch is checked out on minibox DEV folder
+- Uses separate `deploy.sh` script in `claude-pocket-dev`
+- Completely independent from PROD deployment
 - Build happens on minibox (not locally)
 - Active WebSocket connections will be dropped during deploy

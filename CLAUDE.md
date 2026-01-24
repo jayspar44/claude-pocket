@@ -93,15 +93,26 @@ npm run apk:prod         # Build prodRelease APK
 
 ## Production Deployment (minibox)
 
-**Deploy/redeploy via SSH:**
+**Dual Instance Setup:** Two separate folders for independent deployment:
+
+| Instance | Folder | App Port | Relay Port |
+|----------|--------|----------|------------|
+| PROD | `claude-pocket` | 4500 | 4501 |
+| DEV | `claude-pocket-dev` | 4502 | 4503 |
+
+**Deploy PROD:**
 ```bash
-ssh minibox.rattlesnake-mimosa.ts.net
-cd ~/Documents/projects/claude-pocket
-git pull
-./scripts/deploy.sh
+cd ~/Documents/projects/claude-pocket && ./scripts/deploy.sh
+# Or use: /prod-deploy
 ```
 
-The script handles: env setup, PM2 install, build, start, auto-restart on crash.
+**Deploy DEV:**
+```bash
+cd ~/Documents/projects/claude-pocket-dev && ./scripts/deploy.sh
+# Or use: /dev-deploy
+```
+
+Each script handles: env setup, PM2 install, deps, build, start. Deployments are fully independent.
 
 **Access:**
 | Service | URL | Port |
@@ -110,12 +121,6 @@ The script handles: env setup, PM2 install, build, start, auto-restart on crash.
 | PROD Relay | `ws://minibox.rattlesnake-mimosa.ts.net:4501/ws` | 4501 |
 | DEV App | `http://minibox.rattlesnake-mimosa.ts.net:4502` | 4502 |
 | DEV Relay | `ws://minibox.rattlesnake-mimosa.ts.net:4503/ws` | 4503 |
-
-**Dual App + Relay Setup:** Two complete instances for independent testing:
-- **PROD (App:4500 → Relay:4501)**: Stable, always running
-- **DEV (App:4502 → Relay:4503)**: For testing UI and relay changes
-
-Both apps serve the same build but can be rebuilt/restarted independently. Each relay maintains its own PTY process and output buffer.
 
 **PM2 Commands:**
 | Command | Description |
@@ -135,7 +140,7 @@ pm2 save       # Save process list
 
 **Disable auto-start:** `pm2 unstartup`
 
-**Config files:** `ecosystem.config.js` | `relay/.env.production` | `app/.env.production`
+**Config files per folder:** `ecosystem.config.js` | `relay/.env.production` | `app/.env.production`
 
 ## Conventions
 
@@ -198,15 +203,20 @@ Uses `standard-version` for semantic versioning based on conventional commits.
 | `/pr-merge` | `<pr#> [--no-sync]` | Squash merge + cleanup |
 | `/release` | `[--patch\|--minor\|--major\|--first]` | Version bump from commits |
 
-### Production (minibox)
+### Minibox (PROD + DEV)
 
 | Command | Usage | Description |
 |---------|-------|-------------|
-| `/prod-status` | `[--health]` | Check PM2 status + optional health check |
-| `/prod-logs` | `[--lines N] [--app\|--relay]` | View production logs |
-| `/prod-restart` | `[--app\|--relay\|--all]` | Restart services |
-| `/prod-deploy` | `[--skip-confirm]` | Deploy latest code from main |
-| `/prod-stop` | `[--app\|--relay\|--all]` | Stop services |
+| `/prod-status` | `[--health]` | Check PROD PM2 status |
+| `/prod-logs` | `[--lines N] [--app\|--relay]` | View PROD logs |
+| `/prod-restart` | `[--app\|--relay\|--all]` | Restart PROD services |
+| `/prod-deploy` | `[--skip-confirm]` | Deploy PROD from `claude-pocket` |
+| `/prod-stop` | `[--app\|--relay\|--all]` | Stop PROD services |
+| `/dev-status` | `[--health]` | Check DEV PM2 status |
+| `/dev-logs` | `[--lines N] [--app\|--relay]` | View DEV logs |
+| `/dev-restart` | `[--app\|--relay\|--all]` | Restart DEV services |
+| `/dev-deploy` | `[--skip-confirm]` | Deploy DEV from `claude-pocket-dev` |
+| `/dev-stop` | `[--app\|--relay\|--all]` | Stop DEV services |
 
 **Dev Workflow:** `/feature-start` → code → `/commit-push` → `/pr-flow` → `/release`
 
