@@ -47,15 +47,21 @@ npm run dev:local    # app:4500, relay:4501
 
 | Location | Variable | Default |
 |----------|----------|---------|
-| `relay/.env` | `PORT` | 4501 |
-| | `HOST` | 0.0.0.0 |
+| `relay/.env` | `HOST` | 0.0.0.0 |
 | | `WORKING_DIR` | (required) |
 | | `CLAUDE_COMMAND` | claude |
 | | `ALLOWED_ORIGINS` | * |
 | | `SHELL` | /bin/zsh |
 | | `NODE_ENV` | development |
-| `app/.env.local` | `VITE_RELAY_URL` | ws://localhost:4501/ws |
-| | `VITE_RELAY_API_URL` | http://localhost:4501 |
+| `app/.env.production` | `VITE_RELAY_HOST` | minibox.rattlesnake-mimosa.ts.net |
+| | `VITE_PROD_APP_PORT` | 4500 |
+| | `VITE_PROD_RELAY_PORT` | 4501 |
+| | `VITE_DEV_APP_PORT` | 4502 |
+| | `VITE_DEV_RELAY_PORT` | 4503 |
+| | `VITE_RELAY_URL` | ws://minibox...:4501/ws |
+| | `VITE_RELAY_API_URL` | http://minibox...:4501 |
+
+**Port auto-detection:** `ecosystem.config.js` sets PORT based on folder name (`-dev` suffix → DEV ports)
 
 **Production files:** `relay/.env.production` | `app/.env.production`
 
@@ -100,19 +106,18 @@ npm run apk:prod         # Build prodRelease APK
 | PROD | `claude-pocket` | 4500 | 4501 |
 | DEV | `claude-pocket-dev` | 4502 | 4503 |
 
-**Deploy PROD:**
+**Deploy:**
 ```bash
-cd ~/Documents/projects/claude-pocket && ./scripts/deploy.sh
-# Or use: /prod-deploy
+# Via slash command (recommended)
+/deploy --env prod     # Deploy PROD
+/deploy --env dev      # Deploy DEV
+
+# Or directly on minibox
+ssh minibox "cd ~/Documents/projects/claude-pocket && ./scripts/deploy.sh"
+ssh minibox "cd ~/Documents/projects/claude-pocket-dev && ./scripts/deploy.sh"
 ```
 
-**Deploy DEV:**
-```bash
-cd ~/Documents/projects/claude-pocket-dev && ./scripts/deploy.sh
-# Or use: /dev-deploy
-```
-
-Each script handles: env setup, PM2 install, deps, build, start. Deployments are fully independent.
+**Auto-detection:** Same `deploy.sh` and `ecosystem.config.js` in both folders detect environment from folder name (`-dev` suffix).
 
 **Access:**
 | Service | URL | Port |
@@ -207,17 +212,20 @@ Uses `standard-version` for semantic versioning based on conventional commits.
 
 | Command | Usage | Description |
 |---------|-------|-------------|
-| `/prod-status` | `[--health]` | Check PROD PM2 status |
-| `/prod-logs` | `[--lines N] [--app\|--relay]` | View PROD logs |
-| `/prod-restart` | `[--app\|--relay\|--all]` | Restart PROD services |
-| `/prod-deploy` | `[--skip-confirm]` | Deploy PROD from `claude-pocket` |
-| `/prod-stop` | `[--app\|--relay\|--all]` | Stop PROD services |
-| `/dev-status` | `[--health]` | Check DEV PM2 status |
-| `/dev-logs` | `[--lines N] [--app\|--relay]` | View DEV logs |
-| `/dev-restart` | `[--app\|--relay\|--all]` | Restart DEV services |
-| `/dev-deploy` | `[--skip-confirm]` | Deploy DEV from `claude-pocket-dev` |
-| `/dev-stop` | `[--app\|--relay\|--all]` | Stop DEV services |
+| `/deploy` | `--env <prod\|dev> [--skip-confirm]` | Deploy to minibox |
+| `/status` | `--env <prod\|dev> [--health]` | Check PM2 status |
+| `/logs` | `--env <prod\|dev> [--lines N] [--app\|--relay]` | View logs |
+| `/restart` | `--env <prod\|dev> [--app\|--relay\|--all]` | Restart services |
+| `/stop` | `--env <prod\|dev> [--app\|--relay\|--all]` | Stop services |
+
+**Examples:**
+```bash
+/deploy --env prod           # Deploy to PROD
+/status --env dev --health   # DEV status + health check
+/logs --env prod --relay     # PROD relay logs only
+/restart --env dev --app     # Restart DEV app only
+```
 
 **Dev Workflow:** `/feature-start` → code → `/commit-push` → `/pr-flow` → `/release`
 
-**Deploy Workflow:** `/prod-deploy` → `/prod-status --health` → `/prod-logs`
+**Deploy Workflow:** `/deploy --env prod` → `/status --env prod --health` → `/logs --env prod`

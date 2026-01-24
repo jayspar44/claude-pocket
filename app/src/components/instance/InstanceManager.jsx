@@ -2,12 +2,20 @@ import { useState, useCallback, useEffect } from 'react';
 import { X, Plus, Trash2, Edit2, Check, Server } from 'lucide-react';
 import { useInstance } from '../../contexts/InstanceContext';
 
-// Preset relay URLs for quick selection
-const RELAY_PRESETS = [
-  { label: 'PROD (:4501)', url: 'ws://minibox.rattlesnake-mimosa.ts.net:4501/ws' },
-  { label: 'DEV (:4503)', url: 'ws://minibox.rattlesnake-mimosa.ts.net:4503/ws' },
-  { label: 'Local', url: 'ws://localhost:4501/ws' },
-];
+// Build relay presets from env vars (with fallbacks)
+const buildRelayPresets = () => {
+  const host = import.meta.env.VITE_RELAY_HOST || 'minibox.rattlesnake-mimosa.ts.net';
+  const prodRelayPort = import.meta.env.VITE_PROD_RELAY_PORT || '4501';
+  const devRelayPort = import.meta.env.VITE_DEV_RELAY_PORT || '4503';
+
+  return [
+    { label: 'PROD', url: `ws://${host}:${prodRelayPort}/ws` },
+    { label: 'DEV', url: `ws://${host}:${devRelayPort}/ws` },
+    { label: 'Local', url: 'ws://localhost:4501/ws' },
+  ];
+};
+
+const RELAY_PRESETS = buildRelayPresets();
 
 function InstanceManager({ isOpen, onClose, editInstanceId }) {
   const {

@@ -2,7 +2,7 @@ import { createContext, useContext, useState, useCallback, useRef, useEffect, us
 import { Capacitor } from '@capacitor/core';
 import { App } from '@capacitor/app';
 import { notificationService } from '../services/NotificationService';
-import { storage, getAppPort } from '../utils/storage';
+import { storage } from '../utils/storage';
 
 const InstanceContext = createContext(null);
 
@@ -26,10 +26,15 @@ const getDefaultRelayUrl = () => {
   if (typeof window !== 'undefined' && window.location.port) {
     const appPort = window.location.port;
     const host = window.location.hostname;
-    // DEV app (4502) → DEV relay (4503)
-    if (appPort === '4502') return `ws://${host}:4503/ws`;
-    // PROD app (4500) → PROD relay (4501)
-    if (appPort === '4500') return `ws://${host}:4501/ws`;
+    const devAppPort = import.meta.env.VITE_DEV_APP_PORT || '4502';
+    const devRelayPort = import.meta.env.VITE_DEV_RELAY_PORT || '4503';
+    const prodAppPort = import.meta.env.VITE_PROD_APP_PORT || '4500';
+    const prodRelayPort = import.meta.env.VITE_PROD_RELAY_PORT || '4501';
+
+    // DEV app → DEV relay
+    if (appPort === devAppPort) return `ws://${host}:${devRelayPort}/ws`;
+    // PROD app → PROD relay
+    if (appPort === prodAppPort) return `ws://${host}:${prodRelayPort}/ws`;
   }
   return import.meta.env.VITE_RELAY_URL || 'ws://localhost:4501/ws';
 };

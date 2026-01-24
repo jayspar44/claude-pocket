@@ -11,12 +11,17 @@ function getRelayBaseUrl() {
     return stored.replace(/^ws:\/\//, 'http://').replace(/\/ws$/, '');
   }
 
-  // Auto-detect based on app port
+  // Auto-detect based on app port (using env vars with fallbacks)
   if (typeof window !== 'undefined' && window.location.port) {
     const appPort = window.location.port;
     const host = window.location.hostname;
-    if (appPort === '4502') return `http://${host}:4503`;
-    if (appPort === '4500') return `http://${host}:4501`;
+    const devAppPort = import.meta.env.VITE_DEV_APP_PORT || '4502';
+    const devRelayPort = import.meta.env.VITE_DEV_RELAY_PORT || '4503';
+    const prodAppPort = import.meta.env.VITE_PROD_APP_PORT || '4500';
+    const prodRelayPort = import.meta.env.VITE_PROD_RELAY_PORT || '4501';
+
+    if (appPort === devAppPort) return `http://${host}:${devRelayPort}`;
+    if (appPort === prodAppPort) return `http://${host}:${prodRelayPort}`;
   }
 
   return import.meta.env.VITE_RELAY_API_URL || DEFAULT_RELAY_URL;
