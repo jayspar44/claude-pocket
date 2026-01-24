@@ -2,6 +2,19 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+### [0.2.2](https://github.com/jayspar44/claude-pocket/compare/v0.2.1...v0.2.2) (2026-01-24)
+
+
+### Features
+
+* full DEV/PROD environment separation ([fa7796a](https://github.com/jayspar44/claude-pocket/commit/fa7796a40e499680fce5a3a9aa0bb2f324e10cb3))
+* separate deploy scripts for PROD and DEV ([6b155eb](https://github.com/jayspar44/claude-pocket/commit/6b155eb81ef06a0fd827ac84625aad7f634e7c88))
+
+
+### Bug Fixes
+
+* add node-pty spawn-helper permission fix to deploy script ([aa12698](https://github.com/jayspar44/claude-pocket/commit/aa12698672434e1a1253be692dcd1865af3413a4))
+
 ### [0.2.1](https://github.com/jayspar44/claude-pocket/compare/v0.2.0...v0.2.1) (2026-01-23)
 
 

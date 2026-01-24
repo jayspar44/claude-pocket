@@ -1,6 +1,6 @@
 {
   "name": "claude-pocket",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "Mobile-first client for Claude Code CLI",
   "main": "relay/src/index.js",
   "scripts": {
