@@ -219,7 +219,10 @@ export function InstanceProvider({ children }) {
     const instance = instances.find(i => i.id === instanceId);
     if (!instance) return;
 
-    if (wsRefs.current[instanceId]?.readyState === WebSocket.OPEN) {
+    // Prevent duplicate connections - check both OPEN and CONNECTING states
+    const existingWs = wsRefs.current[instanceId];
+    if (existingWs?.readyState === WebSocket.OPEN ||
+        existingWs?.readyState === WebSocket.CONNECTING) {
       return;
     }
 
