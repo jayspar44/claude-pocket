@@ -1,9 +1,25 @@
 import { useState, useCallback, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ChevronLeft, Server, Type, RefreshCw, Trash2, Info, Check, Play, Square, FolderOpen, FileX } from 'lucide-react';
+import { ChevronLeft, Server, Type, RefreshCw, Trash2, Info, Check, Play, Square, FolderOpen, FileX, Bell, RotateCcw } from 'lucide-react';
 import { useRelay } from '../hooks/useRelay';
 import { healthApi, filesApi } from '../api/relay-api';
 import { version } from '../../../version.json';
+import { notificationService } from '../services/NotificationService';
+import { storage } from '../utils/storage';
+
+// Environment detection based on relay URL port
+function getEnvironment(url) {
+  if (!url) return null;
+  if (url.includes(':4503')) return 'DEV';
+  if (url.includes(':4501')) return 'PROD';
+  return 'CUSTOM';
+}
+
+const envConfig = {
+  DEV: { color: 'bg-blue-600', text: 'DEV' },
+  PROD: { color: 'bg-orange-600', text: 'PROD' },
+  CUSTOM: { color: 'bg-purple-600', text: 'CUSTOM' },
+};
 
 export default function Settings() {
   const navigate = useNavigate();
@@ -11,10 +27,13 @@ export default function Settings() {
 
   const [relayUrlInput, setRelayUrlInput] = useState(getRelayUrl());
   const [workingDirInput, setWorkingDirInput] = useState(() => {
-    return localStorage.getItem('claude-working-dir') || '';
+    const saved = storage.get('working-dir');
+    if (saved) return saved;
+    // Auto-populate with base path for easier entry
+    return '/Users/jayspar/Documents/projects/';
   });
   const [fontSizeInput, setFontSizeInput] = useState(() => {
-    return localStorage.getItem('terminalFontSize') || '14';
+    return storage.get('fontSize') || '14';
   });
   const [healthInfo, setHealthInfo] = useState(null);
   const [saving, setSaving] = useState(false);
@@ -22,12 +41,9 @@ export default function Settings() {
   const [stopping, setStopping] = useState(false);
   const [cleaning, setCleaning] = useState(false);
   const [recentDirs, setRecentDirs] = useState(() => {
-    try {
-      return JSON.parse(localStorage.getItem('claude-recent-dirs') || '[]');
-    } catch {
-      return [];
-    }
+    return storage.getJSON('recent-dirs', []);
   });
+  const [notificationSettings, setNotificationSettings] = useState(() => notificationService.getSettings());
 
   // Fetch health info periodically
   const fetchHealth = useCallback(() => {
@@ -52,14 +68,14 @@ export default function Settings() {
   const handleSaveFontSize = useCallback(() => {
     const size = parseInt(fontSizeInput, 10);
     if (size >= 8 && size <= 24) {
-      localStorage.setItem('terminalFontSize', fontSizeInput);
+      storage.set('fontSize', fontSizeInput);
     }
   }, [fontSizeInput]);
 
   const addToRecentDirs = useCallback((dir) => {
     const updated = [dir, ...recentDirs.filter(d => d !== dir)].slice(0, 5);
     setRecentDirs(updated);
-    localStorage.setItem('claude-recent-dirs', JSON.stringify(updated));
+    storage.setJSON('recent-dirs', updated);
   }, [recentDirs]);
 
   const handleStartPty = useCallback(async () => {
@@ -72,7 +88,7 @@ export default function Settings() {
       console.log('Starting PTY with workingDir:', workingDirInput.trim());
       const response = await healthApi.startPty(workingDirInput.trim());
       console.log('Start PTY response:', response.data);
-      localStorage.setItem('claude-working-dir', workingDirInput.trim());
+      storage.set('working-dir', workingDirInput.trim());
       addToRecentDirs(workingDirInput.trim());
       fetchHealth();
     } catch (error) {
@@ -112,7 +128,14 @@ export default function Settings() {
 
   const handleClearHistory = useCallback(() => {
     if (confirm('Clear command history?')) {
-      localStorage.removeItem('claude-pocket-command-history');
+      storage.remove('history');
+    }
+  }, []);
+
+  const handleResetAppData = useCallback(() => {
+    if (confirm('Reset all app data? This will clear all settings, instances, and reload the app.')) {
+      localStorage.clear();
+      window.location.reload();
     }
   }, []);
 
@@ -135,6 +158,12 @@ export default function Settings() {
     setWorkingDirInput(dir);
   }, []);
 
+  const handleNotificationSettingChange = useCallback((key, value) => {
+    const newSettings = { ...notificationSettings, [key]: value };
+    setNotificationSettings(newSettings);
+    notificationService.saveSettings(newSettings);
+  }, [notificationSettings]);
+
   const connectionStatusColor = {
     connected: 'text-green-400',
     connecting: 'text-yellow-400',
@@ -155,6 +184,15 @@ export default function Settings() {
           <ChevronLeft className="w-5 h-5" />
         </button>
         <h1 className="text-lg font-semibold text-white">Settings</h1>
+        {(() => {
+          const env = getEnvironment(getRelayUrl());
+          const envStyle = env ? envConfig[env] : null;
+          return envStyle ? (
+            <span className={`px-1.5 py-0.5 text-[10px] font-bold rounded ${envStyle.color} text-white`}>
+              {envStyle.text}
+            </span>
+          ) : null;
+        })()}
       </div>
 
       {/* Content */}
@@ -186,7 +224,7 @@ export default function Settings() {
               type="text"
               value={workingDirInput}
               onChange={(e) => setWorkingDirInput(e.target.value)}
-              placeholder="/path/to/your/project"
+              placeholder="Add project folder name (e.g., claude-pocket)"
               disabled={ptyRunning}
               className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:border-orange-500 disabled:opacity-50"
             />
@@ -262,38 +300,6 @@ export default function Settings() {
           {/* Relay URL */}
           <div className="space-y-2">
             <label className="text-sm text-gray-400">Relay URL</label>
-
-            {/* Quick presets - DEV (4502) and PROD (4501) on minibox */}
-            <div className="flex gap-2">
-              <button
-                onClick={() => {
-                  setRelayUrlInput('ws://minibox.rattlesnake-mimosa.ts.net:4502/ws');
-                  setRelayUrl('ws://minibox.rattlesnake-mimosa.ts.net:4502/ws');
-                }}
-                className={`flex-1 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
-                  relayUrlInput.includes(':4502')
-                    ? 'bg-blue-600 text-white'
-                    : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
-                }`}
-              >
-                DEV (:4502)
-              </button>
-              <button
-                onClick={() => {
-                  setRelayUrlInput('ws://minibox.rattlesnake-mimosa.ts.net:4501/ws');
-                  setRelayUrl('ws://minibox.rattlesnake-mimosa.ts.net:4501/ws');
-                }}
-                className={`flex-1 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
-                  relayUrlInput.includes(':4501')
-                    ? 'bg-orange-600 text-white'
-                    : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
-                }`}
-              >
-                PROD (:4501)
-              </button>
-            </div>
-
-            {/* Custom URL input */}
             <div className="flex gap-2">
               <input
                 type="text"
@@ -311,7 +317,7 @@ export default function Settings() {
               </button>
             </div>
             <p className="text-xs text-gray-500">
-              Tap DEV/PROD to switch, or enter a custom URL
+              Auto-configured based on app port. Override for custom setups.
             </p>
           </div>
         </div>
@@ -342,6 +348,76 @@ export default function Settings() {
           </div>
         </div>
 
+        {/* Notifications */}
+        <div className="bg-gray-800 rounded-xl p-4 space-y-4">
+          <div className="flex items-center gap-2">
+            <Bell className="w-5 h-5 text-yellow-400" />
+            <h2 className="text-white font-medium">Notifications</h2>
+          </div>
+
+          {/* Enable notifications toggle */}
+          <div className="flex items-center justify-between py-2">
+            <div>
+              <span className="text-white">Enable Notifications</span>
+              <p className="text-xs text-gray-400">Get alerts when app is in background</p>
+            </div>
+            <button
+              onClick={() => handleNotificationSettingChange('enabled', !notificationSettings.enabled)}
+              className={`relative w-12 h-6 rounded-full transition-colors ${
+                notificationSettings.enabled ? 'bg-yellow-500' : 'bg-gray-600'
+              }`}
+            >
+              <span
+                className={`absolute top-1 w-4 h-4 rounded-full bg-white transition-transform ${
+                  notificationSettings.enabled ? 'left-7' : 'left-1'
+                }`}
+              />
+            </button>
+          </div>
+
+          {/* Input needed toggle */}
+          <div className={`flex items-center justify-between py-2 ${!notificationSettings.enabled ? 'opacity-50' : ''}`}>
+            <div>
+              <span className="text-white">Input Needed Alerts</span>
+              <p className="text-xs text-gray-400">Notify when Claude is waiting for input</p>
+            </div>
+            <button
+              onClick={() => handleNotificationSettingChange('inputNeeded', !notificationSettings.inputNeeded)}
+              disabled={!notificationSettings.enabled}
+              className={`relative w-12 h-6 rounded-full transition-colors ${
+                notificationSettings.inputNeeded && notificationSettings.enabled ? 'bg-yellow-500' : 'bg-gray-600'
+              }`}
+            >
+              <span
+                className={`absolute top-1 w-4 h-4 rounded-full bg-white transition-transform ${
+                  notificationSettings.inputNeeded ? 'left-7' : 'left-1'
+                }`}
+              />
+            </button>
+          </div>
+
+          {/* Task complete toggle */}
+          <div className={`flex items-center justify-between py-2 ${!notificationSettings.enabled ? 'opacity-50' : ''}`}>
+            <div>
+              <span className="text-white">Long Task Completion</span>
+              <p className="text-xs text-gray-400">Notify when tasks over 60s complete</p>
+            </div>
+            <button
+              onClick={() => handleNotificationSettingChange('taskComplete', !notificationSettings.taskComplete)}
+              disabled={!notificationSettings.enabled}
+              className={`relative w-12 h-6 rounded-full transition-colors ${
+                notificationSettings.taskComplete && notificationSettings.enabled ? 'bg-yellow-500' : 'bg-gray-600'
+              }`}
+            >
+              <span
+                className={`absolute top-1 w-4 h-4 rounded-full bg-white transition-transform ${
+                  notificationSettings.taskComplete ? 'left-7' : 'left-1'
+                }`}
+              />
+            </button>
+          </div>
+        </div>
+
         {/* Data */}
         <div className="bg-gray-800 rounded-xl p-4 space-y-4">
           <div className="flex items-center gap-2">
@@ -367,6 +443,17 @@ export default function Settings() {
           </button>
           <p className="text-xs text-gray-500">
             Deletes uploaded images and temp files in .claude-pocket/
+          </p>
+
+          <button
+            onClick={handleResetAppData}
+            className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-red-600 hover:bg-red-700 rounded-lg text-white transition-colors"
+          >
+            <RotateCcw className="w-5 h-5" />
+            <span>Reset App Data & Reload</span>
+          </button>
+          <p className="text-xs text-gray-500">
+            Clears all localStorage and reloads app with fresh defaults
           </p>
         </div>
 

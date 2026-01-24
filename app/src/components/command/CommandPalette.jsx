@@ -2,23 +2,19 @@ import { useState, useEffect, useCallback, useMemo } from 'react';
 import { X, Search, Terminal } from 'lucide-react';
 import { commandsApi } from '../../api/relay-api';
 import { SYSTEM_COMMANDS } from '../../constants/system-commands';
+import { storage } from '../../utils/storage';
 
-const CACHE_KEY = 'claude-pocket-repo-commands';
+const CACHE_KEY = 'repo-cmds';
 
-// Get cached commands from localStorage
+// Get cached commands from storage
 function getCachedCommands() {
-  try {
-    const cached = localStorage.getItem(CACHE_KEY);
-    return cached ? JSON.parse(cached) : [];
-  } catch {
-    return [];
-  }
+  return storage.getJSON(CACHE_KEY, []);
 }
 
-// Save commands to localStorage cache
+// Save commands to storage cache
 function setCachedCommands(commands) {
   try {
-    localStorage.setItem(CACHE_KEY, JSON.stringify(commands));
+    storage.setJSON(CACHE_KEY, commands);
   } catch {
     // Ignore storage errors
   }

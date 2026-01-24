@@ -2,11 +2,11 @@ import { Wifi, WifiOff, RefreshCw, Settings, Terminal, TerminalSquare } from 'lu
 import { Link } from 'react-router-dom';
 import { useRelay } from '../contexts/RelayContext';
 
-// Determine environment from relay URL (by port number)
+// Determine environment from relay URL (by relay port number)
 function getEnvironment(url) {
   if (!url) return null;
-  if (url.includes(':4502')) return 'DEV';
-  if (url.includes(':4501')) return 'PROD';
+  if (url.includes(':4503')) return 'DEV';   // DEV relay port
+  if (url.includes(':4501')) return 'PROD';  // PROD relay port
   return 'CUSTOM';
 }
 

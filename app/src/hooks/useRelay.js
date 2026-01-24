@@ -21,6 +21,12 @@ export function useTerminalRelay(terminalRef) {
   const isSubscribedRef = useRef(false);
   const hasRequestedReplayRef = useRef(false);
 
+  // Keep addMessageListener ref stable to avoid re-subscribing
+  const addMessageListenerRef = useRef(addMessageListener);
+  useEffect(() => {
+    addMessageListenerRef.current = addMessageListener;
+  }, [addMessageListener]);
+
   // Handle incoming messages
   // xterm.js handles all terminal state internally - just write data as it arrives
   useEffect(() => {
@@ -28,7 +34,7 @@ export function useTerminalRelay(terminalRef) {
     if (isSubscribedRef.current) return;
     isSubscribedRef.current = true;
 
-    const unsubscribe = addMessageListener((message) => {
+    const unsubscribe = addMessageListenerRef.current((message) => {
       const terminal = terminalRef.current;
       if (!terminal) return;
 
@@ -70,7 +76,7 @@ export function useTerminalRelay(terminalRef) {
       isSubscribedRef.current = false;
       hasRequestedReplayRef.current = false;
     };
-  }, [addMessageListener, terminalRef]);
+  }, [terminalRef]); // Removed addMessageListener from deps - using ref instead
 
   // Request replay when connected and listener is subscribed
   // This fixes the race condition where replay is sent before listener is ready

@@ -16,6 +16,10 @@
         },
         "SystemBars": {
             "insetsHandling": "disable"
+        },
+        "LocalNotifications": {
+            "smallIcon": "ic_notification",
+            "sound": "default"
         }
     }
 }

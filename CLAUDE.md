@@ -106,15 +106,16 @@ The script handles: env setup, PM2 install, build, start, auto-restart on crash.
 **Access:**
 | Service | URL | Port |
 |---------|-----|------|
-| App | `http://minibox.rattlesnake-mimosa.ts.net:4500` | 4500 |
+| PROD App | `http://minibox.rattlesnake-mimosa.ts.net:4500` | 4500 |
 | PROD Relay | `ws://minibox.rattlesnake-mimosa.ts.net:4501/ws` | 4501 |
-| DEV Relay | `ws://minibox.rattlesnake-mimosa.ts.net:4502/ws` | 4502 |
+| DEV App | `http://minibox.rattlesnake-mimosa.ts.net:4502` | 4502 |
+| DEV Relay | `ws://minibox.rattlesnake-mimosa.ts.net:4503/ws` | 4503 |
 
-**Dual Relay Setup:** Two relay instances run simultaneously for separate Claude sessions:
-- **PROD (4501)**: Main work session
-- **DEV (4502)**: Secondary session for testing
+**Dual App + Relay Setup:** Two complete instances for independent testing:
+- **PROD (App:4500 → Relay:4501)**: Stable, always running
+- **DEV (App:4502 → Relay:4503)**: For testing UI and relay changes
 
-Both share the same project directory but maintain separate PTY processes and output buffers. Switch between them in Settings using the DEV/PROD buttons.
+Both apps serve the same build but can be rebuilt/restarted independently. Each relay maintains its own PTY process and output buffer.
 
 **PM2 Commands:**
 | Command | Description |

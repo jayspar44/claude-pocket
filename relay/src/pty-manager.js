@@ -34,11 +34,15 @@ class PtyManager {
     this.lastOutputLines = []; // Keep last 10 lines for crash diagnosis
     // Option detection state
     this.lastDetectedOptions = null;
+    this.lastOptionsSetTime = 0; // Track when options were set for grace period
     // Idle state tracking for option detection
     this.isIdle = false;
     this.lastOutputTime = 0;
     this.idleTimer = null;
     this.optionExpiryTimer = null;
+    // Long task tracking for notifications
+    this.lastUserInputTime = 0;
+    this.processingStartTime = null;
   }
 
   start(workingDir) {
@@ -222,6 +226,9 @@ class PtyManager {
   write(data) {
     if (this.ptyProcess) {
       this.ptyProcess.write(data);
+      // Track user input time for long task detection
+      this.lastUserInputTime = Date.now();
+      this.processingStartTime = Date.now();
       // Clear detected options when user sends input
       if (this.lastDetectedOptions) {
         this.clearDetectedOptions();
@@ -302,8 +309,13 @@ class PtyManager {
 
     // Clear options on substantive new output (user typed, Claude responding)
     // This prevents stale options from persisting during new conversation flow
+    // But wait for grace period to avoid clearing options that were just detected
     const cleanData = data.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '');
-    if (cleanData.length >= config.optionDetection.minSubstantiveChars && this.lastDetectedOptions) {
+    const OPTION_GRACE_PERIOD_MS = 500;
+    const optionAge = Date.now() - this.lastOptionsSetTime;
+    if (cleanData.length >= config.optionDetection.minSubstantiveChars &&
+        this.lastDetectedOptions &&
+        optionAge > OPTION_GRACE_PERIOD_MS) {
       this.clearDetectedOptions();
     }
 
@@ -344,17 +356,37 @@ class PtyManager {
     // Only detect options when PTY is idle (Claude waiting for input)
     if (!this.isIdle) return;
 
-    const options = this.detectNumberedOptions();
+    // Check for long task completion
+    if (this.processingStartTime) {
+      const processingDuration = Date.now() - this.processingStartTime;
+      if (processingDuration >= config.longTask.thresholdMs) {
+        logger.debug({ duration: processingDuration }, 'Long task completed');
+        this.broadcast({
+          type: 'task-complete',
+          duration: processingDuration,
+        });
+      }
+      this.processingStartTime = null;
+    }
+
+    const detection = this.detectNumberedOptions();
 
     // Only broadcast if options changed
-    const optionsKey = options ? options.join(',') : '';
+    const optionsKey = detection ? detection.options.join(',') : '';
     const lastKey = this.lastDetectedOptions ? this.lastDetectedOptions.join(',') : '';
 
     if (optionsKey !== lastKey) {
-      this.lastDetectedOptions = options;
-      this.broadcast({ type: 'options-detected', options: options || [] });
-      if (options) {
-        logger.debug({ options }, 'Detected numbered options');
+      this.lastDetectedOptions = detection?.options || null;
+      this.lastOptionsSetTime = detection ? Date.now() : 0; // Track when options were set
+      this.broadcast({
+        type: 'options-detected',
+        options: detection?.options || [],
+        confidence: detection?.confidence || 0,
+        context: detection?.context || 'unknown',
+        triggerPhrase: detection?.triggerPhrase || null,
+      });
+      if (detection) {
+        logger.debug({ options: detection.options, confidence: detection.confidence }, 'Detected numbered options');
         // Schedule auto-expiry
         this.scheduleOptionExpiry();
       }
@@ -391,31 +423,74 @@ class PtyManager {
       return null;
     }
 
-    // Improved pattern: require capital letter after number to filter out code/markdown
-    // Matches: "1.", "1)", "1:", "[1]", "(1)" followed by space and capital letter
-    const pattern = /(?:^|\n)\s*(?:(\d)[.):\]]\s+[A-Z]|\[(\d)\]\s+[A-Z]|\((\d)\)\s+[A-Z])/gm;
-    const numbers = new Set();
+    let confidence = 0;
+    let context = 'unknown';
+    let triggerPhrase = null;
 
-    let match;
-    while ((match = pattern.exec(clean)) !== null) {
-      const num = parseInt(match[1] || match[2] || match[3]);
-      if (num >= 1 && num <= 9) numbers.add(num);
+    // Check for trigger phrases (high confidence)
+    for (const pattern of config.optionDetection.triggerPhrases) {
+      const match = clean.match(pattern);
+      if (match) {
+        confidence += 30;
+        context = pattern.source.includes('\\?') ? 'question' : 'menu';
+        triggerPhrase = match[0].trim();
+        break;
+      }
     }
 
-    // Only return if we found sequential options starting from 1
-    if (numbers.size >= 2 && numbers.has(1)) {
-      const sorted = Array.from(numbers).sort((a, b) => a - b);
-      // Verify they're mostly sequential (allow gaps of 1)
-      let isSequential = true;
-      for (let i = 1; i < sorted.length; i++) {
-        if (sorted[i] - sorted[i - 1] > 2) {
-          isSequential = false;
+    // Find numbered lines using relaxed patterns
+    const numbers = new Set();
+    const lines = clean.split('\n');
+
+    for (const line of lines) {
+      const trimmed = line.trim();
+      for (const pattern of config.optionDetection.numberPatterns) {
+        const match = trimmed.match(pattern);
+        if (match) {
+          const num = parseInt(match[1]);
+          if (num >= 1 && num <= 9) numbers.add(num);
           break;
         }
       }
-      if (isSequential) {
-        return sorted;
+    }
+
+    if (numbers.size < 2) return null;
+
+    const sorted = Array.from(numbers).sort((a, b) => a - b);
+
+    // Boost confidence for sequential numbers
+    let isSequential = true;
+    for (let i = 1; i < sorted.length; i++) {
+      if (sorted[i] - sorted[i - 1] > 2) {
+        isSequential = false;
+        break;
       }
+    }
+    if (isSequential && sorted[0] === 1) confidence += 20;
+
+    // Boost for status indicators
+    for (const pattern of config.optionDetection.confidencePatterns) {
+      if (pattern.test(clean)) {
+        confidence += 15;
+        if (context === 'unknown') context = 'menu';
+        break;
+      }
+    }
+
+    // Boost for capital letters after numbers (original heuristic)
+    const capitalPattern = /(?:^|\n)\s*(?:(\d)[.):\]]\s+[A-Z]|\[(\d)\]\s+[A-Z]|\((\d)\)\s+[A-Z])/gm;
+    if (capitalPattern.test(clean)) {
+      confidence += 15;
+    }
+
+    // Only detect if confidence meets threshold
+    if (confidence >= config.optionDetection.confidenceThreshold) {
+      return {
+        options: sorted,
+        confidence,
+        context,
+        triggerPhrase,
+      };
     }
 
     return null;
@@ -423,7 +498,13 @@ class PtyManager {
 
   clearDetectedOptions() {
     this.lastDetectedOptions = null;
-    this.broadcast({ type: 'options-detected', options: [] });
+    this.broadcast({
+      type: 'options-detected',
+      options: [],
+      confidence: 0,
+      context: 'unknown',
+      triggerPhrase: null,
+    });
     // Clear expiry timer
     if (this.optionExpiryTimer) {
       clearTimeout(this.optionExpiryTimer);
@@ -438,6 +519,7 @@ class PtyManager {
       bufferSize: this.outputBufferSize,
       bufferLines: this.outputBuffer.join('').split('\n').length,
       workingDir: this.currentWorkingDir,
+      processingStartTime: this.processingStartTime,
     };
   }
 

@@ -8,17 +8,15 @@ cd "$PROJECT_DIR"
 echo "=== Claude Pocket Deployment ==="
 echo "Project: $PROJECT_DIR"
 echo ""
+echo "Folder structure:"
+echo "  PROD: $PROJECT_DIR (this folder)"
+echo "  DEV:  $PROJECT_DIR-dev (separate folder)"
+echo ""
 
 # Check if relay/.env exists, create from production template if not
 if [ ! -f relay/.env ]; then
   echo "Creating relay/.env from production template..."
   cp relay/.env.production relay/.env
-fi
-
-# Set WORKING_DIR to project directory if not already set
-if ! grep -q "^WORKING_DIR=" relay/.env; then
-  echo "Setting WORKING_DIR=$PROJECT_DIR"
-  echo "WORKING_DIR=$PROJECT_DIR" >> relay/.env
 fi
 
 # Install PM2 globally if not present
@@ -33,15 +31,27 @@ echo ""
 echo "Installing dependencies..."
 npm run install-all
 
-# Build app for production
+# Build PROD app
 echo ""
-echo "Building app..."
+echo "Building PROD app..."
 cd app && npm run build && cd ..
+
+# Build DEV app if the folder exists
+DEV_DIR="$PROJECT_DIR-dev"
+if [ -d "$DEV_DIR" ]; then
+  echo ""
+  echo "Building DEV app..."
+  cd "$DEV_DIR/app" && npm run build && cd "$PROJECT_DIR"
+else
+  echo ""
+  echo "Note: DEV folder not found at $DEV_DIR"
+  echo "DEV instance will not be available until you set up the folder."
+fi
 
 # Stop existing processes
 echo ""
 echo "Stopping existing processes..."
-pm2 delete claude-pocket-relay claude-pocket-relay-dev claude-pocket-app 2>/dev/null || true
+pm2 delete claude-pocket-relay claude-pocket-relay-dev claude-pocket-app claude-pocket-app-dev 2>/dev/null || true
 
 # Start with ecosystem config
 echo ""
@@ -61,9 +71,10 @@ echo ""
 echo "=== Deployment Complete ==="
 echo ""
 echo "Access:"
-echo "  App:        http://$(hostname):4500"
+echo "  PROD App:   http://$(hostname):4500"
 echo "  PROD Relay: http://$(hostname):4501"
-echo "  DEV Relay:  http://$(hostname):4502"
+echo "  DEV App:    http://$(hostname):4502"
+echo "  DEV Relay:  http://$(hostname):4503"
 echo "  Tailscale:  http://$(hostname).rattlesnake-mimosa.ts.net:4500"
 echo ""
 echo "Commands:"

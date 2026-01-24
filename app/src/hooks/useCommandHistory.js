@@ -1,24 +1,20 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
+import { storage } from '../utils/storage';
 
-const HISTORY_KEY = 'claude-pocket-command-history';
+const HISTORY_KEY = 'history';
 const MAX_HISTORY = 100;
 
 export function useCommandHistory() {
   const [history, setHistory] = useState(() => {
-    try {
-      const stored = localStorage.getItem(HISTORY_KEY);
-      return stored ? JSON.parse(stored) : [];
-    } catch {
-      return [];
-    }
+    return storage.getJSON(HISTORY_KEY, []);
   });
 
   const indexRef = useRef(-1);
 
-  // Save history to localStorage whenever it changes
+  // Save history to storage whenever it changes
   useEffect(() => {
     try {
-      localStorage.setItem(HISTORY_KEY, JSON.stringify(history));
+      storage.setJSON(HISTORY_KEY, history);
     } catch (e) {
       console.error('Failed to save command history:', e);
     }
@@ -68,7 +64,7 @@ export function useCommandHistory() {
   const clearHistory = useCallback(() => {
     setHistory([]);
     indexRef.current = -1;
-    localStorage.removeItem(HISTORY_KEY);
+    storage.remove(HISTORY_KEY);
   }, []);
 
   return {

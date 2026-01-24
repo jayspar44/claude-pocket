@@ -29,8 +29,38 @@ const config = {
   optionDetection: {
     idleThresholdMs: 200,    // Wait for output to settle before detecting
     expiryMs: 30000,         // Auto-clear options after 30s
-    minSubstantiveChars: 20, // Min chars to consider "substantive" output
+    minSubstantiveChars: 50, // Min chars to consider "substantive" output
     bufferLookback: 1500,    // Chars to scan for options
+    confidenceThreshold: 30, // Min confidence score to detect options
+
+    // Trigger phrases that indicate options follow
+    triggerPhrases: [
+      /(?:choose|select|pick)\s+(?:one|an option|from)/i,
+      /which\s+(?:one|option|would you)/i,
+      /enter\s+(?:your\s+)?choice/i,
+      /available\s+options/i,
+      /\?\s*$/m, // Question mark at end of line
+    ],
+
+    // Number patterns (relaxed - no capital letter required)
+    numberPatterns: [
+      /^(\d)[.):\]]\s+\S/,     // 1. text, 1) text, 1: text
+      /^\[(\d)\]\s+\S/,        // [1] text
+      /^\((\d)\)\s+\S/,        // (1) text
+      /^[❯►→]\s*(\d)[.)]\s+\S/, // ❯ 1. text (cursor prefix)
+    ],
+
+    // Confidence boosters
+    confidencePatterns: [
+      /[✔✓✗✘●○]/,              // Status indicators
+      /\s+·\s+/,               // Separator dots
+      /connected|failed|pending/i, // Status words
+    ],
+  },
+
+  // Long task detection for notifications
+  longTask: {
+    thresholdMs: 60000,      // 60s before considering a task "long"
   },
 
   // CORS configuration

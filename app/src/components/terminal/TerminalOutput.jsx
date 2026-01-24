@@ -1,4 +1,4 @@
-import { useEffect, useRef, useImperativeHandle, forwardRef, useState, useCallback } from 'react';
+import { useEffect, useRef, useImperativeHandle, forwardRef, useState, useCallback, useMemo } from 'react';
 import { AnsiUp } from 'ansi_up';
 import { ChevronDown } from 'lucide-react';
 
@@ -8,18 +8,19 @@ const TerminalOutput = forwardRef(function TerminalOutput(
 ) {
   const containerRef = useRef(null);
   const contentRef = useRef(null);
-  const ansiUpRef = useRef(null);
   const linesRef = useRef([]);        // Completed lines
   const currentLineRef = useRef('');  // Current incomplete line
   const [renderedHtml, setRenderedHtml] = useState('');
   const [showScrollButton, setShowScrollButton] = useState(false);
   const shouldAutoScroll = useRef(true);
 
-  // Initialize AnsiUp (using == null pattern for safe ref initialization)
-  if (ansiUpRef.current == null) {
-    ansiUpRef.current = new AnsiUp();
-    ansiUpRef.current.use_classes = true;
-  }
+  // Initialize AnsiUp with useMemo to avoid ref access during render
+  const ansiUp = useMemo(() => {
+    const instance = new AnsiUp();
+    instance.use_classes = true;
+    return instance;
+  }, []);
+  const ansiUpRef = useRef(ansiUp);
 
   // Line-aware append - handles \r for spinner overwriting
   const appendData = useCallback((data) => {

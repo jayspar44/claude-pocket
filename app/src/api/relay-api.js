@@ -1,13 +1,24 @@
 import axios from 'axios';
+import { storage } from '../utils/storage';
 
 const DEFAULT_RELAY_URL = 'http://localhost:4501';
 
 function getRelayBaseUrl() {
-  const stored = localStorage.getItem('relayUrl');
+  // Check port-prefixed storage first
+  const stored = storage.get('relayUrl');
   if (stored) {
     // Convert ws:// to http:// for REST API
     return stored.replace(/^ws:\/\//, 'http://').replace(/\/ws$/, '');
   }
+
+  // Auto-detect based on app port
+  if (typeof window !== 'undefined' && window.location.port) {
+    const appPort = window.location.port;
+    const host = window.location.hostname;
+    if (appPort === '4502') return `http://${host}:4503`;
+    if (appPort === '4500') return `http://${host}:4501`;
+  }
+
   return import.meta.env.VITE_RELAY_API_URL || DEFAULT_RELAY_URL;
 }
 

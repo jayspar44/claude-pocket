@@ -7,6 +7,8 @@ import QuickActions from '../components/input/QuickActions';
 import StatusBar from '../components/StatusBar';
 import { CommandPalette } from '../components/command';
 import { MobileFilePicker, ImagePicker } from '../components/files';
+import { InstanceTabBar, InstanceManager } from '../components/instance';
+import { storage } from '../utils/storage';
 
 function Terminal() {
   const terminalRef = useRef(null);
@@ -18,7 +20,7 @@ function Terminal() {
   const { connect, detectedOptions } = useRelay();
   const viewportHeight = useViewportHeight();
   const [fontSize] = useState(() => {
-    const stored = localStorage.getItem('terminalFontSize');
+    const stored = storage.get('fontSize');
     return stored ? parseInt(stored, 10) : 14;
   });
 
@@ -51,6 +53,8 @@ function Terminal() {
   const [showCommands, setShowCommands] = useState(false);
   const [showFiles, setShowFiles] = useState(false);
   const [showImagePicker, setShowImagePicker] = useState(false);
+  const [showInstanceManager, setShowInstanceManager] = useState(false);
+  const [editInstanceId, setEditInstanceId] = useState(null);
 
   // Ctrl modifier state
   const [ctrlActive, setCtrlActive] = useState(false);
@@ -139,6 +143,11 @@ function Terminal() {
     setShowImagePicker(false);
   }, []);
 
+  const handleManageInstance = useCallback((instanceId) => {
+    setEditInstanceId(instanceId || null);
+    setShowInstanceManager(true);
+  }, []);
+
   return (
     <div
       ref={containerRef}
@@ -147,6 +156,9 @@ function Terminal() {
     >
       {/* Status Bar */}
       <StatusBar connectionState={connectionState} ptyStatus={ptyStatus} onReconnect={connect} />
+
+      {/* Instance Tab Bar */}
+      <InstanceTabBar onManageClick={handleManageInstance} />
 
       {/* Terminal - flex-1 with min-h-0 allows it to shrink/grow */}
       <div className="flex-1 min-h-0 overflow-hidden">
@@ -194,6 +206,15 @@ function Terminal() {
         isOpen={showImagePicker}
         onClose={() => setShowImagePicker(false)}
         onUpload={handleImageUpload}
+      />
+
+      <InstanceManager
+        isOpen={showInstanceManager}
+        onClose={() => {
+          setShowInstanceManager(false);
+          setEditInstanceId(null);
+        }}
+        editInstanceId={editInstanceId}
       />
     </div>
   );
