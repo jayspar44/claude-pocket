@@ -1,4 +1,4 @@
-import { Wifi, WifiOff, RefreshCw, Settings, Terminal, TerminalSquare, AlertCircle, Plus } from 'lucide-react';
+import { Wifi, WifiOff, RefreshCw, Settings, Terminal, TerminalSquare, AlertCircle, Layers } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { useRelay } from '../contexts/RelayContext';
 
@@ -113,9 +113,9 @@ function StatusBar({ connectionState, ptyStatus, workingDir, ptyError, onReconne
           <button
             onClick={onAddInstance}
             className="p-1.5 text-gray-400 hover:text-white hover:bg-gray-700 rounded-md transition-colors"
-            aria-label="Add instance"
+            aria-label="Instance manager"
           >
-            <Plus className="w-4 h-4" />
+            <Layers className="w-4 h-4" />
           </button>
           <Link
             to="/settings"

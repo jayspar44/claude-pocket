@@ -201,7 +201,7 @@ function InstanceManager({ isOpen, onClose, editInstanceId, startInAddMode }) {
       onClick={handleClose}
     >
       <div
-        className="w-full max-w-lg bg-gray-800 rounded-t-2xl max-h-[80vh] flex flex-col animate-slide-up safe-area-top"
+        className="w-full max-w-lg bg-gray-800 rounded-t-2xl max-h-[80vh] flex flex-col animate-slide-up"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}

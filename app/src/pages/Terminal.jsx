@@ -67,15 +67,17 @@ function Terminal() {
     // Only check once after initial connection
     if (hasAutoOpenedRef.current) return;
     if (connectionState !== 'connected') return;
+    // Wait until we receive PTY status from server (not just undefined)
+    if (ptyStatus === undefined || ptyStatus === null) return;
 
-    // If connected but PTY not running, open instance manager
-    if (!ptyStatus?.running) {
+    // If connected and PTY status received but not running, open instance manager
+    if (!ptyStatus.running) {
       hasAutoOpenedRef.current = true;
       setShowInstanceManager(true);
     } else {
       hasAutoOpenedRef.current = true;
     }
-  }, [connectionState, ptyStatus?.running]);
+  }, [connectionState, ptyStatus]);
 
   const handleResize = useCallback((cols, rows) => {
     sendResize(cols, rows);
