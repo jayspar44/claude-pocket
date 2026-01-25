@@ -97,6 +97,9 @@ export const instancesApi = {
 
   // Delete an instance
   delete: (instanceId) => relayApi.delete(`/api/instances/${instanceId}`),
+
+  // Stop and delete all instances
+  deleteAll: () => relayApi.delete('/api/instances'),
 };
 
 export default relayApi;

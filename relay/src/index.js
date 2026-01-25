@@ -125,6 +125,25 @@ app.delete('/api/instances/:instanceId', (req, res) => {
   }
 });
 
+// Stop and delete ALL instances
+app.delete('/api/instances', (req, res) => {
+  try {
+    const instances = ptyRegistry.listInstances();
+    const removed = [];
+
+    for (const instance of instances) {
+      if (ptyRegistry.remove(instance.instanceId)) {
+        removed.push(instance.instanceId);
+      }
+    }
+
+    logger.info({ count: removed.length }, 'Stopped all PTY instances');
+    res.json({ success: true, removed, count: removed.length });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // Get instance status
 app.get('/api/instances/:instanceId', (req, res) => {
   try {

@@ -1,8 +1,8 @@
 import { useState, useCallback, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ChevronLeft, Server, Type, Trash2, Info, Check, FileX, Bell, RotateCcw } from 'lucide-react';
+import { ChevronLeft, Server, Type, Trash2, Info, Check, FileX, Bell, RotateCcw, Square } from 'lucide-react';
 import { useRelay } from '../hooks/useRelay';
-import { healthApi, filesApi } from '../api/relay-api';
+import { healthApi, filesApi, instancesApi } from '../api/relay-api';
 import { version } from '../../../version.json';
 import { notificationService } from '../services/NotificationService';
 import { storage } from '../utils/storage';
@@ -32,6 +32,7 @@ export default function Settings() {
   const [healthInfo, setHealthInfo] = useState(null);
   const [saving, setSaving] = useState(false);
   const [cleaning, setCleaning] = useState(false);
+  const [stoppingAll, setStoppingAll] = useState(false);
   const [notificationSettings, setNotificationSettings] = useState(() => notificationService.getSettings());
 
   // Fetch health info periodically
@@ -87,6 +88,21 @@ export default function Settings() {
       alert(error.response?.data?.error || 'Failed to cleanup files');
     }
     setCleaning(false);
+  }, []);
+
+  const handleStopAllInstances = useCallback(async () => {
+    if (!confirm('Stop all Claude Code instances on the relay? This will terminate all running sessions.')) {
+      return;
+    }
+    setStoppingAll(true);
+    try {
+      const response = await instancesApi.deleteAll();
+      alert(`Stopped ${response.data.count} instance(s)`);
+    } catch (error) {
+      console.error('Failed to stop instances:', error);
+      alert(error.response?.data?.error || 'Failed to stop instances');
+    }
+    setStoppingAll(false);
   }, []);
 
   const handleNotificationSettingChange = useCallback((key, value) => {
@@ -270,8 +286,20 @@ export default function Settings() {
           </div>
 
           <button
+            onClick={handleStopAllInstances}
+            disabled={stoppingAll || connectionState !== 'connected'}
+            className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-red-600/20 hover:bg-red-600/30 disabled:opacity-50 rounded-lg text-red-400 transition-colors"
+          >
+            <Square className={`w-5 h-5 ${stoppingAll ? 'animate-pulse' : ''}`} />
+            <span>{stoppingAll ? 'Stopping...' : 'Stop All Server Instances'}</span>
+          </button>
+          <p className="text-xs text-gray-500">
+            Stops all Claude Code PTY processes on the relay server
+          </p>
+
+          <button
             onClick={handleClearHistory}
-            className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-red-600/20 hover:bg-red-600/30 rounded-lg text-red-400 transition-colors"
+            className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-orange-600/20 hover:bg-orange-600/30 rounded-lg text-orange-400 transition-colors"
           >
             <Trash2 className="w-5 h-5" />
             <span>Clear Command History</span>
