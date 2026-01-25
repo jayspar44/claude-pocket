@@ -1,7 +1,6 @@
 import { useState, useCallback, useEffect } from 'react';
 import { X, Plus, Trash2, Edit2, Check, Server, FolderOpen, Play, Square, RotateCw, Clock } from 'lucide-react';
 import { useInstance } from '../../contexts/InstanceContext';
-import { useRelay } from '../../contexts/RelayContext';
 import { healthApi } from '../../api/relay-api';
 import { storage } from '../../utils/storage';
 
@@ -33,7 +32,6 @@ function InstanceManager({ isOpen, onClose, editInstanceId, startInAddMode }) {
     getInstanceState,
   } = useInstance();
 
-  const { ptyStatus } = useRelay();
   const [ptyLoading, setPtyLoading] = useState(false);
   const [recentDirs, setRecentDirs] = useState(() => storage.getJSON('recent-dirs', []));
 
@@ -228,7 +226,9 @@ function InstanceManager({ isOpen, onClose, editInstanceId, startInAddMode }) {
                 const state = getInstanceState(instance.id);
                 const isActive = instance.id === activeInstanceId;
                 const isConnected = state.connectionState === 'connected';
-                const isPtyRunning = isActive && ptyStatus?.running;
+                // Use per-instance PTY status, not just active instance
+                const instancePtyStatus = state.ptyStatus;
+                const isPtyRunning = instancePtyStatus?.running;
 
                 return (
                   <div
@@ -271,8 +271,8 @@ function InstanceManager({ isOpen, onClose, editInstanceId, startInAddMode }) {
                       }`}
                     />
 
-                    {/* PTY controls for active instance */}
-                    {isActive && isConnected && (
+                    {/* PTY controls for connected instances */}
+                    {isConnected && (
                       <div className="flex items-center gap-1">
                         {isPtyRunning ? (
                           <>
