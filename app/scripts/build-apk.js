@@ -36,9 +36,9 @@ const configPath = join(frontendDir, 'capacitor.config.json');
 // Default: ~/apks (cross-platform home directory)
 const APK_OUTPUT_PATH = process.env.APK_OUTPUT_PATH || join(homedir(), 'apks');
 
-// App configuration - UPDATE THESE VALUES
-const APP_ID_BASE = '{{APP_ID_BASE}}';
-const APP_NAME = '{{PROJECT_NAME}}';
+// App configuration
+const APP_ID_BASE = 'com.claudecode.pocket';
+const APP_NAME = 'Claude Pocket';
 
 // ANSI color codes
 const colors = {
@@ -60,13 +60,13 @@ const VALID_BUILD_TYPES = ['debug', 'release'];
 const flavorConfigs = {
   local: {
     appId: `${APP_ID_BASE}.local`,
-    appName: `${APP_NAME} Local`,
+    appName: `${APP_NAME} (local)`,
     server: { androidScheme: 'http', cleartext: true },
     buildMode: 'android-local'
   },
   dev: {
     appId: `${APP_ID_BASE}.dev`,
-    appName: `${APP_NAME} Dev`,
+    appName: `${APP_NAME} (dev)`,
     server: { androidScheme: 'https' },
     buildMode: 'dev'
   },

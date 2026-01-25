@@ -40,14 +40,14 @@ const colors = {
   bgRed: '\x1b[41m',
 };
 
-// Environment configurations - UPDATE APP_ID_BASE with your app ID
-const APP_ID_BASE = '{{APP_ID_BASE}}';
-const APP_NAME = '{{PROJECT_TITLE}}';
+// Environment configurations
+const APP_ID_BASE = 'com.claudecode.pocket';
+const APP_NAME = 'Claude Pocket';
 
 const configs = {
   local: {
     appId: `${APP_ID_BASE}.local`,
-    appName: `${APP_NAME} Local`,
+    appName: `${APP_NAME} (local)`,
     webDir: 'dist',
     server: {
       androidScheme: 'http',
@@ -62,7 +62,7 @@ const configs = {
   },
   'local-livereload': {
     appId: `${APP_ID_BASE}.local`,
-    appName: `${APP_NAME} Local`,
+    appName: `${APP_NAME} (local)`,
     webDir: 'dist',
     server: {
       url: 'http://10.0.2.2:4500',
@@ -76,7 +76,7 @@ const configs = {
   },
   dev: {
     appId: `${APP_ID_BASE}.dev`,
-    appName: `${APP_NAME} Dev`,
+    appName: `${APP_NAME} (dev)`,
     webDir: 'dist',
     server: {
       androidScheme: 'https'
