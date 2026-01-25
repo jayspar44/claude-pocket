@@ -111,6 +111,14 @@ export default function Settings() {
     notificationService.saveSettings(newSettings);
   }, [notificationSettings]);
 
+  const handleTestNotification = useCallback(async () => {
+    await notificationService.notify({
+      title: 'Test Notification',
+      body: 'Notifications are working!',
+      type: 'input-needed',
+    });
+  }, []);
+
   const connectionStatusColor = {
     connected: 'text-green-400',
     connecting: 'text-yellow-400',
@@ -276,6 +284,14 @@ export default function Settings() {
               />
             </button>
           </div>
+
+          {/* Test notification button */}
+          <button
+            onClick={handleTestNotification}
+            className="w-full px-4 py-2 bg-yellow-600/20 hover:bg-yellow-600/30 rounded-lg text-yellow-400 text-sm transition-colors"
+          >
+            Send Test Notification
+          </button>
         </div>
 
         {/* Data */}
