@@ -113,7 +113,9 @@ class PtyManager {
         this.queueOutput(data);
 
         // Track last lines for crash diagnosis (strip ANSI codes for readability)
-        const cleanData = data.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '');
+        const cleanData = data
+          .replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '')           // CSI sequences
+          .replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, ''); // OSC sequences (hyperlinks)
         const lines = cleanData.split('\n').filter(l => l.trim());
         for (const line of lines) {
           this.lastOutputLines.push(line.substring(0, 200)); // Limit line length
@@ -428,8 +430,10 @@ class PtyManager {
     const fullBuffer = this.getBufferedOutput();
     const recentBuffer = fullBuffer.slice(-config.optionDetection.bufferLookback);
 
-    // Strip ANSI codes for clean parsing
-    const clean = recentBuffer.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '');
+    // Strip ANSI codes for clean parsing (CSI and OSC sequences including hyperlinks)
+    const clean = recentBuffer
+      .replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '')           // CSI sequences: ESC[...m
+      .replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, ''); // OSC sequences: ESC]...BEL or ST
 
     // Skip if inside a code block (odd number of ```)
     const codeBlockCount = (clean.match(/```/g) || []).length;

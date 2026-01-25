@@ -22,7 +22,7 @@ function Terminal() {
   const viewportHeight = useViewportHeight();
   const [fontSize] = useState(() => {
     const stored = storage.get('fontSize');
-    return stored ? parseInt(stored, 10) : 14;
+    return stored ? parseInt(stored, 10) : 12;
   });
 
   // Refit terminal when viewport changes (keyboard show/hide)
