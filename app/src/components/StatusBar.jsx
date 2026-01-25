@@ -1,4 +1,4 @@
-import { Wifi, WifiOff, RefreshCw, Settings, Terminal, TerminalSquare, AlertCircle } from 'lucide-react';
+import { Wifi, WifiOff, RefreshCw, Settings, Terminal, TerminalSquare, AlertCircle, Plus } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { useRelay } from '../contexts/RelayContext';
 
@@ -40,7 +40,7 @@ const ptyConfig = {
   stopped: { color: 'bg-gray-500', icon: TerminalSquare, label: 'Stopped' },
 };
 
-function StatusBar({ connectionState, ptyStatus, workingDir, ptyError, onReconnect }) {
+function StatusBar({ connectionState, ptyStatus, workingDir, ptyError, onReconnect, onAddInstance }) {
   const { getRelayUrl } = useRelay();
   const connStatus = connectionConfig[connectionState] || connectionConfig.disconnected;
   const ConnIcon = connStatus.icon;
@@ -110,6 +110,13 @@ function StatusBar({ connectionState, ptyStatus, workingDir, ptyError, onReconne
               <span>Reconnect</span>
             </button>
           )}
+          <button
+            onClick={onAddInstance}
+            className="p-1.5 text-gray-400 hover:text-white hover:bg-gray-700 rounded-md transition-colors"
+            aria-label="Add instance"
+          >
+            <Plus className="w-4 h-4" />
+          </button>
           <Link
             to="/settings"
             className="p-1.5 text-gray-400 hover:text-white hover:bg-gray-700 rounded-md transition-colors"

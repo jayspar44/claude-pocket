@@ -60,7 +60,7 @@ const config = {
 
   // Long task detection for notifications
   longTask: {
-    thresholdMs: 60000,      // 60s before considering a task "long"
+    thresholdMs: 10000,      // 10s for testing (was 60000)
   },
 
   // CORS configuration

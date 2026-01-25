@@ -9,6 +9,7 @@ import { CommandPalette } from '../components/command';
 import { MobileFilePicker, ImagePicker } from '../components/files';
 import { InstanceTabBar, InstanceManager } from '../components/instance';
 import { storage } from '../utils/storage';
+import { Server } from 'lucide-react';
 
 function Terminal() {
   const terminalRef = useRef(null);
@@ -55,9 +56,26 @@ function Terminal() {
   const [showImagePicker, setShowImagePicker] = useState(false);
   const [showInstanceManager, setShowInstanceManager] = useState(false);
   const [editInstanceId, setEditInstanceId] = useState(null);
+  const [startInAddMode, setStartInAddMode] = useState(false);
 
   // Ctrl modifier state
   const [ctrlActive, setCtrlActive] = useState(false);
+
+  // Auto-open instance manager on first load if PTY not running
+  const hasAutoOpenedRef = useRef(false);
+  useEffect(() => {
+    // Only check once after initial connection
+    if (hasAutoOpenedRef.current) return;
+    if (connectionState !== 'connected') return;
+
+    // If connected but PTY not running, open instance manager
+    if (!ptyStatus?.running) {
+      hasAutoOpenedRef.current = true;
+      setShowInstanceManager(true);
+    } else {
+      hasAutoOpenedRef.current = true;
+    }
+  }, [connectionState, ptyStatus?.running]);
 
   const handleResize = useCallback((cols, rows) => {
     sendResize(cols, rows);
@@ -146,6 +164,13 @@ function Terminal() {
 
   const handleManageInstance = useCallback((instanceId) => {
     setEditInstanceId(instanceId || null);
+    setStartInAddMode(false);
+    setShowInstanceManager(true);
+  }, []);
+
+  const handleOpenInstanceManager = useCallback(() => {
+    setEditInstanceId(null);
+    setStartInAddMode(false);  // Open list view, not add form
     setShowInstanceManager(true);
   }, []);
 
@@ -156,18 +181,35 @@ function Terminal() {
       style={{ height: viewportHeight ? `${viewportHeight}px` : '100dvh' }}
     >
       {/* Status Bar */}
-      <StatusBar connectionState={connectionState} ptyStatus={ptyStatus} onReconnect={connect} workingDir={ptyStatus?.workingDir || activeInstance?.workingDir} ptyError={ptyError} />
+      <StatusBar connectionState={connectionState} ptyStatus={ptyStatus} onReconnect={connect} workingDir={ptyStatus?.workingDir || activeInstance?.workingDir} ptyError={ptyError} onAddInstance={handleOpenInstanceManager} />
 
       {/* Instance Tab Bar */}
       <InstanceTabBar onManageClick={handleManageInstance} />
 
       {/* Terminal - flex-1 with min-h-0 allows it to shrink/grow */}
       <div className="flex-1 min-h-0 overflow-hidden">
-        <TerminalView
-          ref={terminalRef}
-          onResize={handleResize}
-          fontSize={fontSize}
-        />
+        {connectionState === 'connected' && !ptyStatus?.running ? (
+          // Empty state when connected but no PTY running
+          <div className="flex flex-col items-center justify-center h-full text-gray-400 px-6">
+            <Server className="w-12 h-12 mb-4 text-gray-600" />
+            <p className="text-center text-lg font-medium text-gray-300 mb-2">No Active Session</p>
+            <p className="text-center text-sm mb-4">
+              Start Claude Code from the instance manager to begin
+            </p>
+            <button
+              onClick={handleOpenInstanceManager}
+              className="px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded-lg text-white text-sm transition-colors"
+            >
+              Open Instance Manager
+            </button>
+          </div>
+        ) : (
+          <TerminalView
+            ref={terminalRef}
+            onResize={handleResize}
+            fontSize={fontSize}
+          />
+        )}
       </div>
 
       {/* Quick Actions */}
@@ -215,8 +257,10 @@ function Terminal() {
         onClose={() => {
           setShowInstanceManager(false);
           setEditInstanceId(null);
+          setStartInAddMode(false);
         }}
         editInstanceId={editInstanceId}
+        startInAddMode={startInAddMode}
       />
     </div>
   );

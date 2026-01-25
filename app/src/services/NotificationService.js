@@ -95,8 +95,8 @@ class NotificationService {
     if (type === 'input-needed' && !this.settings.inputNeeded) return;
     if (type === 'task-complete' && !this.settings.taskComplete) return;
 
-    // Don't notify if app is in foreground
-    if (document.visibilityState === 'visible') return;
+    // Don't notify if app is in foreground (DISABLED FOR TESTING)
+    // if (document.visibilityState === 'visible') return;
 
     await this.init();
 

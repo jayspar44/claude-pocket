@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ChevronLeft, Server, Type, RefreshCw, Trash2, Info, Check, Play, Square, FolderOpen, FileX, Bell, RotateCcw } from 'lucide-react';
+import { ChevronLeft, Server, Type, Trash2, Info, Check, FileX, Bell, RotateCcw } from 'lucide-react';
 import { useRelay } from '../hooks/useRelay';
 import { healthApi, filesApi } from '../api/relay-api';
 import { version } from '../../../version.json';
@@ -26,23 +26,12 @@ export default function Settings() {
   const { getRelayUrl, setRelayUrl, connectionState } = useRelay();
 
   const [relayUrlInput, setRelayUrlInput] = useState(getRelayUrl());
-  const [workingDirInput, setWorkingDirInput] = useState(() => {
-    const saved = storage.get('working-dir');
-    if (saved) return saved;
-    // Auto-populate with base path for easier entry
-    return '/Users/jayspar/Documents/projects/';
-  });
   const [fontSizeInput, setFontSizeInput] = useState(() => {
     return storage.get('fontSize') || '14';
   });
   const [healthInfo, setHealthInfo] = useState(null);
   const [saving, setSaving] = useState(false);
-  const [starting, setStarting] = useState(false);
-  const [stopping, setStopping] = useState(false);
   const [cleaning, setCleaning] = useState(false);
-  const [recentDirs, setRecentDirs] = useState(() => {
-    return storage.getJSON('recent-dirs', []);
-  });
   const [notificationSettings, setNotificationSettings] = useState(() => notificationService.getSettings());
 
   // Fetch health info periodically
@@ -72,60 +61,6 @@ export default function Settings() {
     }
   }, [fontSizeInput]);
 
-  const addToRecentDirs = useCallback((dir) => {
-    const updated = [dir, ...recentDirs.filter(d => d !== dir)].slice(0, 5);
-    setRecentDirs(updated);
-    storage.setJSON('recent-dirs', updated);
-  }, [recentDirs]);
-
-  const handleStartPty = useCallback(async () => {
-    if (!workingDirInput.trim()) {
-      alert('Please enter a working directory');
-      return;
-    }
-    setStarting(true);
-    try {
-      console.log('Starting PTY with workingDir:', workingDirInput.trim());
-      const response = await healthApi.startPty(workingDirInput.trim());
-      console.log('Start PTY response:', response.data);
-      storage.set('working-dir', workingDirInput.trim());
-      addToRecentDirs(workingDirInput.trim());
-      fetchHealth();
-    } catch (error) {
-      console.error('Failed to start PTY:', error);
-      console.error('Error details:', {
-        message: error.message,
-        response: error.response?.data,
-        status: error.response?.status,
-        config: error.config,
-      });
-      alert(error.response?.data?.error || error.message || 'Failed to start Claude Code');
-    }
-    setStarting(false);
-  }, [workingDirInput, addToRecentDirs, fetchHealth]);
-
-  const handleStopPty = useCallback(async () => {
-    setStopping(true);
-    try {
-      await healthApi.stopPty();
-      fetchHealth();
-    } catch (error) {
-      console.error('Failed to stop PTY:', error);
-    }
-    setStopping(false);
-  }, [fetchHealth]);
-
-  const handleRestartPty = useCallback(async () => {
-    setStarting(true);
-    try {
-      await healthApi.restartPty();
-      fetchHealth();
-    } catch (error) {
-      console.error('Failed to restart PTY:', error);
-    }
-    setStarting(false);
-  }, [fetchHealth]);
-
   const handleClearHistory = useCallback(() => {
     if (confirm('Clear command history?')) {
       storage.remove('history');
@@ -154,10 +89,6 @@ export default function Settings() {
     setCleaning(false);
   }, []);
 
-  const handleSelectRecentDir = useCallback((dir) => {
-    setWorkingDirInput(dir);
-  }, []);
-
   const handleNotificationSettingChange = useCallback((key, value) => {
     const newSettings = { ...notificationSettings, [key]: value };
     setNotificationSettings(newSettings);
@@ -170,8 +101,6 @@ export default function Settings() {
     reconnecting: 'text-yellow-400',
     disconnected: 'text-red-400',
   };
-
-  const ptyRunning = healthInfo?.pty?.running;
 
   return (
     <div className="flex flex-col h-full bg-gray-900">
@@ -197,91 +126,6 @@ export default function Settings() {
 
       {/* Content */}
       <div className="flex-1 overflow-y-auto p-4 space-y-6">
-        {/* Claude Code Control */}
-        <div className="bg-gray-800 rounded-xl p-4 space-y-4">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <FolderOpen className="w-5 h-5 text-orange-400" />
-              <h2 className="text-white font-medium">Claude Code</h2>
-            </div>
-            <span className={ptyRunning ? 'text-green-400 text-sm' : 'text-gray-500 text-sm'}>
-              {ptyRunning ? 'Running' : 'Stopped'}
-            </span>
-          </div>
-
-          {/* Current working dir if running */}
-          {ptyRunning && healthInfo?.pty?.workingDir && (
-            <div className="px-3 py-2 bg-gray-700/50 rounded-lg">
-              <p className="text-xs text-gray-400">Current Project</p>
-              <p className="text-sm text-white truncate">{healthInfo.pty.workingDir}</p>
-            </div>
-          )}
-
-          {/* Working Directory Input */}
-          <div className="space-y-2">
-            <label className="text-sm text-gray-400">Project Directory</label>
-            <input
-              type="text"
-              value={workingDirInput}
-              onChange={(e) => setWorkingDirInput(e.target.value)}
-              placeholder="Add project folder name (e.g., claude-pocket)"
-              disabled={ptyRunning}
-              className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:border-orange-500 disabled:opacity-50"
-            />
-          </div>
-
-          {/* Recent Directories */}
-          {recentDirs.length > 0 && !ptyRunning && (
-            <div className="space-y-2">
-              <label className="text-xs text-gray-500">Recent</label>
-              <div className="flex flex-wrap gap-2">
-                {recentDirs.map((dir) => (
-                  <button
-                    key={dir}
-                    onClick={() => handleSelectRecentDir(dir)}
-                    className="px-2 py-1 text-xs bg-gray-700 hover:bg-gray-600 rounded text-gray-300 truncate max-w-[150px]"
-                  >
-                    {dir.split('/').pop() || dir}
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* Start/Stop/Restart Buttons */}
-          <div className="flex gap-2">
-            {!ptyRunning ? (
-              <button
-                onClick={handleStartPty}
-                disabled={starting || connectionState !== 'connected'}
-                className="flex-1 flex items-center justify-center gap-2 px-4 py-3 bg-green-600 hover:bg-green-700 disabled:bg-green-600/50 disabled:text-gray-300 rounded-lg text-white transition-colors"
-              >
-                <Play className="w-5 h-5" />
-                <span>{starting ? 'Starting...' : 'Start Claude Code'}</span>
-              </button>
-            ) : (
-              <>
-                <button
-                  onClick={handleStopPty}
-                  disabled={stopping || connectionState !== 'connected'}
-                  className="flex-1 flex items-center justify-center gap-2 px-4 py-3 bg-red-600 hover:bg-red-700 disabled:bg-red-600/50 rounded-lg text-white transition-colors"
-                >
-                  <Square className="w-4 h-4" />
-                  <span>{stopping ? 'Stopping...' : 'Stop'}</span>
-                </button>
-                <button
-                  onClick={handleRestartPty}
-                  disabled={starting || connectionState !== 'connected'}
-                  className="flex-1 flex items-center justify-center gap-2 px-4 py-3 bg-gray-700 hover:bg-gray-600 disabled:bg-gray-700/50 rounded-lg text-white transition-colors"
-                >
-                  <RefreshCw className={`w-5 h-5 ${starting ? 'animate-spin' : ''}`} />
-                  <span>Restart</span>
-                </button>
-              </>
-            )}
-          </div>
-        </div>
-
         {/* Connection */}
         <div className="bg-gray-800 rounded-xl p-4 space-y-4">
           <div className="flex items-center gap-2">
@@ -435,7 +279,7 @@ export default function Settings() {
 
           <button
             onClick={handleCleanupFiles}
-            disabled={cleaning || connectionState !== 'connected' || !ptyRunning}
+            disabled={cleaning || connectionState !== 'connected'}
             className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-orange-600/20 hover:bg-orange-600/30 disabled:opacity-50 rounded-lg text-orange-400 transition-colors"
           >
             <FileX className={`w-5 h-5 ${cleaning ? 'animate-pulse' : ''}`} />

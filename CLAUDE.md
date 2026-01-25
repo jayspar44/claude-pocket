@@ -2,6 +2,21 @@
 
 Mobile-first client for Claude Code CLI via WebSocket relay.
 
+## Execution Context (READ FIRST)
+
+**Always check hostname before running commands:**
+```bash
+hostname  # MiniBox.local = on minibox, run commands directly
+          # Other = local Mac, use SSH for minibox commands
+```
+
+| Running From | Minibox Commands |
+|--------------|------------------|
+| Minibox (`hostname` = `MiniBox.local`) | Run directly: `pm2 status`, `./scripts/deploy.sh` |
+| Local Mac | Use SSH: `ssh minibox "pm2 status"` |
+
+**Common scenario:** SSH from phone → minibox → `claude`. You're ON minibox, no SSH needed.
+
 ## Style Guide
 
 - **Tables over prose** - use tables for lists of items with attributes
@@ -49,16 +64,9 @@ app/src/                         relay/src/
 
 ## Development Environment
 
-**Local development, remote deployment:**
-- Code runs locally in this repo (`claude-pocket-dev`)
-- Production deploys to `minibox` (Mac Mini on Tailscale)
-- Claude can directly read/write files and run commands locally
-- **No SSH needed** unless connecting to minibox for logs/status/deploy
-
-**When to use SSH:**
-- Only for `/deploy`, `/logs`, `/status`, `/restart`, `/stop` commands
-- These slash commands handle SSH internally
-- Direct file operations should use local tools (Read, Write, Edit, Bash)
+- Code and deployment both on `minibox` (Mac Mini on Tailscale)
+- Direct file operations: use Read, Write, Edit, Bash tools
+- Slash commands (`/deploy`, `/logs`, etc.) auto-detect execution context
 
 ## Development
 
