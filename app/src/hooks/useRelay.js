@@ -12,27 +12,40 @@ export function useTerminalRelay(terminalRef) {
     sendInput,
     sendResize,
     sendInterrupt,
-    requestReplay,
     submitInput,
-    addMessageListener,
     isConnected,
     clearDetectedOptions,
     activeInstanceId,
+    // Use instance-specific functions for proper routing
+    addInstanceMessageListener,
+    sendToInstance,
   } = useRelayContext();
 
   const hasRequestedReplayRef = useRef(false);
   const unsubscribeRef = useRef(null);
+  const prevInstanceIdRef = useRef(null);
 
-  // Handle incoming messages
+  // Handle incoming messages and instance switching
   // Re-subscribe when activeInstanceId changes to listen to the correct instance
   useEffect(() => {
+    if (!activeInstanceId) return;
+
+    const isInstanceSwitch = prevInstanceIdRef.current && prevInstanceIdRef.current !== activeInstanceId;
+    prevInstanceIdRef.current = activeInstanceId;
+
     // Unsubscribe from previous instance
     if (unsubscribeRef.current) {
       unsubscribeRef.current();
+      unsubscribeRef.current = null;
     }
 
-    // Subscribe to current instance
-    unsubscribeRef.current = addMessageListener((message) => {
+    // Clear terminal on instance switch (before subscribing to new instance)
+    if (isInstanceSwitch && terminalRef.current) {
+      terminalRef.current.clear();
+    }
+
+    // Subscribe to current instance using instance-specific listener
+    unsubscribeRef.current = addInstanceMessageListener(activeInstanceId, (message) => {
       const terminal = terminalRef.current;
       if (!terminal) return;
 
@@ -72,6 +85,22 @@ export function useTerminalRelay(terminalRef) {
     // Reset replay flag when instance changes so new instance triggers replay
     hasRequestedReplayRef.current = false;
 
+    // Request replay immediately for the new instance (after subscription is set up)
+    if (isInstanceSwitch) {
+      // Small delay to ensure subscription is fully registered
+      const timer = setTimeout(() => {
+        sendToInstance(activeInstanceId, { type: 'replay' });
+        hasRequestedReplayRef.current = true;
+      }, 50);
+      return () => {
+        clearTimeout(timer);
+        if (unsubscribeRef.current) {
+          unsubscribeRef.current();
+          unsubscribeRef.current = null;
+        }
+      };
+    }
+
     return () => {
       if (unsubscribeRef.current) {
         unsubscribeRef.current();
@@ -79,16 +108,15 @@ export function useTerminalRelay(terminalRef) {
       }
       hasRequestedReplayRef.current = false;
     };
-  }, [terminalRef, addMessageListener, activeInstanceId]);
+  }, [terminalRef, addInstanceMessageListener, activeInstanceId, sendToInstance]);
 
-  // Request replay when connected
-  // This fixes the race condition where replay is sent before listener is ready
+  // Request replay when first connected (not on instance switch - that's handled above)
   useEffect(() => {
-    if (isConnected && !hasRequestedReplayRef.current) {
+    if (isConnected && !hasRequestedReplayRef.current && activeInstanceId) {
       hasRequestedReplayRef.current = true;
       // Small delay to ensure connection is fully established
       const timer = setTimeout(() => {
-        requestReplay();
+        sendToInstance(activeInstanceId, { type: 'replay' });
       }, 50);
       return () => clearTimeout(timer);
     }
@@ -96,7 +124,7 @@ export function useTerminalRelay(terminalRef) {
     if (!isConnected) {
       hasRequestedReplayRef.current = false;
     }
-  }, [isConnected, requestReplay]);
+  }, [isConnected, activeInstanceId, sendToInstance]);
 
   const handleInput = useCallback((data) => {
     sendInput(data);
@@ -106,13 +134,16 @@ export function useTerminalRelay(terminalRef) {
     sendResize(cols, rows);
   }, [sendResize]);
 
+  // Clear terminal and request replay from current instance
   const handleClearAndReplay = useCallback(() => {
     const terminal = terminalRef.current;
     if (terminal) {
       terminal.clear();
     }
-    requestReplay();
-  }, [requestReplay, terminalRef]);
+    if (activeInstanceId) {
+      sendToInstance(activeInstanceId, { type: 'replay' });
+    }
+  }, [activeInstanceId, sendToInstance, terminalRef]);
 
   const handleSubmitInput = useCallback((data) => {
     submitInput(data);
@@ -122,6 +153,7 @@ export function useTerminalRelay(terminalRef) {
     connectionState,
     ptyStatus,
     isConnected,
+    activeInstanceId,
     sendInput: handleInput,
     sendResize: handleResize,
     sendInterrupt,

@@ -34,6 +34,10 @@ export function RelayProvider({ children }) {
     clearDetectedOptions: instance.clearDetectedOptions,
     addMessageListener: instance.addMessageListener,
 
+    // Instance-specific actions (for proper multi-instance routing)
+    addInstanceMessageListener: instance.addInstanceMessageListener,
+    sendToInstance: instance.sendToInstance,
+
     // URL management (for backward compatibility)
     getRelayUrl: instance.getRelayUrl,
     setRelayUrl: instance.setRelayUrl,

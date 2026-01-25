@@ -79,23 +79,8 @@ function Terminal() {
     }
   }, [connectionState, ptyStatus]);
 
-  // Clear terminal and replay when switching instances
-  const prevInstanceIdRef = useRef(activeInstance?.id);
-  useEffect(() => {
-    const currentId = activeInstance?.id;
-    const prevId = prevInstanceIdRef.current;
-
-    // Only trigger on actual instance change (not initial load)
-    if (prevId && currentId && prevId !== currentId) {
-      // Small delay to let WebSocket switch complete
-      const timer = setTimeout(() => {
-        clearAndReplay();
-      }, 100);
-      return () => clearTimeout(timer);
-    }
-
-    prevInstanceIdRef.current = currentId;
-  }, [activeInstance?.id, clearAndReplay]);
+  // Note: Instance switching and terminal clear/replay is now handled
+  // directly in useTerminalRelay hook for proper instance routing
 
   const handleResize = useCallback((cols, rows) => {
     sendResize(cols, rows);
