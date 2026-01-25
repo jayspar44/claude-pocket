@@ -166,7 +166,7 @@ export default function Settings() {
   return (
     <div className="flex flex-col h-full bg-gray-900">
       {/* Header */}
-      <div className="flex items-center gap-3 p-4 border-b border-gray-700 safe-area-top">
+      <div className="flex items-center gap-3 p-4 border-b border-gray-700 safe-area-top safe-area-left safe-area-right">
         <button
           onClick={() => navigate('/')}
           className="p-2 -ml-2 text-gray-400 hover:text-white hover:bg-gray-800 rounded-lg transition-colors"
@@ -186,7 +186,7 @@ export default function Settings() {
       </div>
 
       {/* Content */}
-      <div className="flex-1 overflow-y-auto p-4 space-y-6">
+      <div className="flex-1 overflow-y-auto p-4 space-y-6 safe-area-bottom safe-area-left safe-area-right">
         {/* Connection */}
         <div className="bg-gray-800 rounded-xl p-4 space-y-4">
           <div className="flex items-center gap-2">

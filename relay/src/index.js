@@ -4,6 +4,7 @@ const express = require('express');
 const pinoHttp = require('pino-http');
 const logger = require('./logger');
 const config = require('./config');
+const { version } = require('../package.json');
 const ptyRegistry = require('./pty-registry');
 const { DEFAULT_INSTANCE_ID } = require('./pty-registry');
 const WebSocketHandler = require('./websocket-handler');
@@ -65,7 +66,7 @@ app.get('/api/health', (req, res) => {
   const defaultInstance = ptyRegistry.getDefault();
   res.json({
     status: 'ok',
-    version: process.env.npm_package_version || '0.1.0',
+    version,
     pty: defaultInstance ? defaultInstance.getStatus() : { running: false },
     instanceCount: instances.length,
     clients: wsHandler.getConnectedClients(),
@@ -250,7 +251,7 @@ app.use('/api/files', filesRouter);
 app.get('/', (req, res) => {
   res.json({
     name: 'Claude Pocket Relay',
-    version: process.env.npm_package_version || '0.1.0',
+    version,
     ws: `ws://${req.headers.host}${config.ws.path}`,
     features: ['multi-instance'],
   });
