@@ -89,22 +89,47 @@ class NotificationService {
   }
 
   async notify({ title, body, instanceId, type }) {
-    if (!this.settings.enabled) return;
+    console.log('[NotificationService] notify() called:', { title, body, type, instanceId });
+    console.log('[NotificationService] Current state:', {
+      initialized: this.initialized,
+      settings: this.settings,
+      isNative: Capacitor.isNativePlatform(),
+      hasLocalNotifications: !!this.LocalNotifications,
+      hasSwRegistration: !!this.swRegistration,
+      notificationPermission: 'Notification' in window ? Notification.permission : 'N/A',
+    });
+
+    if (!this.settings.enabled) {
+      console.log('[NotificationService] Blocked: notifications disabled in settings');
+      return { sent: false, reason: 'disabled' };
+    }
 
     // Check type-specific settings
-    if (type === 'input-needed' && !this.settings.inputNeeded) return;
-    if (type === 'task-complete' && !this.settings.taskComplete) return;
+    if (type === 'input-needed' && !this.settings.inputNeeded) {
+      console.log('[NotificationService] Blocked: inputNeeded notifications disabled');
+      return { sent: false, reason: 'type-disabled' };
+    }
+    if (type === 'task-complete' && !this.settings.taskComplete) {
+      console.log('[NotificationService] Blocked: taskComplete notifications disabled');
+      return { sent: false, reason: 'type-disabled' };
+    }
 
     // Don't notify if app is in foreground (DISABLED FOR TESTING)
     // if (document.visibilityState === 'visible') return;
 
     await this.init();
+    console.log('[NotificationService] After init:', {
+      initialized: this.initialized,
+      hasSwRegistration: !!this.swRegistration,
+      swActive: !!this.swRegistration?.active,
+    });
 
     const tag = `claude-pocket-${type}-${instanceId || 'default'}`;
     const data = { instanceId, type };
 
     if (Capacitor.isNativePlatform() && this.LocalNotifications) {
       // Native notification via Capacitor
+      console.log('[NotificationService] Sending via Capacitor LocalNotifications');
       await this.LocalNotifications.schedule({
         notifications: [
           {
@@ -117,15 +142,23 @@ class NotificationService {
           },
         ],
       });
-    } else if (this.swRegistration) {
+      return { sent: true, method: 'capacitor' };
+    } else if (this.swRegistration?.active) {
       // Service Worker notification (works in background on mobile Chrome)
-      this.swRegistration.active?.postMessage({
+      console.log('[NotificationService] Sending via Service Worker postMessage');
+      this.swRegistration.active.postMessage({
         type: 'SHOW_NOTIFICATION',
         payload: { title, body, tag, data },
       });
+      return { sent: true, method: 'service-worker' };
     } else if ('Notification' in window && Notification.permission === 'granted') {
       // Basic web notification fallback
+      console.log('[NotificationService] Sending via basic Notification API');
       new Notification(title, { body, tag, data });
+      return { sent: true, method: 'basic-api' };
+    } else {
+      console.log('[NotificationService] No notification method available');
+      return { sent: false, reason: 'no-method' };
     }
   }
 

@@ -34,6 +34,8 @@ export default function Settings() {
   const [cleaning, setCleaning] = useState(false);
   const [stoppingAll, setStoppingAll] = useState(false);
   const [notificationSettings, setNotificationSettings] = useState(() => notificationService.getSettings());
+  const [testNotificationStatus, setTestNotificationStatus] = useState(null); // null | { success, message }
+  const [notifDiagnostics, setNotifDiagnostics] = useState(null);
 
   // Fetch health info periodically
   const fetchHealth = useCallback(() => {
@@ -111,13 +113,48 @@ export default function Settings() {
     notificationService.saveSettings(newSettings);
   }, [notificationSettings]);
 
-  const handleTestNotification = useCallback(async () => {
-    await notificationService.notify({
-      title: 'Test Notification',
-      body: 'Notifications are working!',
-      type: 'input-needed',
-    });
+  const fetchNotifDiagnostics = useCallback(async () => {
+    const swReg = await navigator.serviceWorker?.getRegistration();
+    const diag = {
+      permission: 'Notification' in window ? Notification.permission : 'N/A',
+      swSupported: 'serviceWorker' in navigator,
+      swRegistered: !!swReg,
+      swActive: !!swReg?.active,
+      swScope: swReg?.scope || 'none',
+    };
+    setNotifDiagnostics(diag);
+    return diag;
   }, []);
+
+  const handleRequestPermission = useCallback(async () => {
+    if ('Notification' in window) {
+      const result = await Notification.requestPermission();
+      fetchNotifDiagnostics();
+      setTestNotificationStatus({ success: result === 'granted', message: `Permission: ${result}` });
+      setTimeout(() => setTestNotificationStatus(null), 5000);
+    }
+  }, [fetchNotifDiagnostics]);
+
+  const handleTestNotification = useCallback(async () => {
+    setTestNotificationStatus(null);
+    await fetchNotifDiagnostics();
+    try {
+      const result = await notificationService.notify({
+        title: 'Test Notification',
+        body: 'Notifications are working!',
+        type: 'input-needed',
+      });
+      if (result?.sent) {
+        setTestNotificationStatus({ success: true, message: `Sent via ${result.method}` });
+      } else {
+        setTestNotificationStatus({ success: false, message: result?.reason || 'Unknown error' });
+      }
+    } catch (err) {
+      setTestNotificationStatus({ success: false, message: err.message });
+    }
+    // Auto-clear after 5 seconds
+    setTimeout(() => setTestNotificationStatus(null), 5000);
+  }, [fetchNotifDiagnostics]);
 
   const connectionStatusColor = {
     connected: 'text-green-400',
@@ -285,13 +322,34 @@ export default function Settings() {
             </button>
           </div>
 
-          {/* Test notification button */}
-          <button
-            onClick={handleTestNotification}
-            className="w-full px-4 py-2 bg-yellow-600/20 hover:bg-yellow-600/30 rounded-lg text-yellow-400 text-sm transition-colors"
-          >
-            Send Test Notification
-          </button>
+          {/* Test notification buttons */}
+          <div className="flex gap-2">
+            <button
+              onClick={handleRequestPermission}
+              className="flex-1 px-4 py-2 bg-blue-600/20 hover:bg-blue-600/30 rounded-lg text-blue-400 text-sm transition-colors"
+            >
+              Request Permission
+            </button>
+            <button
+              onClick={handleTestNotification}
+              className="flex-1 px-4 py-2 bg-yellow-600/20 hover:bg-yellow-600/30 rounded-lg text-yellow-400 text-sm transition-colors"
+            >
+              Send Test
+            </button>
+          </div>
+          {testNotificationStatus && (
+            <p className={`text-xs mt-1 ${testNotificationStatus.success ? 'text-green-400' : 'text-red-400'}`}>
+              {testNotificationStatus.success ? '✓' : '✗'} {testNotificationStatus.message}
+            </p>
+          )}
+          {/* Diagnostics */}
+          {notifDiagnostics && (
+            <div className="text-xs text-gray-400 space-y-1 mt-2 p-2 bg-gray-900 rounded">
+              <p>Permission: <span className={notifDiagnostics.permission === 'granted' ? 'text-green-400' : 'text-red-400'}>{notifDiagnostics.permission}</span></p>
+              <p>SW Registered: <span className={notifDiagnostics.swRegistered ? 'text-green-400' : 'text-red-400'}>{notifDiagnostics.swRegistered ? 'yes' : 'no'}</span></p>
+              <p>SW Active: <span className={notifDiagnostics.swActive ? 'text-green-400' : 'text-red-400'}>{notifDiagnostics.swActive ? 'yes' : 'no'}</span></p>
+            </div>
+          )}
         </div>
 
         {/* Data */}
