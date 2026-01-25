@@ -4,7 +4,8 @@ const express = require('express');
 const pinoHttp = require('pino-http');
 const logger = require('./logger');
 const config = require('./config');
-const ptyManager = require('./pty-manager');
+const ptyRegistry = require('./pty-registry');
+const { DEFAULT_INSTANCE_ID } = require('./pty-registry');
 const WebSocketHandler = require('./websocket-handler');
 const commandsRouter = require('./routes/commands');
 const filesRouter = require('./routes/files');
@@ -60,25 +61,105 @@ app.use(pinoHttp({
 
 // Health check endpoint
 app.get('/api/health', (req, res) => {
-  const ptyStatus = ptyManager.getStatus();
+  const instances = ptyRegistry.listInstances();
+  const defaultInstance = ptyRegistry.getDefault();
   res.json({
     status: 'ok',
     version: process.env.npm_package_version || '0.1.0',
-    pty: ptyStatus,
+    pty: defaultInstance ? defaultInstance.getStatus() : { running: false },
+    instanceCount: instances.length,
     clients: wsHandler.getConnectedClients(),
-    workingDir: ptyManager.currentWorkingDir,
+    workingDir: defaultInstance?.currentWorkingDir,
   });
 });
 
+// === Instance Management API ===
+
+// List all instances
+app.get('/api/instances', (req, res) => {
+  const instances = ptyRegistry.listInstances();
+  res.json({
+    instances,
+    count: instances.length,
+    clients: wsHandler.getConnectedClients(),
+  });
+});
+
+// Create/get instance with optional auto-start
+app.post('/api/instances', (req, res) => {
+  try {
+    const { instanceId, workingDir, autoStart = false } = req.body;
+
+    if (!instanceId) {
+      return res.status(400).json({ error: 'instanceId is required' });
+    }
+
+    const ptyManager = ptyRegistry.get(instanceId, workingDir);
+
+    if (autoStart && !ptyManager.isRunning && workingDir) {
+      ptyManager.start(workingDir);
+    }
+
+    res.json({
+      success: true,
+      instance: ptyManager.getStatus(),
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Delete instance
+app.delete('/api/instances/:instanceId', (req, res) => {
+  try {
+    const { instanceId } = req.params;
+    const removed = ptyRegistry.remove(instanceId);
+
+    if (!removed) {
+      return res.status(404).json({ error: 'Instance not found' });
+    }
+
+    res.json({ success: true, instanceId });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Get instance status
+app.get('/api/instances/:instanceId', (req, res) => {
+  try {
+    const { instanceId } = req.params;
+
+    if (!ptyRegistry.has(instanceId)) {
+      return res.status(404).json({ error: 'Instance not found' });
+    }
+
+    const ptyManager = ptyRegistry.get(instanceId);
+    res.json({
+      instance: ptyManager.getStatus(),
+      clients: wsHandler.getInstanceClients(instanceId),
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// === PTY Status/Control API (with optional instanceId) ===
+
 // PTY status endpoint
 app.get('/api/pty/status', (req, res) => {
+  const instanceId = req.query.instanceId || DEFAULT_INSTANCE_ID;
+  const ptyManager = ptyRegistry.get(instanceId);
   res.json(ptyManager.getStatus());
 });
 
 // Debug: Get raw buffer content
 app.get('/api/pty/buffer', (req, res) => {
+  const instanceId = req.query.instanceId || DEFAULT_INSTANCE_ID;
+  const ptyManager = ptyRegistry.get(instanceId);
   const buffer = ptyManager.getBufferedOutput();
   res.json({
+    instanceId,
     length: buffer.length,
     content: buffer,
     escaped: JSON.stringify(buffer).slice(1, -1), // Show escape sequences
@@ -88,9 +169,14 @@ app.get('/api/pty/buffer', (req, res) => {
 // Restart PTY endpoint
 app.post('/api/pty/restart', (req, res) => {
   try {
-    // Use provided workingDir, or fall back to current working dir
-    const { workingDir } = req.body || {};
+    const { workingDir, instanceId = DEFAULT_INSTANCE_ID } = req.body || {};
+    const ptyManager = ptyRegistry.get(instanceId);
     const restartDir = workingDir || ptyManager.currentWorkingDir;
+
+    if (!restartDir) {
+      return res.status(400).json({ error: 'workingDir required for new instance' });
+    }
+
     ptyManager.stop();
     ptyManager.clearBuffer();
     ptyManager.start(restartDir);
@@ -103,11 +189,18 @@ app.post('/api/pty/restart', (req, res) => {
 // Start PTY with optional working directory
 app.post('/api/pty/start', (req, res) => {
   try {
-    const { workingDir } = req.body;
+    const { workingDir, instanceId = DEFAULT_INSTANCE_ID } = req.body;
+    const ptyManager = ptyRegistry.get(instanceId, workingDir);
+
     if (ptyManager.getStatus().running) {
       return res.status(400).json({ error: 'PTY already running. Stop it first or use restart.' });
     }
-    ptyManager.start(workingDir);
+
+    if (!workingDir && !ptyManager.currentWorkingDir) {
+      return res.status(400).json({ error: 'workingDir required for new instance' });
+    }
+
+    ptyManager.start(workingDir || ptyManager.currentWorkingDir);
     res.json({ success: true, status: ptyManager.getStatus(), workingDir: ptyManager.currentWorkingDir });
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -117,8 +210,13 @@ app.post('/api/pty/start', (req, res) => {
 // Stop PTY endpoint
 app.post('/api/pty/stop', (req, res) => {
   try {
+    const { instanceId = DEFAULT_INSTANCE_ID, clearBuffer = true } = req.body || {};
+    const ptyManager = ptyRegistry.get(instanceId);
+
     ptyManager.stop();
-    ptyManager.clearBuffer();
+    if (clearBuffer) {
+      ptyManager.clearBuffer();
+    }
     res.json({ success: true, status: ptyManager.getStatus() });
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -135,11 +233,12 @@ app.get('/', (req, res) => {
     name: 'Claude Pocket Relay',
     version: process.env.npm_package_version || '0.1.0',
     ws: `ws://${req.headers.host}${config.ws.path}`,
+    features: ['multi-instance'],
   });
 });
 
 // Don't auto-start PTY - let the user configure and start from the app
-logger.info('PTY auto-start disabled - use /api/pty/start to launch Claude Code');
+logger.info('PTY auto-start disabled - use /api/pty/start or set-instance WebSocket message to launch Claude Code');
 
 // Start server
 server.listen(config.port, config.host, () => {
@@ -153,9 +252,7 @@ server.listen(config.port, config.host, () => {
 // Graceful shutdown
 process.on('SIGINT', () => {
   logger.info('Shutting down relay server');
-  // Save buffer before stopping (stop() also does this, but explicit for safety)
-  ptyManager.saveBuffer();
-  ptyManager.stop();
+  ptyRegistry.shutdown();
   server.close(() => {
     logger.info('Server closed');
     process.exit(0);
@@ -164,9 +261,7 @@ process.on('SIGINT', () => {
 
 process.on('SIGTERM', () => {
   logger.info('Received SIGTERM, shutting down');
-  // Save buffer before stopping
-  ptyManager.saveBuffer();
-  ptyManager.stop();
+  ptyRegistry.shutdown();
   server.close(() => {
     process.exit(0);
   });

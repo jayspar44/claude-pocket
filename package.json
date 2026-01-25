@@ -4,7 +4,7 @@
   "description": "Mobile-first client for Claude Code CLI",
   "main": "relay/src/index.js",
   "scripts": {
-    "install-all": "npm install && cd app && npm install && cd ../relay && npm install",
+    "install-all": "npm install --include=dev && cd app && npm install --include=dev && cd ../relay && npm install --include=dev",
     "build": "npm run install-all && cd app && npm run build",
     "lint": "npm run lint --prefix app && npm run lint --prefix relay",
     "start": "node relay/src/index.js",
@@ -34,7 +34,7 @@
     "release:minor": "standard-version --release-as minor",
     "release:major": "standard-version --release-as major",
     "release:first": "standard-version --first-release",
-    "prepare": "husky"
+    "prepare": "node -e \"try{require.resolve('husky')}catch(e){process.exit(0)}\" && husky"
   },
   "dependencies": {
     "concurrently": "^8.2.2",

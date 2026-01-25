@@ -39,12 +39,15 @@ const getDefaultRelayUrl = () => {
   return import.meta.env.VITE_RELAY_URL || 'ws://localhost:4501/ws';
 };
 
+// Default instance ID must match relay's DEFAULT_INSTANCE_ID
+const DEFAULT_INSTANCE_ID = 'default';
+
 // Generate unique ID
 const generateId = () => `inst-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
 
 // Create a new instance object
-const createInstance = (name, relayUrl, workingDir, color) => ({
-  id: generateId(),
+const createInstance = (name, relayUrl, workingDir, color, useDefaultId = false) => ({
+  id: useDefaultId ? DEFAULT_INSTANCE_ID : generateId(),
   name,
   relayUrl,
   workingDir: workingDir || '',
@@ -61,6 +64,7 @@ const createInstanceState = () => ({
   hasUnread: false,
   processingStartTime: null,
   error: null,
+  ptyError: null,
 });
 
 export function InstanceProvider({ children }) {
@@ -86,17 +90,21 @@ export function InstanceProvider({ children }) {
         'Default',
         oldRelayUrl || getDefaultRelayUrl(),
         oldWorkingDir || '',
-        INSTANCE_COLORS[0]
+        INSTANCE_COLORS[0],
+        true  // Use 'default' ID to match relay's default instance
       );
       return [defaultInstance];
     }
 
     // Create a fresh default instance with auto-detected relay URL
+    // Use 'default' ID to match relay's DEFAULT_INSTANCE_ID - this allows
+    // the relay to use its saved workingDir from previous sessions
     return [createInstance(
       'Default',
       getDefaultRelayUrl(),
       '',
-      INSTANCE_COLORS[0]
+      INSTANCE_COLORS[0],
+      true  // Use 'default' ID
     )];
   });
 
@@ -248,6 +256,14 @@ export function InstanceProvider({ children }) {
         updateInstanceState(instanceId, { connectionState: 'connected', error: null });
         reconnectAttemptsRef.current[instanceId] = 0;
         startHeartbeat(instanceId, ws);
+
+        // Send set-instance message to relay to register this client's instance
+        // This tells the relay which PTY instance to route messages to/from
+        ws.send(JSON.stringify({
+          type: 'set-instance',
+          instanceId: instance.id,
+          workingDir: instance.workingDir || null,
+        }));
       };
 
       ws.onclose = (event) => {
@@ -294,7 +310,10 @@ export function InstanceProvider({ children }) {
           }
 
           // Handle status messages
-          if (message.type === 'status') {
+          if (message.type === 'ready') {
+            // Relay is ready, set-instance was already sent in onopen
+            console.log('[InstanceContext] Relay ready for instance:', instanceId);
+          } else if (message.type === 'status') {
             if (message.connected !== undefined) {
               updateInstanceState(instanceId, {
                 connectionState: message.connected ? 'connected' : 'disconnected',
@@ -304,6 +323,20 @@ export function InstanceProvider({ children }) {
             updateInstanceState(instanceId, {
               ptyStatus: message,
               processingStartTime: message.processingStartTime || null,
+              ptyError: null, // Clear error on successful status
+            });
+          } else if (message.type === 'pty-error') {
+            // PTY failed to start or crashed repeatedly
+            updateInstanceState(instanceId, {
+              ptyError: message.message || 'Claude Code failed to start',
+            });
+          } else if (message.type === 'pty-crash') {
+            // PTY crashed - show exit code and hint
+            const errorMsg = message.exitCode
+              ? `Claude Code crashed (exit ${message.exitCode})`
+              : 'Claude Code crashed unexpectedly';
+            updateInstanceState(instanceId, {
+              ptyError: errorMsg,
             });
           } else if (message.type === 'options-detected') {
             updateInstanceState(instanceId, {
@@ -472,6 +505,20 @@ export function InstanceProvider({ children }) {
     }
   }, []); // Only on mount
 
+  // Listen for Service Worker notification click events to switch instances
+  useEffect(() => {
+    const handleSwSwitchInstance = (event) => {
+      const { instanceId: targetInstanceId } = event.detail || {};
+      if (targetInstanceId && instances.find(i => i.id === targetInstanceId)) {
+        console.log('[InstanceContext] SW notification click, switching to instance:', targetInstanceId);
+        switchInstance(targetInstanceId);
+      }
+    };
+
+    window.addEventListener('sw-switch-instance', handleSwSwitchInstance);
+    return () => window.removeEventListener('sw-switch-instance', handleSwSwitchInstance);
+  }, [instances, switchInstance]);
+
   // Reconnect when app returns from background
   useEffect(() => {
     const handleVisibilityChange = () => {
@@ -569,6 +616,7 @@ export function InstanceProvider({ children }) {
     connectionState: activeInstanceState.connectionState,
     ptyStatus: activeInstanceState.ptyStatus,
     error: activeInstanceState.error,
+    ptyError: activeInstanceState.ptyError,
     detectedOptions: activeInstanceState.detectedOptions,
     isConnected: activeInstanceState.connectionState === 'connected',
     isReconnecting: activeInstanceState.connectionState === 'reconnecting',

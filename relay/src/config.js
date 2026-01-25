@@ -27,8 +27,8 @@ const config = {
 
   // Option detection configuration
   optionDetection: {
-    idleThresholdMs: 200,    // Wait for output to settle before detecting
-    expiryMs: 30000,         // Auto-clear options after 30s
+    idleThresholdMs: 800,    // Wait for output to settle before detecting
+    expiryMs: 60000,         // Auto-clear options after 60s
     minSubstantiveChars: 50, // Min chars to consider "substantive" output
     bufferLookback: 1500,    // Chars to scan for options
     confidenceThreshold: 30, // Min confidence score to detect options

@@ -13,13 +13,19 @@ const MAX_RESTART_ATTEMPTS = 3; // Max restarts within window
 const RESTART_WINDOW_MS = 30000; // Reset counter after 30s of stability
 
 class PtyManager {
-  constructor() {
+  /**
+   * Create a PTY manager instance
+   * @param {string} instanceId - Unique identifier for this instance (used for buffer persistence)
+   */
+  constructor(instanceId = 'default') {
+    this.instanceId = instanceId;
     this.ptyProcess = null;
     this.outputBuffer = [];
     this.outputBufferSize = 0;
     this.listeners = new Set();
     this.isRunning = false;
     this.currentWorkingDir = null;
+    this.pendingWorkingDir = null; // For updating workingDir without restart
     // Batching state
     this.batchQueue = '';
     this.batchTimer = null;
@@ -47,21 +53,25 @@ class PtyManager {
 
   start(workingDir) {
     if (this.ptyProcess) {
-      logger.warn('PTY process already running');
+      logger.warn({ instanceId: this.instanceId }, 'PTY process already running');
       return;
     }
 
-    if (!workingDir) {
+    // Use pending working dir if set (changed while running)
+    const effectiveWorkingDir = this.pendingWorkingDir || workingDir;
+    this.pendingWorkingDir = null;
+
+    if (!effectiveWorkingDir) {
       throw new Error('workingDir is required to start PTY');
     }
 
-    this.currentWorkingDir = workingDir;
+    this.currentWorkingDir = effectiveWorkingDir;
     this.intentionalStop = false;
 
     // Restore buffer from disk if available
     this.loadBuffer();
 
-    logger.info({ workingDir }, 'Starting Claude Code process');
+    logger.info({ instanceId: this.instanceId, workingDir: effectiveWorkingDir }, 'Starting Claude Code process');
 
     try {
       const proc = pty.spawn(config.claudeCommand, [], {
@@ -307,18 +317,6 @@ class PtyManager {
     this.lastOutputTime = Date.now();
     this.isIdle = false;
 
-    // Clear options on substantive new output (user typed, Claude responding)
-    // This prevents stale options from persisting during new conversation flow
-    // But wait for grace period to avoid clearing options that were just detected
-    const cleanData = data.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '');
-    const OPTION_GRACE_PERIOD_MS = 500;
-    const optionAge = Date.now() - this.lastOptionsSetTime;
-    if (cleanData.length >= config.optionDetection.minSubstantiveChars &&
-        this.lastDetectedOptions &&
-        optionAge > OPTION_GRACE_PERIOD_MS) {
-      this.clearDetectedOptions();
-    }
-
     // Schedule idle detection (will run option detection when idle)
     this.scheduleIdleDetection();
 
@@ -514,6 +512,7 @@ class PtyManager {
 
   getStatus() {
     return {
+      instanceId: this.instanceId,
       running: this.isRunning,
       pid: this.ptyProcess?.pid || null,
       bufferSize: this.outputBufferSize,
@@ -529,7 +528,10 @@ class PtyManager {
     if (!this.currentWorkingDir) {
       return null;
     }
-    return path.join(this.currentWorkingDir, config.buffer.persistPath);
+    // Include instanceId in buffer filename for multi-instance support
+    const bufferDir = path.dirname(config.buffer.persistPath);
+    const bufferFilename = `output-buffer-${this.instanceId}.json`;
+    return path.join(this.currentWorkingDir, bufferDir, bufferFilename);
   }
 
   ensurePersistDir() {
@@ -613,7 +615,5 @@ class PtyManager {
   }
 }
 
-// Singleton instance
-const ptyManager = new PtyManager();
-
-module.exports = ptyManager;
+// Export the class for multi-instance support via PtyRegistry
+module.exports = PtyManager;

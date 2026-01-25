@@ -1,6 +1,18 @@
-import { Wifi, WifiOff, RefreshCw, Settings, Terminal, TerminalSquare } from 'lucide-react';
+import { Wifi, WifiOff, RefreshCw, Settings, Terminal, TerminalSquare, AlertCircle } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { useRelay } from '../contexts/RelayContext';
+
+// Extract folder name from working directory path
+// e.g., "/Users/foo/Documents/projects/my-app" -> "my-app"
+function getFolderName(workingDir) {
+  if (!workingDir) return null;
+  // Find everything after "projects/" or just the last folder
+  const projectsMatch = workingDir.match(/projects\/(.+)$/);
+  if (projectsMatch) return projectsMatch[1];
+  // Fallback: just the last path segment
+  const parts = workingDir.split('/').filter(Boolean);
+  return parts[parts.length - 1] || null;
+}
 
 // Determine environment from relay URL (by relay port number)
 function getEnvironment(url) {
@@ -28,7 +40,7 @@ const ptyConfig = {
   stopped: { color: 'bg-gray-500', icon: TerminalSquare, label: 'Stopped' },
 };
 
-function StatusBar({ connectionState, ptyStatus, workingDir, onReconnect }) {
+function StatusBar({ connectionState, ptyStatus, workingDir, ptyError, onReconnect }) {
   const { getRelayUrl } = useRelay();
   const connStatus = connectionConfig[connectionState] || connectionConfig.disconnected;
   const ConnIcon = connStatus.icon;
@@ -44,6 +56,9 @@ function StatusBar({ connectionState, ptyStatus, workingDir, onReconnect }) {
   const isPtyRunning = ptyStatus?.running === true;
   const ptyState = isPtyRunning ? ptyConfig.running : ptyConfig.stopped;
   const PtyIcon = ptyState.icon;
+
+  // Folder name from working directory
+  const folderName = getFolderName(workingDir);
 
   return (
     <div className="flex items-center justify-between px-3 py-2 bg-gray-800 border-b border-gray-700 safe-area-top min-h-[44px]">
@@ -70,20 +85,26 @@ function StatusBar({ connectionState, ptyStatus, workingDir, onReconnect }) {
           <>
             <span className="text-gray-600">|</span>
             <div className="flex items-center gap-1.5 h-4">
-              <div className={`w-2 h-2 rounded-full shrink-0 ${ptyState.color}`} />
+              <div className={`w-2 h-2 rounded-full shrink-0 ${ptyError ? 'bg-red-500' : ptyState.color}`} />
               <PtyIcon className="w-4 h-4 text-gray-400 shrink-0" />
               <span className="text-xs text-gray-400 leading-4">{ptyState.label}</span>
             </div>
+            {/* Folder name */}
+            {folderName && (
+              <>
+                <span className="text-gray-600">|</span>
+                <span className="text-xs text-gray-500 truncate max-w-[120px]">{folderName}</span>
+              </>
+            )}
           </>
         )}
       </div>
 
-      {/* Working directory (if provided) */}
-      {workingDir && (
-        <div className="flex-1 mx-4 overflow-hidden">
-          <p className="text-xs text-gray-500 truncate text-center">
-            {workingDir}
-          </p>
+      {/* PTY Error message */}
+      {ptyError && isConnected && (
+        <div className="flex items-center gap-1.5 mx-2 px-2 py-0.5 bg-red-900/50 rounded">
+          <AlertCircle className="w-3.5 h-3.5 text-red-400 shrink-0" />
+          <span className="text-xs text-red-300 truncate">{ptyError}</span>
         </div>
       )}
 
