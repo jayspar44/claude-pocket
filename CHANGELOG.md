@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+### [0.3.1](https://github.com/jayspar44/claude-pocket/compare/v0.3.0...v0.3.1) (2026-01-25)
+
+
+### Bug Fixes
+
+* settings page safe area bottom on Android ([f7a9589](https://github.com/jayspar44/claude-pocket/commit/f7a95894f8dc328bef64421b388d126c782ca42b))
+
 ## [0.3.0](https://github.com/jayspar44/claude-pocket/compare/v0.2.2...v0.3.0) (2026-01-25)
 
 
