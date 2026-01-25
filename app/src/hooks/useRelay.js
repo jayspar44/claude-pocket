@@ -21,110 +21,101 @@ export function useTerminalRelay(terminalRef) {
     sendToInstance,
   } = useRelayContext();
 
-  const hasRequestedReplayRef = useRef(false);
+  // Track subscription state
+  const subscribedInstanceRef = useRef(null);
   const unsubscribeRef = useRef(null);
-  const prevInstanceIdRef = useRef(null);
+  const replayTimerRef = useRef(null);
 
-  // Handle incoming messages and instance switching
-  // Re-subscribe when activeInstanceId changes to listen to the correct instance
+  // Single effect to handle subscription and replay
+  // Only re-runs when activeInstanceId or isConnected changes
   useEffect(() => {
-    if (!activeInstanceId) return;
-
-    const isInstanceSwitch = prevInstanceIdRef.current && prevInstanceIdRef.current !== activeInstanceId;
-    prevInstanceIdRef.current = activeInstanceId;
-
-    // Unsubscribe from previous instance
-    if (unsubscribeRef.current) {
-      unsubscribeRef.current();
-      unsubscribeRef.current = null;
+    // Clear any pending replay timer
+    if (replayTimerRef.current) {
+      clearTimeout(replayTimerRef.current);
+      replayTimerRef.current = null;
     }
 
-    // Clear terminal on instance switch (before subscribing to new instance)
-    if (isInstanceSwitch && terminalRef.current) {
-      terminalRef.current.clear();
+    // Nothing to do if no instance or not connected
+    if (!activeInstanceId || !isConnected) {
+      return;
     }
 
-    // Subscribe to current instance using instance-specific listener
-    unsubscribeRef.current = addInstanceMessageListener(activeInstanceId, (message) => {
-      const terminal = terminalRef.current;
-      if (!terminal) return;
+    // Check if we need to switch instances
+    const needsSwitch = subscribedInstanceRef.current !== activeInstanceId;
 
-      switch (message.type) {
-        case 'output':
-          terminal.write(message.data);
-          break;
-
-        case 'replay':
-          // Replay is the full buffer - clear and write
-          terminal.clear();
-          terminal.write(message.data);
-          break;
-
-        case 'status':
-          if (message.connected === false) {
-            terminal.write('\r\n\x1b[33m[Disconnected from relay]\x1b[0m\r\n');
-          }
-          break;
-
-        case 'pty-status':
-          if (!message.running && message.exitCode !== undefined) {
-            terminal.write(`\r\n\x1b[33m[Claude Code exited with code ${message.exitCode}]\x1b[0m\r\n`);
-          }
-          break;
-
-        case 'pty-restarting':
-          terminal.write(`\r\n\x1b[36m[Auto-restarting Claude Code (attempt ${message.attempt})...]\x1b[0m\r\n`);
-          break;
-
-        case 'pty-error':
-          terminal.write(`\r\n\x1b[31m[${message.message}]\x1b[0m\r\n`);
-          break;
-      }
-    });
-
-    // Reset replay flag when instance changes so new instance triggers replay
-    hasRequestedReplayRef.current = false;
-
-    // Request replay immediately for the new instance (after subscription is set up)
-    if (isInstanceSwitch) {
-      // Small delay to ensure subscription is fully registered
-      const timer = setTimeout(() => {
-        sendToInstance(activeInstanceId, { type: 'replay' });
-        hasRequestedReplayRef.current = true;
-      }, 50);
-      return () => {
-        clearTimeout(timer);
-        if (unsubscribeRef.current) {
-          unsubscribeRef.current();
-          unsubscribeRef.current = null;
-        }
-      };
-    }
-
-    return () => {
+    if (needsSwitch) {
+      // Unsubscribe from previous instance first
       if (unsubscribeRef.current) {
         unsubscribeRef.current();
         unsubscribeRef.current = null;
       }
-      hasRequestedReplayRef.current = false;
-    };
-  }, [terminalRef, addInstanceMessageListener, activeInstanceId, sendToInstance]);
 
-  // Request replay when first connected (not on instance switch - that's handled above)
-  useEffect(() => {
-    if (isConnected && !hasRequestedReplayRef.current && activeInstanceId) {
-      hasRequestedReplayRef.current = true;
-      // Small delay to ensure connection is fully established
-      const timer = setTimeout(() => {
-        sendToInstance(activeInstanceId, { type: 'replay' });
+      // Clear terminal when switching (not on initial load)
+      if (subscribedInstanceRef.current && terminalRef.current) {
+        terminalRef.current.clear();
+      }
+
+      // Update tracked instance
+      subscribedInstanceRef.current = activeInstanceId;
+
+      // Subscribe to new instance
+      const currentInstanceId = activeInstanceId; // Capture for closure
+      unsubscribeRef.current = addInstanceMessageListener(currentInstanceId, (message) => {
+        const terminal = terminalRef.current;
+        if (!terminal) return;
+
+        switch (message.type) {
+          case 'output':
+            terminal.write(message.data);
+            break;
+
+          case 'replay':
+            terminal.clear();
+            terminal.write(message.data);
+            break;
+
+          case 'status':
+            if (message.connected === false) {
+              terminal.write('\r\n\x1b[33m[Disconnected from relay]\x1b[0m\r\n');
+            }
+            break;
+
+          case 'pty-status':
+            if (!message.running && message.exitCode !== undefined) {
+              terminal.write(`\r\n\x1b[33m[Claude Code exited with code ${message.exitCode}]\x1b[0m\r\n`);
+            }
+            break;
+
+          case 'pty-restarting':
+            terminal.write(`\r\n\x1b[36m[Auto-restarting Claude Code (attempt ${message.attempt})...]\x1b[0m\r\n`);
+            break;
+
+          case 'pty-error':
+            terminal.write(`\r\n\x1b[31m[${message.message}]\x1b[0m\r\n`);
+            break;
+        }
+      });
+
+      // Request replay after subscription is set up
+      replayTimerRef.current = setTimeout(() => {
+        sendToInstance(currentInstanceId, { type: 'replay' });
+        replayTimerRef.current = null;
       }, 50);
-      return () => clearTimeout(timer);
     }
-    // Reset flag when disconnected so reconnection triggers replay
-    if (!isConnected) {
-      hasRequestedReplayRef.current = false;
-    }
-  }, [isConnected, activeInstanceId, sendToInstance]);
+
+    // Cleanup function
+    return () => {
+      if (replayTimerRef.current) {
+        clearTimeout(replayTimerRef.current);
+        replayTimerRef.current = null;
+      }
+      if (unsubscribeRef.current) {
+        unsubscribeRef.current();
+        unsubscribeRef.current = null;
+      }
+      subscribedInstanceRef.current = null;
+    };
+  }, [activeInstanceId, isConnected, addInstanceMessageListener, sendToInstance, terminalRef]);
 
   const handleInput = useCallback((data) => {
     sendInput(data);
