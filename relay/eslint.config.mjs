@@ -14,6 +14,8 @@ export default [
     },
     rules: {
       'no-unused-vars': ['error', { argsIgnorePattern: '^_' }],
+      // Allow control characters in regex - needed for ANSI escape code stripping
+      'no-control-regex': 'off',
     },
   },
   {
