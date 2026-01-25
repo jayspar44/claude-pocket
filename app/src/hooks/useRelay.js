@@ -17,25 +17,22 @@ export function useTerminalRelay(terminalRef) {
     addMessageListener,
     isConnected,
     clearDetectedOptions,
+    activeInstanceId,
   } = useRelayContext();
 
-  const isSubscribedRef = useRef(false);
   const hasRequestedReplayRef = useRef(false);
-
-  // Keep addMessageListener ref stable to avoid re-subscribing
-  const addMessageListenerRef = useRef(addMessageListener);
-  useEffect(() => {
-    addMessageListenerRef.current = addMessageListener;
-  }, [addMessageListener]);
+  const unsubscribeRef = useRef(null);
 
   // Handle incoming messages
-  // xterm.js handles all terminal state internally - just write data as it arrives
+  // Re-subscribe when activeInstanceId changes to listen to the correct instance
   useEffect(() => {
-    // Only subscribe once per mount
-    if (isSubscribedRef.current) return;
-    isSubscribedRef.current = true;
+    // Unsubscribe from previous instance
+    if (unsubscribeRef.current) {
+      unsubscribeRef.current();
+    }
 
-    const unsubscribe = addMessageListenerRef.current((message) => {
+    // Subscribe to current instance
+    unsubscribeRef.current = addMessageListener((message) => {
       const terminal = terminalRef.current;
       if (!terminal) return;
 
@@ -72,17 +69,22 @@ export function useTerminalRelay(terminalRef) {
       }
     });
 
+    // Reset replay flag when instance changes so new instance triggers replay
+    hasRequestedReplayRef.current = false;
+
     return () => {
-      unsubscribe();
-      isSubscribedRef.current = false;
+      if (unsubscribeRef.current) {
+        unsubscribeRef.current();
+        unsubscribeRef.current = null;
+      }
       hasRequestedReplayRef.current = false;
     };
-  }, [terminalRef]); // Removed addMessageListener from deps - using ref instead
+  }, [terminalRef, addMessageListener, activeInstanceId]);
 
-  // Request replay when connected and listener is subscribed
+  // Request replay when connected
   // This fixes the race condition where replay is sent before listener is ready
   useEffect(() => {
-    if (isConnected && isSubscribedRef.current && !hasRequestedReplayRef.current) {
+    if (isConnected && !hasRequestedReplayRef.current) {
       hasRequestedReplayRef.current = true;
       // Small delay to ensure connection is fully established
       const timer = setTimeout(() => {
