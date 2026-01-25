@@ -2,13 +2,20 @@ const express = require('express');
 const fs = require('fs').promises;
 const { createReadStream } = require('fs');
 const path = require('path');
-const os = require('os');
 const logger = require('../logger');
 
 const router = express.Router();
 
-// Builds directory - configurable via env, defaults to ~/aabs-dev (separate from PROD's ~/aabs)
-const BUILDS_DIR = process.env.BUILDS_DIR || path.join(os.homedir(), 'aabs-dev');
+// Auto-detect environment from project folder name
+const PROJECT_DIR = path.basename(path.resolve(__dirname, '../../..'));
+const IS_DEV_INSTANCE = PROJECT_DIR.endsWith('-dev');
+const ENVIRONMENT_LABEL = IS_DEV_INSTANCE ? 'DEV' : 'PROD';
+
+// Base output directory for all builds
+const BUILDS_BASE = '/Users/jayspar/Documents/projects/claude-pocket-outputs';
+
+// PROD relay serves prod builds, DEV relay serves dev builds
+const BUILDS_DIR = process.env.BUILDS_DIR || path.join(BUILDS_BASE, IS_DEV_INSTANCE ? 'dev' : 'prod');
 
 // Ensure builds directory exists
 async function ensureBuildsDir() {
@@ -75,7 +82,7 @@ router.get('/page', async (req, res) => {
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Claude Pocket Builds</title>
+  <title>Claude Pocket Builds (${ENVIRONMENT_LABEL})</title>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
@@ -170,7 +177,7 @@ router.get('/page', async (req, res) => {
   <div class="container">
     <div class="header">
       <div>
-        <h1>Claude Pocket Builds</h1>
+        <h1>Claude Pocket Builds (${ENVIRONMENT_LABEL})</h1>
         <p class="subtitle">${builds.length} build${builds.length !== 1 ? 's' : ''} available</p>
       </div>
       <button class="refresh-btn" onclick="location.reload()">Refresh</button>

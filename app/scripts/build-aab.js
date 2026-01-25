@@ -31,7 +31,6 @@ import { existsSync, copyFileSync, mkdirSync, readFileSync, writeFileSync } from
 import { spawn } from 'child_process';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
-import { homedir } from 'os';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -39,8 +38,10 @@ const frontendDir = join(__dirname, '..');
 const androidDir = join(frontendDir, 'android');
 const configPath = join(frontendDir, 'capacitor.config.json');
 
-// Output destination (separate from PROD's ~/aabs)
-const OUTPUT_PATH = process.env.AAB_OUTPUT_PATH || join(homedir(), 'aabs-dev');
+// Base output directory for all builds
+const BUILDS_BASE = '/Users/jayspar/Documents/projects/claude-pocket-outputs';
+
+// OUTPUT_PATH determined after flavor is parsed (below)
 
 // App configuration
 const APP_ID_BASE = 'com.claudecode.pocket';
@@ -94,6 +95,9 @@ if (!VALID_BUILD_TYPES.includes(buildType)) {
   console.error(`Valid build types: ${VALID_BUILD_TYPES.join(', ')}`);
   process.exit(1);
 }
+
+// Output path based on flavor (prod builds go to prod/, dev builds go to dev/)
+const OUTPUT_PATH = process.env.AAB_OUTPUT_PATH || join(BUILDS_BASE, flavor === 'prod' ? 'prod' : 'dev');
 
 // Get version from package.json
 function getVersion() {
