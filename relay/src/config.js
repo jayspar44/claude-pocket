@@ -56,6 +56,15 @@ const config = {
       /\s+·\s+/,               // Separator dots
       /connected|failed|pending/i, // Status words
     ],
+
+    // Negative patterns that reduce confidence (documentation/prose indicators)
+    negativePatterns: [
+      /^(?:test|steps?|example|note|tip|warning|todo|usage|instructions?):\s*$/im, // Section headers
+      /^##?\s+/m,              // Markdown headers
+      /^\*{3,}$/m,             // Horizontal rules
+      /\bshould\b.*\bwithout\b/i, // Documentation prose ("should see... without")
+      /\beach\s+\w+\s+should\b/i, // "Each X should" documentation
+    ],
   },
 
   // Long task detection for notifications

@@ -497,6 +497,23 @@ class PtyManager {
       confidence += 15;
     }
 
+    // Reduce confidence for documentation-style content
+    if (config.optionDetection.negativePatterns) {
+      for (const pattern of config.optionDetection.negativePatterns) {
+        if (pattern.test(clean)) {
+          confidence -= 20;
+          break;
+        }
+      }
+    }
+
+    // Reduce confidence if numbered items are too long (documentation prose)
+    const numberedLines = lines.filter(l => /^\s*\d[.):\]]\s+/.test(l.trim()));
+    const avgLength = numberedLines.reduce((sum, l) => sum + l.trim().length, 0) / (numberedLines.length || 1);
+    if (avgLength > 60) {
+      confidence -= 15; // Long lines suggest documentation, not menu options
+    }
+
     // Only detect if confidence meets threshold
     if (confidence >= config.optionDetection.confidenceThreshold) {
       return {
