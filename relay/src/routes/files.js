@@ -2,13 +2,14 @@ const express = require('express');
 const fs = require('fs').promises;
 const path = require('path');
 const logger = require('../logger');
-const ptyManager = require('../pty-manager');
+const ptyRegistry = require('../pty-registry');
 
 const router = express.Router();
 
-// Get working directory from PTY manager
+// Get working directory from PTY registry (default instance)
 function getWorkingDir() {
-  return ptyManager.currentWorkingDir;
+  const defaultInstance = ptyRegistry.getDefault();
+  return defaultInstance?.currentWorkingDir;
 }
 
 // Ensure path is within working directory (security)
