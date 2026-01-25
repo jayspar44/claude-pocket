@@ -1,5 +1,4 @@
 const PtyManager = require('./pty-manager');
-const config = require('./config');
 const logger = require('./logger');
 
 // Maximum number of concurrent PTY instances

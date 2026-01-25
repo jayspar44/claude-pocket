@@ -47,11 +47,68 @@ app/src/                         relay/src/
 └─ api/relay-api.js
 ```
 
+## Development Environment
+
+**Local development, remote deployment:**
+- Code runs locally in this repo (`claude-pocket-dev`)
+- Production deploys to `minibox` (Mac Mini on Tailscale)
+- Claude can directly read/write files and run commands locally
+- **No SSH needed** unless connecting to minibox for logs/status/deploy
+
+**When to use SSH:**
+- Only for `/deploy`, `/logs`, `/status`, `/restart`, `/stop` commands
+- These slash commands handle SSH internally
+- Direct file operations should use local tools (Read, Write, Edit, Bash)
+
 ## Development
 
 ```bash
 npm run install-all && cp relay/.env.example relay/.env
 npm run dev:local    # app:4500, relay:4501
+```
+
+## NPM Scripts
+
+Run from repo root with `npm run <script>`:
+
+| Script | Description |
+|--------|-------------|
+| `install-all` | Install deps for root, app, and relay |
+| `build` | Install all + build app |
+| `lint` | ESLint both app and relay |
+| `start` | Start relay server |
+| `dev` | Start relay with nodemon |
+| `dev:local` | Start app + relay with local ports |
+| `dev:relay` | Start relay only (dev mode) |
+| `dev:app` | Start app only (dev mode) |
+| `build:app` | Build app for production |
+| `android` | Open Android Studio (prod config) |
+| `android:dev` | Open Android Studio (dev config) |
+| `android:local` | Open Android Studio (local relay) |
+| `android:local-livereload` | Android with live reload |
+| `apk` | Build APK (default) |
+| `apk:dev` | Build APK (dev config) |
+| `apk:local` | Build APK (local relay) |
+| `apk:prod` | Build APK (prod config) |
+| `test:app` | Run app tests |
+| `deploy` | Run deploy script |
+| `pm2:start` | Start PM2 services |
+| `pm2:stop` | Stop PM2 services |
+| `pm2:restart` | Restart PM2 services |
+| `pm2:logs` | Tail PM2 logs |
+| `pm2:status` | Check PM2 status |
+| `version:get` | Get current version |
+| `release` | Auto version bump |
+| `release:patch` | Force patch bump |
+| `release:minor` | Force minor bump |
+| `release:major` | Force major bump |
+| `release:first` | First release |
+
+**Common usage:**
+```bash
+npm run lint           # Check code quality (NOT lint:app or lint:relay)
+npm run dev:local      # Full local dev environment
+npm run build          # Production build
 ```
 
 ## Environment Variables

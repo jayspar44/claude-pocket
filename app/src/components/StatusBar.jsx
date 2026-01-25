@@ -59,81 +59,87 @@ function StatusBar({ connectionState, ptyStatus, workingDir, ptyError, onReconne
 
   // Folder name from working directory
   const folderName = getFolderName(workingDir);
+  const gitBranch = ptyStatus?.gitBranch;
+
+  // Show context row only when connected and have folder info
+  const showContextRow = isConnected && folderName;
 
   return (
-    <div className="flex items-center justify-between px-3 py-2 bg-gray-800 border-b border-gray-700 safe-area-top min-h-[44px]">
-      {/* Connection + PTY status */}
-      <div className="flex items-center gap-3">
-        {/* Environment badge */}
-        {envStyle && (
-          <span className={`px-1.5 py-0.5 text-[10px] font-bold rounded ${envStyle.color} text-white`}>
-            {envStyle.text}
-          </span>
-        )}
+    <div className="bg-gray-800 border-b border-gray-700 safe-area-top">
+      {/* Row 1: Connection status + Settings (always visible) */}
+      <div className="flex items-center justify-between px-3 py-2 min-h-[44px]">
+        <div className="flex items-center gap-3">
+          {/* Environment badge */}
+          {envStyle && (
+            <span className={`px-1.5 py-0.5 text-[10px] font-bold rounded ${envStyle.color} text-white`}>
+              {envStyle.text}
+            </span>
+          )}
 
-        {/* Relay connection */}
-        <div className="flex items-center gap-1.5 h-4">
-          <div className={`w-2 h-2 rounded-full shrink-0 ${connStatus.color}`} />
-          <ConnIcon
-            className={`w-4 h-4 text-gray-400 shrink-0 ${connStatus.animate ? 'animate-spin' : ''}`}
-          />
-          <span className="text-xs text-gray-400 leading-4">{connStatus.label}</span>
+          {/* Relay connection */}
+          <div className="flex items-center gap-1.5 h-4">
+            <div className={`w-2 h-2 rounded-full shrink-0 ${connStatus.color}`} />
+            <ConnIcon
+              className={`w-4 h-4 text-gray-400 shrink-0 ${connStatus.animate ? 'animate-spin' : ''}`}
+            />
+            <span className="text-xs text-gray-400 leading-4">{connStatus.label}</span>
+          </div>
+
+          {/* PTY status - show when connected */}
+          {isConnected && (
+            <>
+              <span className="text-gray-600">|</span>
+              <div className="flex items-center gap-1.5 h-4">
+                <div className={`w-2 h-2 rounded-full shrink-0 ${ptyError ? 'bg-red-500' : ptyState.color}`} />
+                <PtyIcon className="w-4 h-4 text-gray-400 shrink-0" />
+                <span className="text-xs text-gray-400 leading-4">{ptyState.label}</span>
+              </div>
+            </>
+          )}
         </div>
 
-        {/* PTY status - show when connected */}
-        {isConnected && (
-          <>
-            <span className="text-gray-600">|</span>
-            <div className="flex items-center gap-1.5 h-4">
-              <div className={`w-2 h-2 rounded-full shrink-0 ${ptyError ? 'bg-red-500' : ptyState.color}`} />
-              <PtyIcon className="w-4 h-4 text-gray-400 shrink-0" />
-              <span className="text-xs text-gray-400 leading-4">{ptyState.label}</span>
-            </div>
-            {/* Folder name and git branch */}
-            {folderName && (
-              <>
-                <span className="text-gray-600">|</span>
-                <span className="text-xs text-gray-500 truncate max-w-[120px]">{folderName}</span>
-                {ptyStatus?.gitBranch && (
-                  <>
-                    <span className="text-gray-600">:</span>
-                    <span className="text-xs text-blue-400 truncate max-w-[80px]">{ptyStatus.gitBranch}</span>
-                  </>
-                )}
-              </>
-            )}
-          </>
-        )}
+        {/* Right side: Reconnect + Settings */}
+        <div className="flex items-center gap-2">
+          {showReconnect && onReconnect && (
+            <button
+              onClick={onReconnect}
+              disabled={isReconnecting}
+              className="flex items-center gap-1 px-2 py-1 text-xs font-medium text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50 rounded-md transition-colors"
+            >
+              <RefreshCw className={`w-4 h-4 ${isReconnecting ? 'animate-spin' : ''}`} />
+              <span>Reconnect</span>
+            </button>
+          )}
+          <Link
+            to="/settings"
+            className="p-1.5 text-gray-400 hover:text-white hover:bg-gray-700 rounded-md transition-colors"
+            aria-label="Settings"
+          >
+            <Settings className="w-4 h-4" />
+          </Link>
+        </div>
       </div>
 
-      {/* PTY Error message */}
+      {/* Row 2: Context info (only when connected + folder exists) */}
+      {showContextRow && (
+        <div className="flex items-center gap-2 px-3 py-1.5 border-t border-gray-700/50 bg-gray-800/50">
+          <span className="text-xs text-gray-500 truncate flex-1 min-w-0">{folderName}</span>
+          {gitBranch && (
+            <>
+              <span className="text-gray-600 shrink-0">:</span>
+              <span className="text-xs text-blue-400 truncate max-w-[120px]">{gitBranch}</span>
+            </>
+          )}
+        </div>
+      )}
+
+      {/* PTY Error (when present) */}
       {ptyError && isConnected && (
-        <div className="flex items-center gap-1.5 mx-2 px-2 py-0.5 bg-red-900/50 rounded">
+        <div className="flex items-center gap-1.5 px-3 py-1.5 border-t border-red-900/50 bg-red-900/30">
           <AlertCircle className="w-3.5 h-3.5 text-red-400 shrink-0" />
           <span className="text-xs text-red-300 truncate">{ptyError}</span>
         </div>
       )}
-
-      {/* Right side: Reconnect + Settings */}
-      <div className="flex items-center gap-2">
-        {showReconnect && onReconnect && (
-          <button
-            onClick={onReconnect}
-            disabled={isReconnecting}
-            className="flex items-center gap-1 px-2 py-1 text-xs font-medium text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50 rounded-md transition-colors"
-          >
-            <RefreshCw className={`w-4 h-4 ${isReconnecting ? 'animate-spin' : ''}`} />
-            <span>Reconnect</span>
-          </button>
-        )}
-        <Link
-          to="/settings"
-          className="p-1.5 text-gray-400 hover:text-white hover:bg-gray-700 rounded-md transition-colors"
-          aria-label="Settings"
-        >
-          <Settings className="w-4 h-4" />
-        </Link>
-      </div>
     </div>
   );
 }
