@@ -63,7 +63,27 @@ APP_SERVICE="claude-pocket-app-dev"
 RELAY_SERVICE="claude-pocket-relay-dev"
 ```
 
-### 3. Check PM2 Status
+### 3. Setup Execution Helpers
+
+Add helper functions to detect if running locally on minibox:
+
+```bash
+# Check if already on minibox (hostname is "MiniBox.local" or "MiniBox")
+is_on_minibox() {
+  [[ "$(hostname)" == "MiniBox"* ]] || [[ "$(hostname -s 2>/dev/null)" == minibox* ]]
+}
+
+# Run command locally or via SSH
+run_on_minibox() {
+  if is_on_minibox; then
+    eval "$1"
+  else
+    ssh minibox.rattlesnake-mimosa.ts.net "$1"
+  fi
+}
+```
+
+### 4. Check PM2 Status
 
 ```bash
 echo "============================================"
@@ -71,10 +91,18 @@ echo "   $ENV Status - minibox"
 echo "============================================"
 echo ""
 
+# Show execution mode
+if is_on_minibox; then
+  echo "   Execution: Local (on minibox)"
+else
+  echo "   Execution: Remote (via SSH)"
+fi
+echo ""
+
 echo "PM2 Process Status"
 echo "--------------------------------------------"
 
-ssh minibox.rattlesnake-mimosa.ts.net "pm2 status"
+run_on_minibox "pm2 status"
 
 if [[ $? -ne 0 ]]; then
   echo ""
@@ -83,17 +111,17 @@ if [[ $? -ne 0 ]]; then
 fi
 ```
 
-### 4. Show Resource Usage
+### 5. Show Resource Usage
 
 ```bash
 echo ""
 echo "Resource Usage ($ENV)"
 echo "--------------------------------------------"
 
-ssh minibox.rattlesnake-mimosa.ts.net "pm2 show $APP_SERVICE 2>/dev/null | grep -E '(cpu|memory|uptime|restarts)' || echo 'App not running'"
+run_on_minibox "pm2 show $APP_SERVICE 2>/dev/null | grep -E '(cpu|memory|uptime|restarts)' || echo 'App not running'"
 ```
 
-### 5. Health Check (Optional)
+### 6. Health Check (Optional)
 
 Only run if `--health` flag provided:
 
@@ -128,7 +156,7 @@ curl -s "http://minibox.rattlesnake-mimosa.ts.net:$RELAY_PORT/api/pty/status" | 
 echo ""
 ```
 
-### 6. Summary
+### 7. Summary
 
 ```bash
 echo ""

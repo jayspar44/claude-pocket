@@ -77,10 +77,26 @@ export const filesApi = {
 // Health API
 export const healthApi = {
   check: () => relayApi.get('/api/health'),
-  ptyStatus: () => relayApi.get('/api/pty/status'),
-  restartPty: () => relayApi.post('/api/pty/restart'),
-  startPty: (workingDir) => relayApi.post('/api/pty/start', { workingDir }),
-  stopPty: () => relayApi.post('/api/pty/stop'),
+  ptyStatus: (instanceId) => relayApi.get('/api/pty/status', { params: { instanceId } }),
+  restartPty: (workingDir, instanceId) => relayApi.post('/api/pty/restart', { workingDir, instanceId }),
+  startPty: (workingDir, instanceId) => relayApi.post('/api/pty/start', { workingDir, instanceId }),
+  stopPty: (instanceId, clearBuffer = true) => relayApi.post('/api/pty/stop', { instanceId, clearBuffer }),
+};
+
+// Instances API - Multi-PTY support
+export const instancesApi = {
+  // List all instances on the relay
+  list: () => relayApi.get('/api/instances'),
+
+  // Create or get an instance (optionally auto-start)
+  create: (instanceId, workingDir, autoStart = false) =>
+    relayApi.post('/api/instances', { instanceId, workingDir, autoStart }),
+
+  // Get specific instance status
+  get: (instanceId) => relayApi.get(`/api/instances/${instanceId}`),
+
+  // Delete an instance
+  delete: (instanceId) => relayApi.delete(`/api/instances/${instanceId}`),
 };
 
 export default relayApi;

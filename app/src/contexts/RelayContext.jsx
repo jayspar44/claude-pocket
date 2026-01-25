@@ -14,9 +14,11 @@ export function RelayProvider({ children }) {
     connectionState: instance.connectionState,
     ptyStatus: instance.ptyStatus,
     error: instance.error,
+    ptyError: instance.ptyError,
     detectedOptions: instance.detectedOptions,
     isConnected: instance.isConnected,
     isReconnecting: instance.isReconnecting,
+    activeInstance: instance.activeInstance,
 
     // Connection actions
     connect: instance.connect,

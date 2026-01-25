@@ -1,21 +1,13 @@
 import { useState, useCallback, useEffect } from 'react';
-import { X, Plus, Trash2, Edit2, Check, Server } from 'lucide-react';
+import { X, Plus, Trash2, Edit2, Check, Server, FolderOpen } from 'lucide-react';
 import { useInstance } from '../../contexts/InstanceContext';
 
-// Build relay presets from env vars (with fallbacks)
-const buildRelayPresets = () => {
+// Build default relay URL from env vars (used for new instances)
+const getDefaultRelayUrl = () => {
   const host = import.meta.env.VITE_RELAY_HOST || 'minibox.rattlesnake-mimosa.ts.net';
   const prodRelayPort = import.meta.env.VITE_PROD_RELAY_PORT || '4501';
-  const devRelayPort = import.meta.env.VITE_DEV_RELAY_PORT || '4503';
-
-  return [
-    { label: 'PROD', url: `ws://${host}:${prodRelayPort}/ws` },
-    { label: 'DEV', url: `ws://${host}:${devRelayPort}/ws` },
-    { label: 'Local', url: 'ws://localhost:4501/ws' },
-  ];
+  return `ws://${host}:${prodRelayPort}/ws`;
 };
-
-const RELAY_PRESETS = buildRelayPresets();
 
 function InstanceManager({ isOpen, onClose, editInstanceId }) {
   const {
@@ -33,7 +25,6 @@ function InstanceManager({ isOpen, onClose, editInstanceId }) {
   const [editingId, setEditingId] = useState(null);
   const [formData, setFormData] = useState({
     name: '',
-    relayUrl: '',
     workingDir: '',
     color: instanceColors[0],
   });
@@ -46,7 +37,6 @@ function InstanceManager({ isOpen, onClose, editInstanceId }) {
         setEditingId(editInstanceId);
         setFormData({
           name: instance.name,
-          relayUrl: instance.relayUrl,
           workingDir: instance.workingDir || '',
           color: instance.color,
         });
@@ -60,7 +50,6 @@ function InstanceManager({ isOpen, onClose, editInstanceId }) {
   const resetForm = useCallback(() => {
     setFormData({
       name: '',
-      relayUrl: RELAY_PRESETS[0].url,
       workingDir: '',
       color: instanceColors[instances.length % instanceColors.length],
     });
@@ -71,7 +60,6 @@ function InstanceManager({ isOpen, onClose, editInstanceId }) {
   const handleAddClick = useCallback(() => {
     setFormData({
       name: `Instance ${instances.length + 1}`,
-      relayUrl: RELAY_PRESETS[0].url,
       workingDir: '',
       color: instanceColors[instances.length % instanceColors.length],
     });
@@ -82,7 +70,6 @@ function InstanceManager({ isOpen, onClose, editInstanceId }) {
     setEditingId(instance.id);
     setFormData({
       name: instance.name,
-      relayUrl: instance.relayUrl,
       workingDir: instance.workingDir || '',
       color: instance.color,
     });
@@ -90,12 +77,13 @@ function InstanceManager({ isOpen, onClose, editInstanceId }) {
   }, []);
 
   const handleSave = useCallback(() => {
-    if (!formData.name.trim() || !formData.relayUrl.trim()) return;
+    if (!formData.name.trim()) return;
 
     if (mode === 'add') {
+      // New instances use the default relay URL (PROD)
       const newInstance = addInstance(
         formData.name.trim(),
-        formData.relayUrl.trim(),
+        getDefaultRelayUrl(),
         formData.workingDir.trim(),
         formData.color
       );
@@ -103,7 +91,6 @@ function InstanceManager({ isOpen, onClose, editInstanceId }) {
     } else if (mode === 'edit' && editingId) {
       updateInstance(editingId, {
         name: formData.name.trim(),
-        relayUrl: formData.relayUrl.trim(),
         workingDir: formData.workingDir.trim(),
         color: formData.color,
       });
@@ -185,9 +172,12 @@ function InstanceManager({ isOpen, onClose, editInstanceId }) {
                       }}
                     >
                       <p className="text-white font-medium truncate">{instance.name}</p>
-                      <p className="text-xs text-gray-400 truncate">
-                        {instance.relayUrl.replace('ws://', '').replace('/ws', '')}
-                      </p>
+                      {instance.workingDir && (
+                        <p className="text-xs text-gray-400 truncate flex items-center gap-1">
+                          <FolderOpen className="w-3 h-3" />
+                          {instance.workingDir.split('/').pop() || instance.workingDir}
+                        </p>
+                      )}
                     </div>
 
                     {/* Connection status */}
@@ -246,36 +236,9 @@ function InstanceManager({ isOpen, onClose, editInstanceId }) {
                 />
               </div>
 
-              {/* Relay URL presets */}
-              <div className="space-y-2">
-                <label className="text-sm text-gray-400">Relay Server</label>
-                <div className="flex gap-2">
-                  {RELAY_PRESETS.map((preset) => (
-                    <button
-                      key={preset.url}
-                      onClick={() => setFormData(prev => ({ ...prev, relayUrl: preset.url }))}
-                      className={`flex-1 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
-                        formData.relayUrl === preset.url
-                          ? 'bg-blue-600 text-white'
-                          : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
-                      }`}
-                    >
-                      {preset.label}
-                    </button>
-                  ))}
-                </div>
-                <input
-                  type="text"
-                  value={formData.relayUrl}
-                  onChange={(e) => setFormData(prev => ({ ...prev, relayUrl: e.target.value }))}
-                  placeholder="ws://host:port/ws"
-                  className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:border-blue-500"
-                />
-              </div>
-
               {/* Working Directory */}
               <div className="space-y-2">
-                <label className="text-sm text-gray-400">Working Directory (optional)</label>
+                <label className="text-sm text-gray-400">Working Directory</label>
                 <input
                   type="text"
                   value={formData.workingDir}
@@ -283,6 +246,9 @@ function InstanceManager({ isOpen, onClose, editInstanceId }) {
                   placeholder="/path/to/project"
                   className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:border-blue-500"
                 />
+                <p className="text-xs text-gray-500">
+                  Path to your project folder where Claude will run
+                </p>
               </div>
 
               {/* Color picker */}
@@ -312,7 +278,7 @@ function InstanceManager({ isOpen, onClose, editInstanceId }) {
                 </button>
                 <button
                   onClick={handleSave}
-                  disabled={!formData.name.trim() || !formData.relayUrl.trim()}
+                  disabled={!formData.name.trim()}
                   className="flex-1 flex items-center justify-center gap-2 px-4 py-3 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-600 disabled:text-gray-400 rounded-lg text-white transition-colors"
                 >
                   <Check className="w-5 h-5" />

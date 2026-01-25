@@ -98,12 +98,40 @@ APP_SERVICE="claude-pocket-app-dev"
 RELAY_SERVICE="claude-pocket-relay-dev"
 ```
 
-### 3. Display Logs
+### 3. Setup Execution Helpers
+
+Add helper functions to detect if running locally on minibox:
+
+```bash
+# Check if already on minibox (hostname is "MiniBox.local" or "MiniBox")
+is_on_minibox() {
+  [[ "$(hostname)" == "MiniBox"* ]] || [[ "$(hostname -s 2>/dev/null)" == minibox* ]]
+}
+
+# Run command locally or via SSH
+run_on_minibox() {
+  if is_on_minibox; then
+    eval "$1"
+  else
+    ssh minibox.rattlesnake-mimosa.ts.net "$1"
+  fi
+}
+```
+
+### 4. Display Logs
 
 ```bash
 echo "============================================"
 echo "   $ENV Logs - minibox"
 echo "============================================"
+echo ""
+
+# Show execution mode
+if is_on_minibox; then
+  echo "   Execution: Local (on minibox)"
+else
+  echo "   Execution: Remote (via SSH)"
+fi
 echo ""
 
 if [[ "$SERVICE" == "all" ]]; then
@@ -112,9 +140,9 @@ if [[ "$SERVICE" == "all" ]]; then
   echo ""
 
   if [[ "$ERRORS_ONLY" == "true" ]]; then
-    ssh minibox.rattlesnake-mimosa.ts.net "pm2 logs $APP_SERVICE $RELAY_SERVICE --lines $LINES --err"
+    run_on_minibox "pm2 logs $APP_SERVICE $RELAY_SERVICE --lines $LINES --err"
   else
-    ssh minibox.rattlesnake-mimosa.ts.net "pm2 logs $APP_SERVICE $RELAY_SERVICE --lines $LINES --nostream"
+    run_on_minibox "pm2 logs $APP_SERVICE $RELAY_SERVICE --lines $LINES --nostream"
   fi
 
 elif [[ "$SERVICE" == "app" ]]; then
@@ -123,9 +151,9 @@ elif [[ "$SERVICE" == "app" ]]; then
   echo ""
 
   if [[ "$ERRORS_ONLY" == "true" ]]; then
-    ssh minibox.rattlesnake-mimosa.ts.net "pm2 logs $APP_SERVICE --lines $LINES --err"
+    run_on_minibox "pm2 logs $APP_SERVICE --lines $LINES --err"
   else
-    ssh minibox.rattlesnake-mimosa.ts.net "pm2 logs $APP_SERVICE --lines $LINES --nostream"
+    run_on_minibox "pm2 logs $APP_SERVICE --lines $LINES --nostream"
   fi
 
 elif [[ "$SERVICE" == "relay" ]]; then
@@ -134,9 +162,9 @@ elif [[ "$SERVICE" == "relay" ]]; then
   echo ""
 
   if [[ "$ERRORS_ONLY" == "true" ]]; then
-    ssh minibox.rattlesnake-mimosa.ts.net "pm2 logs $RELAY_SERVICE --lines $LINES --err"
+    run_on_minibox "pm2 logs $RELAY_SERVICE --lines $LINES --err"
   else
-    ssh minibox.rattlesnake-mimosa.ts.net "pm2 logs $RELAY_SERVICE --lines $LINES --nostream"
+    run_on_minibox "pm2 logs $RELAY_SERVICE --lines $LINES --nostream"
   fi
 fi
 
@@ -147,7 +175,7 @@ if [[ $? -ne 0 ]]; then
 fi
 ```
 
-### 4. Footer
+### 5. Footer
 
 ```bash
 echo ""

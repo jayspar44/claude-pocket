@@ -38,28 +38,32 @@ if ! command -v pm2 &> /dev/null; then
   npm install -g pm2
 fi
 
-# Install dependencies
+# Install dependencies (--include=dev ensures devDependencies like husky are installed)
 echo ""
-echo "Installing dependencies..."
-npm run install-all
+echo "Installing root dependencies..."
+npm install --include=dev
 
-# Fix node-pty spawn-helper permissions (npm doesn't preserve executable bit)
-if [ -f relay/node_modules/node-pty/prebuilds/darwin-arm64/spawn-helper ]; then
-  chmod +x relay/node_modules/node-pty/prebuilds/darwin-arm64/spawn-helper
-fi
-if [ -f relay/node_modules/node-pty/prebuilds/darwin-x64/spawn-helper ]; then
-  chmod +x relay/node_modules/node-pty/prebuilds/darwin-x64/spawn-helper
-fi
+echo ""
+echo "Installing app dependencies..."
+(cd app && npm install --include=dev)
+
+echo ""
+echo "Installing relay dependencies..."
+(cd relay && npm install --include=dev)
 
 # Build app
 echo ""
 echo "Building $ENV app..."
-cd app && npm run build && cd ..
+(cd app && npm run build)
 
 # Stop existing processes for this environment
 echo ""
 echo "Stopping existing $ENV processes..."
 pm2 delete $APP_SERVICE $RELAY_SERVICE 2>/dev/null || true
+
+# Fix node-pty spawn-helper permissions (npm doesn't preserve executable bit)
+# Must run after npm install and before starting relay
+chmod +x relay/node_modules/node-pty/prebuilds/darwin-*/spawn-helper 2>/dev/null || true
 
 # Start with ecosystem config
 echo ""

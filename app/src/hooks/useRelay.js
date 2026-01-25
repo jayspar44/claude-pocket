@@ -16,6 +16,7 @@ export function useTerminalRelay(terminalRef) {
     submitInput,
     addMessageListener,
     isConnected,
+    clearDetectedOptions,
   } = useRelayContext();
 
   const isSubscribedRef = useRef(false);
@@ -124,6 +125,7 @@ export function useTerminalRelay(terminalRef) {
     sendInterrupt,
     submitInput: handleSubmitInput,
     clearAndReplay: handleClearAndReplay,
+    clearDetectedOptions,
   };
 }
 

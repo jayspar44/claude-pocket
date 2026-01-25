@@ -1,4 +1,4 @@
-import { StopCircle, CornerDownLeft, FolderOpen, Camera, RotateCcw, ChevronUp, ChevronDown, ChevronLeft, ChevronRight, ArrowUp } from 'lucide-react';
+import { StopCircle, CornerDownLeft, FolderOpen, Camera, RotateCcw, ChevronUp, ChevronDown, ChevronLeft, ChevronRight, ArrowUp, X } from 'lucide-react';
 
 // Row 1: Navigation keys
 const navActions = [
@@ -22,7 +22,7 @@ const actionButtons = [
   { id: 'camera', label: 'Image', icon: Camera, color: 'bg-cyan-600 hover:bg-cyan-700' },
 ];
 
-function QuickActions({ onAction, onOpenCommands, onOpenFiles, onOpenCamera, ctrlActive = false, onCtrlToggle, disabled = false, detectedOptions = [] }) {
+function QuickActions({ onAction, onOpenCommands, onOpenFiles, onOpenCamera, ctrlActive = false, onCtrlToggle, disabled = false, detectedOptions = [], onDismissOptions }) {
   return (
     <div className="flex flex-col bg-gray-800 border-t border-gray-700">
       {/* Row 0: Detected option buttons (dynamic) */}
@@ -42,6 +42,14 @@ function QuickActions({ onAction, onOpenCommands, onOpenFiles, onOpenCamera, ctr
               </button>
             ))}
           </div>
+          {/* Dismiss button */}
+          <button
+            onClick={onDismissOptions}
+            className="p-1.5 text-gray-400 hover:text-white hover:bg-gray-700 rounded transition-colors shrink-0"
+            aria-label="Dismiss options"
+          >
+            <X className="w-4 h-4" />
+          </button>
         </div>
       )}
 

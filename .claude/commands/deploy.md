@@ -68,12 +68,40 @@ APP_SERVICE="claude-pocket-app-dev"
 RELAY_SERVICE="claude-pocket-relay-dev"
 ```
 
-### 3. Pre-Deploy Check
+### 3. Setup Execution Helpers
+
+Add helper functions to detect if running locally on minibox:
+
+```bash
+# Check if already on minibox (hostname is "MiniBox.local" or "MiniBox")
+is_on_minibox() {
+  [[ "$(hostname)" == "MiniBox"* ]] || [[ "$(hostname -s 2>/dev/null)" == minibox* ]]
+}
+
+# Run command locally or via SSH
+run_on_minibox() {
+  if is_on_minibox; then
+    eval "$1"
+  else
+    ssh minibox.rattlesnake-mimosa.ts.net "$1"
+  fi
+}
+```
+
+### 4. Pre-Deploy Check
 
 ```bash
 echo "============================================"
 echo "   $ENV Deploy - minibox"
 echo "============================================"
+echo ""
+
+# Show execution mode
+if is_on_minibox; then
+  echo "   Execution: Local (on minibox)"
+else
+  echo "   Execution: Remote (via SSH)"
+fi
 echo ""
 
 echo "Pre-Deploy Check"
@@ -93,7 +121,7 @@ echo ""
 echo "Remote Status (minibox)"
 echo "--------------------------------------------"
 
-ssh minibox.rattlesnake-mimosa.ts.net "cd $PROJECT_PATH && git fetch && git status -sb"
+run_on_minibox "cd $PROJECT_PATH && git fetch && git status -sb"
 
 if [[ $? -ne 0 ]]; then
   echo ""
@@ -102,7 +130,7 @@ if [[ $? -ne 0 ]]; then
 fi
 ```
 
-### 4. Confirm Deploy
+### 5. Confirm Deploy
 
 Unless `--skip-confirm` is provided, use AskUserQuestion:
 
@@ -111,7 +139,7 @@ Unless `--skip-confirm` is provided, use AskUserQuestion:
   - "Yes, deploy to $ENV"
   - "Cancel"
 
-### 5. Execute Deploy
+### 6. Execute Deploy
 
 ```bash
 echo ""
@@ -119,7 +147,7 @@ echo "Deploying to $ENV..."
 echo "--------------------------------------------"
 echo ""
 
-ssh minibox.rattlesnake-mimosa.ts.net "cd $PROJECT_PATH && git pull && ./scripts/deploy.sh"
+run_on_minibox "cd $PROJECT_PATH && git pull && ./scripts/deploy.sh"
 
 DEPLOY_EXIT=$?
 
@@ -138,7 +166,7 @@ if [[ $DEPLOY_EXIT -ne 0 ]]; then
 fi
 ```
 
-### 6. Verify Deployment
+### 7. Verify Deployment
 
 ```bash
 echo ""
@@ -148,7 +176,7 @@ echo ""
 
 # Show PM2 status (filtered to env-specific services)
 echo "Service Status"
-ssh minibox.rattlesnake-mimosa.ts.net "pm2 status"
+run_on_minibox "pm2 status"
 
 # Health check
 echo ""
@@ -174,7 +202,7 @@ else
 fi
 ```
 
-### 7. Summary
+### 8. Summary
 
 ```bash
 echo ""
