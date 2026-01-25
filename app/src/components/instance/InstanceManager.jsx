@@ -221,7 +221,7 @@ function InstanceManager({ isOpen, onClose, editInstanceId, startInAddMode }) {
         </div>
 
         {/* Content */}
-        <div className="flex-1 overflow-y-auto p-4">
+        <div className="flex-1 overflow-y-auto p-4 safe-area-bottom">
           {mode === 'list' ? (
             <div className="space-y-2">
               {instances.map((instance) => {
@@ -389,9 +389,9 @@ function InstanceManager({ isOpen, onClose, editInstanceId, startInAddMode }) {
               </div>
 
               {/* Color picker */}
-              <div className="space-y-2">
+              <div className="space-y-3">
                 <label className="text-sm text-gray-400">Color</label>
-                <div className="flex gap-2">
+                <div className="flex gap-3">
                   {instanceColors.map((color) => (
                     <button
                       key={color}
@@ -406,7 +406,7 @@ function InstanceManager({ isOpen, onClose, editInstanceId, startInAddMode }) {
               </div>
 
               {/* Actions */}
-              <div className="flex gap-3 pt-2">
+              <div className="flex gap-3 pt-4 mt-2">
                 <button
                   onClick={resetForm}
                   className="flex-1 px-4 py-3 bg-gray-700 hover:bg-gray-600 rounded-lg text-white transition-colors"
