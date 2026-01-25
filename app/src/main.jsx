@@ -17,6 +17,46 @@ window.addEventListener('unhandledrejection', function (event) {
   logger.error('Unhandled rejection:', event.reason);
 });
 
+// Register Service Worker for web notifications (PWA)
+if ('serviceWorker' in navigator && !Capacitor.isNativePlatform()) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/sw.js')
+      .then((registration) => {
+        logger.info('Service Worker registered:', registration.scope);
+
+        // Handle updates
+        registration.onupdatefound = () => {
+          const installingWorker = registration.installing;
+          if (installingWorker) {
+            installingWorker.onstatechange = () => {
+              if (installingWorker.state === 'installed' && navigator.serviceWorker.controller) {
+                // New SW available, trigger update
+                logger.info('New Service Worker available');
+                installingWorker.postMessage({ type: 'SKIP_WAITING' });
+              }
+            };
+          }
+        };
+      })
+      .catch((error) => {
+        logger.error('Service Worker registration failed:', error);
+      });
+
+    // Listen for SW messages (e.g., notification clicks)
+    navigator.serviceWorker.addEventListener('message', (event) => {
+      if (event.data?.type === 'sw-switch-instance') {
+        // Dispatch custom event for InstanceContext to handle
+        window.dispatchEvent(new CustomEvent('sw-switch-instance', {
+          detail: {
+            instanceId: event.data.instanceId,
+            notificationType: event.data.notificationType,
+          },
+        }));
+      }
+    });
+  });
+}
+
 // Configure status bar for native platforms
 if (Capacitor.isNativePlatform()) {
   // Initialize safe area plugin

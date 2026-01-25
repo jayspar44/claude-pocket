@@ -1,8 +1,24 @@
 const pty = require('node-pty');
 const fs = require('fs');
 const path = require('path');
+const { execSync } = require('child_process');
 const config = require('./config');
 const logger = require('./logger');
+
+// Helper to get current git branch (fast, called on each status request)
+function getGitBranch(cwd) {
+  if (!cwd) return null;
+  try {
+    return execSync('git branch --show-current', {
+      cwd,
+      encoding: 'utf8',
+      timeout: 1000,  // 1s timeout to prevent blocking
+      stdio: ['pipe', 'pipe', 'pipe']  // Suppress stderr
+    }).trim() || null;
+  } catch {
+    return null;  // Not a git repo or error
+  }
+}
 
 // Batch delay for output messages (reduces WebSocket overhead, improves performance)
 const BATCH_DELAY_MS = 50;
@@ -518,6 +534,7 @@ class PtyManager {
       bufferSize: this.outputBufferSize,
       bufferLines: this.outputBuffer.join('').split('\n').length,
       workingDir: this.currentWorkingDir,
+      gitBranch: getGitBranch(this.currentWorkingDir),  // Dynamic git branch
       processingStartTime: this.processingStartTime,
     };
   }

@@ -89,11 +89,17 @@ function StatusBar({ connectionState, ptyStatus, workingDir, ptyError, onReconne
               <PtyIcon className="w-4 h-4 text-gray-400 shrink-0" />
               <span className="text-xs text-gray-400 leading-4">{ptyState.label}</span>
             </div>
-            {/* Folder name */}
+            {/* Folder name and git branch */}
             {folderName && (
               <>
                 <span className="text-gray-600">|</span>
                 <span className="text-xs text-gray-500 truncate max-w-[120px]">{folderName}</span>
+                {ptyStatus?.gitBranch && (
+                  <>
+                    <span className="text-gray-600">:</span>
+                    <span className="text-xs text-blue-400 truncate max-w-[80px]">{ptyStatus.gitBranch}</span>
+                  </>
+                )}
               </>
             )}
           </>

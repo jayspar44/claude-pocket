@@ -85,7 +85,27 @@ APP_SERVICE="claude-pocket-app-dev"
 RELAY_SERVICE="claude-pocket-relay-dev"
 ```
 
-### 3. Confirm Action
+### 3. Setup Execution Helpers
+
+Add helper functions to detect if running locally on minibox:
+
+```bash
+# Check if already on minibox (hostname is "MiniBox.local" or "MiniBox")
+is_on_minibox() {
+  [[ "$(hostname)" == "MiniBox"* ]] || [[ "$(hostname -s 2>/dev/null)" == minibox* ]]
+}
+
+# Run command locally or via SSH
+run_on_minibox() {
+  if is_on_minibox; then
+    eval "$1"
+  else
+    ssh minibox.rattlesnake-mimosa.ts.net "$1"
+  fi
+}
+```
+
+### 4. Confirm Action
 
 Use AskUserQuestion to confirm:
 
@@ -96,7 +116,7 @@ Use AskUserQuestion to confirm:
   - "relay": "Restart relay only"
   - "Cancel"
 
-### 4. Execute Restart
+### 5. Execute Restart
 
 ```bash
 echo "============================================"
@@ -104,23 +124,31 @@ echo "   Restarting $ENV - minibox"
 echo "============================================"
 echo ""
 
+# Show execution mode
+if is_on_minibox; then
+  echo "   Execution: Local (on minibox)"
+else
+  echo "   Execution: Remote (via SSH)"
+fi
+echo ""
+
 if [[ "$SERVICE" == "all" ]]; then
   echo "Restarting all $ENV services..."
   echo "--------------------------------------------"
 
-  ssh minibox.rattlesnake-mimosa.ts.net "pm2 restart $APP_SERVICE $RELAY_SERVICE"
+  run_on_minibox "pm2 restart $APP_SERVICE $RELAY_SERVICE"
 
 elif [[ "$SERVICE" == "app" ]]; then
   echo "Restarting $ENV app..."
   echo "--------------------------------------------"
 
-  ssh minibox.rattlesnake-mimosa.ts.net "pm2 restart $APP_SERVICE"
+  run_on_minibox "pm2 restart $APP_SERVICE"
 
 elif [[ "$SERVICE" == "relay" ]]; then
   echo "Restarting $ENV relay..."
   echo "--------------------------------------------"
 
-  ssh minibox.rattlesnake-mimosa.ts.net "pm2 restart $RELAY_SERVICE"
+  run_on_minibox "pm2 restart $RELAY_SERVICE"
 fi
 
 RESTART_EXIT=$?
@@ -132,7 +160,7 @@ if [[ $RESTART_EXIT -ne 0 ]]; then
 fi
 ```
 
-### 5. Verify Status
+### 6. Verify Status
 
 ```bash
 echo ""
@@ -142,7 +170,7 @@ echo "--------------------------------------------"
 # Wait a moment for services to stabilize
 sleep 2
 
-ssh minibox.rattlesnake-mimosa.ts.net "pm2 status"
+run_on_minibox "pm2 status"
 
 echo ""
 echo "============================================"

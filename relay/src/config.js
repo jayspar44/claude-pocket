@@ -47,7 +47,7 @@ const config = {
       /^(\d)[.):\]]\s+\S/,     // 1. text, 1) text, 1: text
       /^\[(\d)\]\s+\S/,        // [1] text
       /^\((\d)\)\s+\S/,        // (1) text
-      /^[❯►→]\s*(\d)[.)]\s+\S/, // ❯ 1. text (cursor prefix)
+      /^[>❯►→]\s*(\d)[.)]\s+\S/, // > 1. text, ❯ 1. text (cursor/selection prefix)
     ],
 
     // Confidence boosters

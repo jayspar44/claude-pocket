@@ -14,6 +14,7 @@ const DEFAULT_SETTINGS = {
 class NotificationService {
   constructor() {
     this.LocalNotifications = null;
+    this.swRegistration = null;
     this.initialized = false;
     this.settings = this.loadSettings();
   }
@@ -42,7 +43,7 @@ class NotificationService {
   async init() {
     if (this.initialized) return;
 
-    // Only initialize on native platforms
+    // Native platform - use Capacitor LocalNotifications
     if (Capacitor.isNativePlatform()) {
       try {
         const { LocalNotifications } = await import('@capacitor/local-notifications');
@@ -60,14 +61,28 @@ class NotificationService {
         console.warn('[NotificationService] Local notifications not available:', e.message);
       }
     } else {
-      // Web fallback - use Web Notification API
-      if ('Notification' in window) {
-        const permission = await Notification.requestPermission();
-        if (permission === 'granted') {
+      // Web platform - use Service Worker notifications
+      if ('serviceWorker' in navigator && 'Notification' in window) {
+        try {
+          // Request notification permission
+          const permission = await Notification.requestPermission();
+          if (permission !== 'granted') {
+            console.warn('[NotificationService] Web notification permission denied');
+            return;
+          }
+
+          // Get SW registration
+          this.swRegistration = await navigator.serviceWorker.ready;
           this.initialized = true;
-          console.log('[NotificationService] Initialized with Web Notifications');
-        } else {
-          console.warn('[NotificationService] Web notification permission denied');
+          console.log('[NotificationService] Initialized with Service Worker notifications');
+        } catch (e) {
+          console.warn('[NotificationService] Service Worker notifications not available:', e.message);
+
+          // Fallback to basic Notification API
+          if ('Notification' in window && Notification.permission === 'granted') {
+            this.initialized = true;
+            console.log('[NotificationService] Initialized with basic Web Notifications');
+          }
         }
       }
     }
@@ -85,23 +100,32 @@ class NotificationService {
 
     await this.init();
 
+    const tag = `claude-pocket-${type}-${instanceId || 'default'}`;
+    const data = { instanceId, type };
+
     if (Capacitor.isNativePlatform() && this.LocalNotifications) {
-      // Native notification
+      // Native notification via Capacitor
       await this.LocalNotifications.schedule({
         notifications: [
           {
             id: Date.now(),
             title,
             body,
-            extra: { instanceId, type },
+            extra: data,
             sound: 'default',
             smallIcon: 'ic_notification',
           },
         ],
       });
+    } else if (this.swRegistration) {
+      // Service Worker notification (works in background on mobile Chrome)
+      this.swRegistration.active?.postMessage({
+        type: 'SHOW_NOTIFICATION',
+        payload: { title, body, tag, data },
+      });
     } else if ('Notification' in window && Notification.permission === 'granted') {
-      // Web notification fallback
-      new Notification(title, { body, tag: `claude-pocket-${type}` });
+      // Basic web notification fallback
+      new Notification(title, { body, tag, data });
     }
   }
 
@@ -132,6 +156,26 @@ class NotificationService {
       instanceId,
       type: 'task-complete',
     });
+  }
+
+  // Check if notifications are supported
+  isSupported() {
+    if (Capacitor.isNativePlatform()) {
+      return true;
+    }
+    return 'serviceWorker' in navigator && 'Notification' in window;
+  }
+
+  // Get current permission status
+  async getPermissionStatus() {
+    if (Capacitor.isNativePlatform() && this.LocalNotifications) {
+      const result = await this.LocalNotifications.checkPermissions();
+      return result.display;
+    }
+    if ('Notification' in window) {
+      return Notification.permission;
+    }
+    return 'denied';
   }
 }
 

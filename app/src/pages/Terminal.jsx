@@ -156,7 +156,7 @@ function Terminal() {
       style={{ height: viewportHeight ? `${viewportHeight}px` : '100dvh' }}
     >
       {/* Status Bar */}
-      <StatusBar connectionState={connectionState} ptyStatus={ptyStatus} onReconnect={connect} workingDir={activeInstance?.workingDir} ptyError={ptyError} />
+      <StatusBar connectionState={connectionState} ptyStatus={ptyStatus} onReconnect={connect} workingDir={ptyStatus?.workingDir || activeInstance?.workingDir} ptyError={ptyError} />
 
       {/* Instance Tab Bar */}
       <InstanceTabBar onManageClick={handleManageInstance} />
