@@ -186,7 +186,7 @@ export default function Settings() {
       </div>
 
       {/* Content */}
-      <div className="flex-1 overflow-y-auto p-4 space-y-6 safe-area-bottom safe-area-left safe-area-right">
+      <div className="flex-1 overflow-y-auto p-4 space-y-6 safe-area-left safe-area-right">
         {/* Connection */}
         <div className="bg-gray-800 rounded-xl p-4 space-y-4">
           <div className="flex items-center gap-2">
@@ -423,6 +423,9 @@ export default function Settings() {
             )}
           </div>
         </div>
+
+        {/* Safe area spacer for Android navigation bar */}
+        <div className="safe-area-bottom" />
       </div>
     </div>
   );
