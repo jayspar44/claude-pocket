@@ -2,22 +2,29 @@
 /* global process */
 
 /**
- * APK Build Script
+ * AAB Build Script
  *
- * Builds an Android APK via Gradle and optionally copies it to an output directory.
+ * Builds an Android App Bundle (AAB) via Gradle and copies it to output directory.
+ * For Play Store uploads, use release builds.
  *
  * Usage:
- *   node scripts/build-apk.js [flavor] [buildType]
+ *   node scripts/build-aab.js [flavor] [buildType]
  *
  * Arguments:
- *   flavor    - local, dev, prod (default: dev)
- *   buildType - debug, release (default: debug)
+ *   flavor    - dev, prod (default: dev) - note: local not supported for AAB
+ *   buildType - debug, release (default: release)
  *
  * Examples:
- *   node scripts/build-apk.js              # Build devDebug
- *   node scripts/build-apk.js dev debug    # Build devDebug
- *   node scripts/build-apk.js local debug  # Build localDebug
- *   node scripts/build-apk.js prod release # Build prodRelease
+ *   node scripts/build-aab.js              # Build dev release AAB
+ *   node scripts/build-aab.js dev release  # Build dev release AAB
+ *   node scripts/build-aab.js prod release # Build prod release AAB
+ *
+ * Environment:
+ *   For release builds, set these environment variables:
+ *   - KEYSTORE_PATH     - Path to keystore file (required)
+ *   - KEYSTORE_PASSWORD - Keystore password
+ *   - KEY_ALIAS         - Key alias name
+ *   - KEY_PASSWORD      - Key password
  */
 
 import { existsSync, copyFileSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
@@ -32,9 +39,8 @@ const frontendDir = join(__dirname, '..');
 const androidDir = join(frontendDir, 'android');
 const configPath = join(frontendDir, 'capacitor.config.json');
 
-// Output directory for APKs (same as AABs for consistency)
-// Default: ~/aabs-dev (separate from PROD's ~/aabs)
-const APK_OUTPUT_PATH = process.env.APK_OUTPUT_PATH || join(homedir(), 'aabs-dev');
+// Output destination (separate from PROD's ~/aabs)
+const OUTPUT_PATH = process.env.AAB_OUTPUT_PATH || join(homedir(), 'aabs-dev');
 
 // App configuration
 const APP_ID_BASE = 'com.claudecode.pocket';
@@ -52,18 +58,12 @@ const colors = {
   cyan: '\x1b[36m',
 };
 
-// Valid flavors and build types
-const VALID_FLAVORS = ['local', 'dev', 'prod'];
+// Valid flavors and build types (local not supported for AAB - no Play Store use case)
+const VALID_FLAVORS = ['dev', 'prod'];
 const VALID_BUILD_TYPES = ['debug', 'release'];
 
-// Flavor configurations (matching android-build.js)
+// Flavor configurations
 const flavorConfigs = {
-  local: {
-    appId: `${APP_ID_BASE}.local`,
-    appName: `${APP_NAME} (local)`,
-    server: { androidScheme: 'http', cleartext: true },
-    buildMode: 'android-local'
-  },
   dev: {
     appId: `${APP_ID_BASE}.dev`,
     appName: `${APP_NAME} (dev)`,
@@ -80,7 +80,7 @@ const flavorConfigs = {
 
 // Parse command line arguments
 const flavor = process.argv[2] || 'dev';
-const buildType = process.argv[3] || 'debug';
+const buildType = process.argv[3] || 'release';
 
 // Validate arguments
 if (!VALID_FLAVORS.includes(flavor)) {
@@ -124,30 +124,30 @@ function logStep(status, message) {
   console.log(`${icons[status]} ${message}`);
 }
 
+function capitalize(str) {
+  return str.charAt(0).toUpperCase() + str.slice(1);
+}
+
 // Print banner
 function printBanner() {
   const version = getVersion();
   const config = flavorConfigs[flavor];
-  const gradleTask = `assemble${capitalize(buildType)}`;
+  const gradleTask = `bundle${capitalize(buildType)}`;
 
   console.log('');
   console.log(`${colors.bright}========================================${colors.reset}`);
-  console.log(`${colors.bright}  APK BUILD: ${flavor} ${buildType} (v${version})${colors.reset}`);
+  console.log(`${colors.bright}  AAB BUILD: ${flavor} ${buildType} (v${version})${colors.reset}`);
   console.log(`${colors.bright}========================================${colors.reset}`);
   console.log(`  App ID:     ${config.appId}`);
   console.log(`  App Name:   ${config.appName}`);
   console.log(`  Build Type: ${buildType}`);
   console.log(`  Gradle:     ${gradleTask}`);
-  console.log(`  Output:     ${APK_OUTPUT_PATH}`);
+  console.log(`  Output:     ${OUTPUT_PATH}`);
   console.log('');
 }
 
-function capitalize(str) {
-  return str.charAt(0).toUpperCase() + str.slice(1);
-}
-
 // Save original config for restoration
-let originalConfig;
+let originalCapConfig;
 
 // Path to build.gradle and version tracking file
 const buildGradlePath = join(androidDir, 'app', 'build.gradle');
@@ -188,8 +188,8 @@ function updateBuildGradle(newVersionCode) {
 }
 
 // Write the Capacitor config for the build
-function writeConfig() {
-  originalConfig = readFileSync(configPath, 'utf-8');
+function writeCapConfig() {
+  originalCapConfig = readFileSync(configPath, 'utf-8');
   const config = flavorConfigs[flavor];
   const capConfig = {
     appId: config.appId,
@@ -215,13 +215,82 @@ function writeConfig() {
     }
   };
   writeFileSync(configPath, JSON.stringify(capConfig, null, 2));
-  logStep('success', 'Capacitor config updated');
+  logStep('success', `Capacitor config updated for ${flavor}`);
+}
+
+// Setup signing configuration for release builds
+function setupSigning() {
+  if (buildType !== 'release') {
+    logStep('warning', 'Debug build - skipping signing setup');
+    return;
+  }
+
+  // Check if signing config already exists in build.gradle
+  const buildGradle = readFileSync(buildGradlePath, 'utf-8');
+  if (buildGradle.includes('signingConfigs')) {
+    logStep('success', 'Signing config already configured in build.gradle');
+    return;
+  }
+
+  // Only require env vars if signing not already configured
+  const keystorePath = process.env.KEYSTORE_PATH;
+  const keystorePassword = process.env.KEYSTORE_PASSWORD;
+  const keyAlias = process.env.KEY_ALIAS;
+  const keyPassword = process.env.KEY_PASSWORD;
+
+  if (!keystorePath || !keystorePassword || !keyAlias || !keyPassword) {
+    console.error(`${colors.red}Error: Missing required signing credentials${colors.reset}`);
+    console.error('For release builds, set these environment variables:');
+    console.error('  KEYSTORE_PATH     - Path to keystore file');
+    console.error('  KEYSTORE_PASSWORD - Keystore password');
+    console.error('  KEY_ALIAS         - Key alias name');
+    console.error('  KEY_PASSWORD      - Key password');
+    console.error('');
+    console.error('Example (bash):');
+    console.error('  export KEYSTORE_PATH=~/keys/release.keystore');
+    console.error('  export KEYSTORE_PASSWORD="your-password"');
+    console.error('  export KEY_ALIAS="your-alias"');
+    console.error('  export KEY_PASSWORD="your-key-password"');
+    process.exit(1);
+  }
+
+  if (!existsSync(keystorePath)) {
+    console.error(`${colors.red}Error: Keystore not found at: ${keystorePath}${colors.reset}`);
+    process.exit(1);
+  }
+
+  // Insert signing config before buildTypes
+  const signingConfig = `
+    signingConfigs {
+        release {
+            storeFile file("${keystorePath}")
+            storePassword "${keystorePassword}"
+            keyAlias "${keyAlias}"
+            keyPassword "${keyPassword}"
+        }
+    }
+
+`;
+
+  let updatedBuildGradle = buildGradle.replace(
+    /(\s+)(buildTypes\s*\{)/,
+    `$1${signingConfig}$1$2`
+  );
+
+  // Add signingConfig to release buildType
+  updatedBuildGradle = updatedBuildGradle.replace(
+    /(release\s*\{)/,
+    '$1\n            signingConfig signingConfigs.release'
+  );
+
+  writeFileSync(buildGradlePath, updatedBuildGradle);
+  logStep('success', 'Signing config added to build.gradle');
 }
 
 // Restore original config
 function restoreConfig() {
-  if (originalConfig) {
-    writeFileSync(configPath, originalConfig);
+  if (originalCapConfig) {
+    writeFileSync(configPath, originalCapConfig);
     logStep('success', 'Capacitor config restored');
   }
 }
@@ -253,16 +322,15 @@ async function main() {
 
   const version = getVersion();
   const timestamp = getTimestamp();
-  // Standard Capacitor build (no product flavors)
-  const gradleTask = `assemble${capitalize(buildType)}`;
+  const gradleTask = `bundle${capitalize(buildType)}`;
 
-  // APK source path (standard Capacitor output, no flavors)
-  const apkFileName = `app-${buildType}.apk`;
-  const apkSourcePath = join(androidDir, 'app', 'build', 'outputs', 'apk', buildType, apkFileName);
+  // AAB source path (standard Capacitor output, no flavors)
+  const aabFileName = `app-${buildType}.aab`;
+  const aabSourcePath = join(androidDir, 'app', 'build', 'outputs', 'bundle', buildType, aabFileName);
 
-  // APK destination path with versioned name
-  const destFileName = `${APP_NAME}-${flavor}-${buildType}-v${version}-${timestamp}.apk`;
-  const apkDestPath = join(APK_OUTPUT_PATH, destFileName);
+  // AAB destination path with versioned name
+  const destFileName = `${APP_NAME}-${flavor}-${buildType}-v${version}-${timestamp}.aab`;
+  const aabDestPath = join(OUTPUT_PATH, destFileName);
 
   // Setup cleanup handler
   const cleanup = () => {
@@ -274,7 +342,7 @@ async function main() {
 
   try {
     // Step 1: Update Capacitor config
-    writeConfig();
+    writeCapConfig();
 
     // Step 1b: Update version tracking file (so frontend build includes correct versionCode)
     const versionCode = updateVersionTracking();
@@ -298,7 +366,10 @@ async function main() {
     // Step 3c: Update Android build.gradle with versionCode
     updateBuildGradle(versionCode);
 
-    // Step 4: Run Gradle build (platform-specific)
+    // Step 4: Setup signing for release builds
+    setupSigning();
+
+    // Step 5: Run Gradle build
     logStep('running', `Running Gradle: ${gradleTask}...`);
     const gradleCmd = process.platform === 'win32' ? '.\\gradlew.bat' : './gradlew';
     await runCommand(gradleCmd, [gradleTask], { cwd: androidDir });
@@ -307,22 +378,22 @@ async function main() {
     // Restore config before copying
     restoreConfig();
 
-    // Step 5: Verify APK exists
-    if (!existsSync(apkSourcePath)) {
-      throw new Error(`APK not found at: ${apkSourcePath}`);
+    // Step 6: Verify AAB exists
+    if (!existsSync(aabSourcePath)) {
+      throw new Error(`AAB not found at: ${aabSourcePath}`);
     }
-    logStep('success', `APK built: ${apkFileName}`);
+    logStep('success', `AAB built: ${aabFileName}`);
 
-    // Step 6: Ensure output folder exists
-    if (!existsSync(APK_OUTPUT_PATH)) {
-      mkdirSync(APK_OUTPUT_PATH, { recursive: true });
-      logStep('success', `Created directory: ${APK_OUTPUT_PATH}`);
+    // Step 7: Ensure output directory exists
+    if (!existsSync(OUTPUT_PATH)) {
+      mkdirSync(OUTPUT_PATH, { recursive: true });
+      logStep('success', `Created directory: ${OUTPUT_PATH}`);
     }
 
-    // Step 7: Copy APK to output directory
-    logStep('running', 'Copying APK to output directory...');
-    copyFileSync(apkSourcePath, apkDestPath);
-    logStep('success', `APK copied to: ${destFileName}`);
+    // Step 8: Copy AAB to output directory
+    logStep('running', 'Copying AAB to output directory...');
+    copyFileSync(aabSourcePath, aabDestPath);
+    logStep('success', `AAB copied to: ${destFileName}`);
 
     // Success message
     console.log('');
@@ -331,10 +402,16 @@ async function main() {
     console.log(`${colors.green}${colors.bright}========================================${colors.reset}`);
     console.log('');
     console.log(`  ${colors.bright}Source:${colors.reset}`);
-    console.log(`    ${apkSourcePath}`);
+    console.log(`    ${aabSourcePath}`);
     console.log('');
     console.log(`  ${colors.bright}Destination:${colors.reset}`);
-    console.log(`    ${apkDestPath}`);
+    console.log(`    ${aabDestPath}`);
+    console.log('');
+    console.log(`  ${colors.bright}Next steps:${colors.reset}`);
+    console.log(`    1. Go to https://play.google.com/console`);
+    console.log(`    2. Select your app (${flavorConfigs[flavor].appName})`);
+    console.log(`    3. Go to Testing > Internal testing`);
+    console.log(`    4. Create new release and upload the AAB`);
     console.log('');
 
   } catch (error) {

@@ -66,8 +66,8 @@ if (Capacitor.isNativePlatform()) {
 
   // Configure status bar for dark theme
   StatusBar.setOverlaysWebView({ overlay: true });
-  StatusBar.setStyle({ style: Style.Dark }); // light icons on dark background
-  StatusBar.setBackgroundColor({ color: '#1f2937' }); // gray-800
+  StatusBar.setStyle({ style: Style.Light }); // light icons on dark background
+  StatusBar.setBackgroundColor({ color: '#111827' }); // gray-900
 }
 
 createRoot(document.getElementById('root')).render(

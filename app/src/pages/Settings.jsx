@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ChevronLeft, Server, Type, Trash2, Info, Check, FileX, Bell, RotateCcw, Square } from 'lucide-react';
+import { ChevronLeft, Server, Type, Trash2, Info, Check, FileX, Bell, RotateCcw, Square, Download } from 'lucide-react';
 import { useRelay } from '../hooks/useRelay';
 import { healthApi, filesApi, instancesApi } from '../api/relay-api';
 import { version } from '../../../version.json';
@@ -422,6 +422,17 @@ export default function Settings() {
               </div>
             )}
           </div>
+
+          {/* Builds download link */}
+          <a
+            href={getRelayUrl().replace(/^ws/, 'http').replace(/\/ws$/, '') + '/builds'}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex items-center justify-center gap-2 w-full px-4 py-3 bg-cyan-600/20 hover:bg-cyan-600/30 rounded-lg text-cyan-400 transition-colors"
+          >
+            <Download className="w-5 h-5" />
+            <span>Download Builds</span>
+          </a>
         </div>
 
         {/* Safe area spacer for Android navigation bar */}

@@ -123,21 +123,29 @@ function InstanceManager({ isOpen, onClose, editInstanceId, startInAddMode }) {
         formData.color
       );
       switchInstance(newInstance.id);
+      // Close modal after adding (switch to new instance)
+      resetForm();
+      onClose();
+      // Start the PTY if working directory is set
+      if (workingDir) {
+        healthApi.startPty(workingDir, newInstance.id).catch(error => {
+          console.error('Failed to start PTY:', error);
+        });
+      }
     } else if (mode === 'edit' && editingId) {
       updateInstance(editingId, {
         name: formData.name.trim(),
         workingDir,
         color: formData.color,
       });
+      // Go back to list after editing (don't close modal)
+      resetForm();
     }
 
     // Save to recent directories
     if (workingDir) {
       addToRecentDirs(workingDir);
     }
-
-    resetForm();
-    onClose();
   }, [mode, formData, editingId, addInstance, updateInstance, switchInstance, resetForm, onClose, addToRecentDirs]);
 
   const handleDelete = useCallback((instanceId) => {

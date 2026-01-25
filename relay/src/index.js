@@ -10,6 +10,7 @@ const { DEFAULT_INSTANCE_ID } = require('./pty-registry');
 const WebSocketHandler = require('./websocket-handler');
 const commandsRouter = require('./routes/commands');
 const filesRouter = require('./routes/files');
+const buildsRouter = require('./routes/builds');
 
 const app = express();
 const server = http.createServer(app);
@@ -246,6 +247,10 @@ app.post('/api/pty/stop', (req, res) => {
 // API Routes
 app.use('/api/commands', commandsRouter);
 app.use('/api/files', filesRouter);
+app.use('/api/builds', buildsRouter);
+
+// Convenience redirect for builds page
+app.get('/builds', (req, res) => res.redirect('/api/builds/page'));
 
 // Root endpoint
 app.get('/', (req, res) => {
