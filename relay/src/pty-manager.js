@@ -456,18 +456,20 @@ class PtyManager {
       }
     }
 
-    // Find numbered lines using relaxed patterns
+    // Find numbered options using relaxed patterns
+    // Use global matching to find ALL numbers per line (handles inline options like "1. Yes  2. No")
     const numbers = new Set();
     const lines = clean.split('\n');
 
     for (const line of lines) {
       const trimmed = line.trim();
       for (const pattern of config.optionDetection.numberPatterns) {
-        const match = trimmed.match(pattern);
-        if (match) {
+        // Create global version of pattern to find all matches
+        const globalPattern = new RegExp(pattern.source, 'g');
+        let match;
+        while ((match = globalPattern.exec(trimmed)) !== null) {
           const num = parseInt(match[1]);
           if (num >= 1 && num <= 9) numbers.add(num);
-          break;
         }
       }
     }

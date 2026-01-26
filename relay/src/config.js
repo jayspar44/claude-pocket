@@ -44,10 +44,11 @@ const config = {
 
     // Number patterns (relaxed - no capital letter required)
     numberPatterns: [
-      /^(\d)[.):\]]\s+\S/,     // 1. text, 1) text, 1: text
-      /^\[(\d)\]\s+\S/,        // [1] text
-      /^\((\d)\)\s+\S/,        // (1) text
-      /^[>❯►→]\s*(\d)[.)]\s+\S/, // > 1. text, ❯ 1. text (cursor/selection prefix)
+      /^(\d)[.):\]]\s+\S/,              // 1. text, 1) text, 1: text (line start)
+      /^\[(\d)\]\s+\S/,                 // [1] text
+      /^\((\d)\)\s+\S/,                 // (1) text
+      /^[>❯►→›▸▶▷‣⁃]\s*(\d)[.)]\s+\S/, // Selection indicators: > ❯ ► → › ▸ ▶ ▷ ‣ ⁃
+      /\s{2,}(\d)[.)]\s+\S/,            // Inline options: "1. Yes  2. No" (2+ spaces before number)
     ],
 
     // Confidence boosters
