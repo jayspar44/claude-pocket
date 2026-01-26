@@ -133,7 +133,7 @@ class NotificationService {
       await this.LocalNotifications.schedule({
         notifications: [
           {
-            id: Date.now(),
+            id: Date.now() % 2147483647,
             title,
             body,
             extra: data,
