@@ -342,8 +342,8 @@ export function InstanceProvider({ children }) {
             updateInstanceState(instanceId, {
               detectedOptions: message.options || [],
             });
-            // Notify if options detected and instance is not active
-            if (message.options?.length > 0 && instanceId !== activeInstanceId) {
+            // Notify if options detected and app is backgrounded
+            if (message.options?.length > 0 && document.visibilityState !== 'visible') {
               notificationService.notifyInputNeeded({
                 instanceId,
                 optionCount: message.options.length,
@@ -351,11 +351,13 @@ export function InstanceProvider({ children }) {
               });
             }
           } else if (message.type === 'task-complete') {
-            // Notify on long task completion
-            notificationService.notifyTaskComplete({
-              instanceId,
-              duration: message.duration,
-            });
+            // Notify on long task completion (only when app is backgrounded)
+            if (document.visibilityState !== 'visible') {
+              notificationService.notifyTaskComplete({
+                instanceId,
+                duration: message.duration,
+              });
+            }
           } else if (message.type === 'output' || message.type === 'replay') {
             // Mark as unread if not active instance
             if (instanceId !== activeInstanceId) {

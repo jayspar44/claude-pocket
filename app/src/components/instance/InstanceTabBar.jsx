@@ -1,5 +1,5 @@
 import { useCallback } from 'react';
-import { Plus } from 'lucide-react';
+import { Plus, Bell } from 'lucide-react';
 import { useInstance } from '../../contexts/InstanceContext';
 
 export default function InstanceTabBar({ onManageClick }) {
@@ -30,6 +30,7 @@ export default function InstanceTabBar({ onManageClick }) {
         const isActive = instance.id === activeInstanceId;
         const state = getInstanceState(instance.id);
         const hasUnread = state.hasUnread && !isActive;
+        const needsInput = state.detectedOptions?.length > 0;
 
         return (
           <button
@@ -57,6 +58,13 @@ export default function InstanceTabBar({ onManageClick }) {
             {/* Unread indicator */}
             {hasUnread && (
               <span className="w-2 h-2 rounded-full bg-blue-500 flex-shrink-0" />
+            )}
+
+            {/* Needs input indicator */}
+            {needsInput && (
+              <span className="flex items-center justify-center w-4 h-4 rounded-full bg-orange-500 animate-pulse flex-shrink-0">
+                <Bell className="w-2.5 h-2.5 text-white" />
+              </span>
             )}
 
             {/* Connection status indicator */}
