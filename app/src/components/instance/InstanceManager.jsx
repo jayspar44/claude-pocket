@@ -9,15 +9,25 @@ const DEFAULT_WORKING_DIR_PREFIX = '/Users/jayspar/Documents/projects/';
 
 // Build default relay URL matching current app environment
 const getDefaultRelayUrl = () => {
-  const host = import.meta.env.VITE_RELAY_HOST || window.location.hostname;
-  const appPort = window.location.port;
-  const devAppPort = import.meta.env.VITE_DEV_APP_PORT || '4502';
+  const host = import.meta.env.VITE_RELAY_HOST || 'minibox.rattlesnake-mimosa.ts.net';
   const devRelayPort = import.meta.env.VITE_DEV_RELAY_PORT || '4503';
   const prodRelayPort = import.meta.env.VITE_PROD_RELAY_PORT || '4501';
 
-  // Match relay port to app port (DEV app port → DEV relay, else PROD relay)
-  const relayPort = appPort === devAppPort ? devRelayPort : prodRelayPort;
-  return `ws://${host}:${relayPort}/ws`;
+  // For native apps (Capacitor), use VITE_APP_ENV set at build time
+  const appEnv = import.meta.env.VITE_APP_ENV;
+  if (appEnv === 'dev') return `ws://${host}:${devRelayPort}/ws`;
+  if (appEnv === 'prod') return `ws://${host}:${prodRelayPort}/ws`;
+
+  // For web, detect from port
+  if (typeof window !== 'undefined' && window.location.port) {
+    const appPort = window.location.port;
+    const webHost = window.location.hostname;
+    const devAppPort = import.meta.env.VITE_DEV_APP_PORT || '4502';
+    if (appPort === devAppPort) return `ws://${webHost}:${devRelayPort}/ws`;
+    return `ws://${webHost}:${prodRelayPort}/ws`;
+  }
+
+  return `ws://${host}:${prodRelayPort}/ws`;
 };
 
 function InstanceManager({ isOpen, onClose, editInstanceId, startInAddMode }) {

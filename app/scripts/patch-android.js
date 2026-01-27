@@ -12,6 +12,7 @@
 import { existsSync, copyFileSync, readFileSync, writeFileSync, mkdirSync } from 'fs';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
+import process from 'node:process';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -21,6 +22,8 @@ const ANDROID_DIR = join(appDir, 'android');
 const RESOURCES_DIR = join(appDir, 'android-resources');
 const MANIFEST_PATH = join(ANDROID_DIR, 'app/src/main/AndroidManifest.xml');
 const XML_DIR = join(ANDROID_DIR, 'app/src/main/res/xml');
+const JAVA_SRC_DIR = join(RESOURCES_DIR, 'java/com/claudecode/pocket/dev');
+const JAVA_DEST_DIR = join(ANDROID_DIR, 'app/src/main/java/com/claudecode/pocket/dev');
 
 // ANSI colors
 const colors = {
@@ -60,21 +63,71 @@ function patchAndroid() {
     log('warning', 'network_security_config.xml template not found');
   }
 
-  // 2. Patch AndroidManifest.xml
+  // 2. Copy custom Java files (MainActivity, WebSocketService, etc.)
+  if (existsSync(JAVA_SRC_DIR)) {
+    mkdirSync(JAVA_DEST_DIR, { recursive: true });
+    const javaFiles = ['MainActivity.java', 'WebSocketService.java', 'WebSocketServicePlugin.java'];
+    for (const file of javaFiles) {
+      const src = join(JAVA_SRC_DIR, file);
+      const dest = join(JAVA_DEST_DIR, file);
+      if (existsSync(src)) {
+        copyFileSync(src, dest);
+        log('success', `Copied ${file}`);
+      }
+    }
+  }
+
+  // 3. Patch AndroidManifest.xml
   if (existsSync(MANIFEST_PATH)) {
     let manifest = readFileSync(MANIFEST_PATH, 'utf-8');
+    let modified = false;
 
-    // Check if already patched
-    if (manifest.includes('android:networkSecurityConfig')) {
-      log('success', 'AndroidManifest.xml already patched');
-    } else {
-      // Add networkSecurityConfig attribute to <application>
+    // Add networkSecurityConfig attribute to <application>
+    if (!manifest.includes('android:networkSecurityConfig')) {
       manifest = manifest.replace(
         /<application\s+/,
         '<application\n        android:networkSecurityConfig="@xml/network_security_config"\n        '
       );
+      modified = true;
+      log('success', 'Added networkSecurityConfig to AndroidManifest.xml');
+    }
+
+    // Add FOREGROUND_SERVICE permissions
+    if (!manifest.includes('android.permission.FOREGROUND_SERVICE')) {
+      manifest = manifest.replace(
+        '<uses-permission android:name="android.permission.INTERNET" />',
+        `<uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />`
+      );
+      modified = true;
+      log('success', 'Added FOREGROUND_SERVICE permissions');
+    }
+
+    // Add WebSocketService declaration
+    if (!manifest.includes('.WebSocketService')) {
+      manifest = manifest.replace(
+        '</application>',
+        `
+        <!-- Foreground service to keep WebSocket alive when backgrounded -->
+        <service
+            android:name=".WebSocketService"
+            android:foregroundServiceType="specialUse"
+            android:exported="false">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Maintains WebSocket connection to Claude relay server for real-time communication" />
+        </service>
+    </application>`
+      );
+      modified = true;
+      log('success', 'Added WebSocketService declaration');
+    }
+
+    if (modified) {
       writeFileSync(MANIFEST_PATH, manifest);
-      log('success', 'Patched AndroidManifest.xml with networkSecurityConfig');
+    } else {
+      log('success', 'AndroidManifest.xml already patched');
     }
   } else {
     log('error', 'AndroidManifest.xml not found');

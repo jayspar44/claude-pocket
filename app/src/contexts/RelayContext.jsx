@@ -16,6 +16,8 @@ export function RelayProvider({ children }) {
     error: instance.error,
     ptyError: instance.ptyError,
     detectedOptions: instance.detectedOptions,
+    needsInput: instance.needsInput,
+    taskComplete: instance.taskComplete,
     isConnected: instance.isConnected,
     isReconnecting: instance.isReconnecting,
     activeInstance: instance.activeInstance,

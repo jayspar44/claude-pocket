@@ -4,6 +4,7 @@ import { ChevronLeft, Server, Type, Trash2, Info, Check, FileX, Bell, RotateCcw,
 import { useRelay } from '../hooks/useRelay';
 import { healthApi, filesApi, instancesApi } from '../api/relay-api';
 import { version } from '../../../version.json';
+import { versionCode } from '../../android-version.json';
 import { notificationService } from '../services/NotificationService';
 import { storage } from '../utils/storage';
 
@@ -470,6 +471,10 @@ export default function Settings() {
             <div className="flex justify-between">
               <span className="text-gray-400">App Version</span>
               <span className="text-gray-300">v{version}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-gray-400">Android Build</span>
+              <span className="text-gray-300">{versionCode}</span>
             </div>
             {healthInfo && (
               <div className="flex justify-between">

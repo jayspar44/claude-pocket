@@ -376,7 +376,7 @@ class PtyManager {
     if (this.processingStartTime) {
       const processingDuration = Date.now() - this.processingStartTime;
       if (processingDuration >= config.longTask.thresholdMs) {
-        logger.debug({ duration: processingDuration }, 'Long task completed');
+        logger.info({ duration: processingDuration }, 'Long task completed - broadcasting task-complete');
         this.broadcast({
           type: 'task-complete',
           duration: processingDuration,
