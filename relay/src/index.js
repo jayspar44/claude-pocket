@@ -4,11 +4,13 @@ const express = require('express');
 const pinoHttp = require('pino-http');
 const logger = require('./logger');
 const config = require('./config');
+const { version } = require('../package.json');
 const ptyRegistry = require('./pty-registry');
 const { DEFAULT_INSTANCE_ID } = require('./pty-registry');
 const WebSocketHandler = require('./websocket-handler');
 const commandsRouter = require('./routes/commands');
 const filesRouter = require('./routes/files');
+const buildsRouter = require('./routes/builds');
 
 const app = express();
 const server = http.createServer(app);
@@ -65,7 +67,7 @@ app.get('/api/health', (req, res) => {
   const defaultInstance = ptyRegistry.getDefault();
   res.json({
     status: 'ok',
-    version: process.env.npm_package_version || '0.1.0',
+    version,
     pty: defaultInstance ? defaultInstance.getStatus() : { running: false },
     instanceCount: instances.length,
     clients: wsHandler.getConnectedClients(),
@@ -120,6 +122,25 @@ app.delete('/api/instances/:instanceId', (req, res) => {
     }
 
     res.json({ success: true, instanceId });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Stop and delete ALL instances
+app.delete('/api/instances', (req, res) => {
+  try {
+    const instances = ptyRegistry.listInstances();
+    const removed = [];
+
+    for (const instance of instances) {
+      if (ptyRegistry.remove(instance.instanceId)) {
+        removed.push(instance.instanceId);
+      }
+    }
+
+    logger.info({ count: removed.length }, 'Stopped all PTY instances');
+    res.json({ success: true, removed, count: removed.length });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -226,12 +247,16 @@ app.post('/api/pty/stop', (req, res) => {
 // API Routes
 app.use('/api/commands', commandsRouter);
 app.use('/api/files', filesRouter);
+app.use('/api/builds', buildsRouter);
+
+// Convenience redirect for builds page
+app.get('/builds', (req, res) => res.redirect('/api/builds/page'));
 
 // Root endpoint
 app.get('/', (req, res) => {
   res.json({
     name: 'Claude Pocket Relay',
-    version: process.env.npm_package_version || '0.1.0',
+    version,
     ws: `ws://${req.headers.host}${config.ws.path}`,
     features: ['multi-instance'],
   });

@@ -1,9 +1,10 @@
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ChevronLeft, Server, Type, RefreshCw, Trash2, Info, Check, Play, Square, FolderOpen, FileX, Bell, RotateCcw } from 'lucide-react';
+import { ChevronLeft, Server, Type, Trash2, Info, Check, FileX, Bell, RotateCcw, Square, Download, ScrollText, X } from 'lucide-react';
 import { useRelay } from '../hooks/useRelay';
-import { healthApi, filesApi } from '../api/relay-api';
+import { healthApi, filesApi, instancesApi } from '../api/relay-api';
 import { version } from '../../../version.json';
+import { versionCode } from '../../android-version.json';
 import { notificationService } from '../services/NotificationService';
 import { storage } from '../utils/storage';
 
@@ -26,37 +27,64 @@ export default function Settings() {
   const { getRelayUrl, setRelayUrl, connectionState } = useRelay();
 
   const [relayUrlInput, setRelayUrlInput] = useState(getRelayUrl());
-  const [workingDirInput, setWorkingDirInput] = useState(() => {
-    const saved = storage.get('working-dir');
-    if (saved) return saved;
-    // Auto-populate with base path for easier entry
-    return '/Users/jayspar/Documents/projects/';
-  });
   const [fontSizeInput, setFontSizeInput] = useState(() => {
     return storage.get('fontSize') || '14';
   });
   const [healthInfo, setHealthInfo] = useState(null);
   const [saving, setSaving] = useState(false);
-  const [starting, setStarting] = useState(false);
-  const [stopping, setStopping] = useState(false);
   const [cleaning, setCleaning] = useState(false);
-  const [recentDirs, setRecentDirs] = useState(() => {
-    return storage.getJSON('recent-dirs', []);
-  });
+  const [stoppingAll, setStoppingAll] = useState(false);
   const [notificationSettings, setNotificationSettings] = useState(() => notificationService.getSettings());
+  const [testNotificationStatus, setTestNotificationStatus] = useState(null); // null | { success, message }
+  const [notifDiagnostics, setNotifDiagnostics] = useState(null);
+  const [notifLog, setNotifLog] = useState(() => notificationService.getDebugLog());
+  const [serverInstances, setServerInstances] = useState(null);
+  const [stoppingInstance, setStoppingInstance] = useState(null);
 
-  // Fetch health info periodically
-  const fetchHealth = useCallback(() => {
-    healthApi.check()
-      .then((response) => setHealthInfo(response.data))
-      .catch(() => setHealthInfo(null));
-  }, []);
-
+  // Use ref for connectionState to avoid effect re-running on every state change
+  const connectionStateRef = useRef(connectionState);
   useEffect(() => {
+    connectionStateRef.current = connectionState;
+  }, [connectionState]);
+
+  // Fetch health and server instances periodically
+  useEffect(() => {
+    const fetchHealth = () => {
+      healthApi.check()
+        .then((response) => setHealthInfo(response.data))
+        .catch(() => setHealthInfo(null));
+    };
+
+    const fetchInstances = () => {
+      if (connectionStateRef.current !== 'connected') {
+        setServerInstances(null);
+        return;
+      }
+      instancesApi.list()
+        .then((response) => setServerInstances(response.data))
+        .catch(() => setServerInstances(null));
+    };
+
+    // Initial fetch
     fetchHealth();
-    const interval = setInterval(fetchHealth, 3000);
+    fetchInstances();
+
+    // Periodic fetch
+    const interval = setInterval(() => {
+      fetchHealth();
+      fetchInstances();
+    }, 3000);
+
     return () => clearInterval(interval);
-  }, [fetchHealth, connectionState]);
+  }, []); // Empty deps - runs once, uses ref for connectionState
+
+  // Refresh notification log periodically
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setNotifLog(notificationService.getDebugLog());
+    }, 1000);
+    return () => clearInterval(interval);
+  }, []);
 
   const handleSaveRelayUrl = useCallback(() => {
     if (!relayUrlInput.trim()) return;
@@ -71,60 +99,6 @@ export default function Settings() {
       storage.set('fontSize', fontSizeInput);
     }
   }, [fontSizeInput]);
-
-  const addToRecentDirs = useCallback((dir) => {
-    const updated = [dir, ...recentDirs.filter(d => d !== dir)].slice(0, 5);
-    setRecentDirs(updated);
-    storage.setJSON('recent-dirs', updated);
-  }, [recentDirs]);
-
-  const handleStartPty = useCallback(async () => {
-    if (!workingDirInput.trim()) {
-      alert('Please enter a working directory');
-      return;
-    }
-    setStarting(true);
-    try {
-      console.log('Starting PTY with workingDir:', workingDirInput.trim());
-      const response = await healthApi.startPty(workingDirInput.trim());
-      console.log('Start PTY response:', response.data);
-      storage.set('working-dir', workingDirInput.trim());
-      addToRecentDirs(workingDirInput.trim());
-      fetchHealth();
-    } catch (error) {
-      console.error('Failed to start PTY:', error);
-      console.error('Error details:', {
-        message: error.message,
-        response: error.response?.data,
-        status: error.response?.status,
-        config: error.config,
-      });
-      alert(error.response?.data?.error || error.message || 'Failed to start Claude Code');
-    }
-    setStarting(false);
-  }, [workingDirInput, addToRecentDirs, fetchHealth]);
-
-  const handleStopPty = useCallback(async () => {
-    setStopping(true);
-    try {
-      await healthApi.stopPty();
-      fetchHealth();
-    } catch (error) {
-      console.error('Failed to stop PTY:', error);
-    }
-    setStopping(false);
-  }, [fetchHealth]);
-
-  const handleRestartPty = useCallback(async () => {
-    setStarting(true);
-    try {
-      await healthApi.restartPty();
-      fetchHealth();
-    } catch (error) {
-      console.error('Failed to restart PTY:', error);
-    }
-    setStarting(false);
-  }, [fetchHealth]);
 
   const handleClearHistory = useCallback(() => {
     if (confirm('Clear command history?')) {
@@ -154,15 +128,86 @@ export default function Settings() {
     setCleaning(false);
   }, []);
 
-  const handleSelectRecentDir = useCallback((dir) => {
-    setWorkingDirInput(dir);
+  const handleStopAllInstances = useCallback(async () => {
+    if (!confirm('Stop all Claude Code instances on the relay? This will terminate all running sessions.')) {
+      return;
+    }
+    setStoppingAll(true);
+    try {
+      const response = await instancesApi.deleteAll();
+      alert(`Stopped ${response.data.count} instance(s)`);
+    } catch (error) {
+      console.error('Failed to stop instances:', error);
+      alert(error.response?.data?.error || 'Failed to stop instances');
+    }
+    setStoppingAll(false);
   }, []);
+
+  const handleStopInstance = useCallback(async (instanceId) => {
+    setStoppingInstance(instanceId);
+    try {
+      await instancesApi.delete(instanceId);
+      // Re-fetch will happen via the interval
+    } catch (error) {
+      console.error('Failed to stop instance:', error);
+      alert(error.response?.data?.error || 'Failed to stop instance');
+    }
+    setStoppingInstance(null);
+  }, []);
+
+  // All server instances (listenerCount determines connection status)
+  const serverInstanceList = useMemo(() => {
+    return serverInstances?.instances || [];
+  }, [serverInstances]);
 
   const handleNotificationSettingChange = useCallback((key, value) => {
     const newSettings = { ...notificationSettings, [key]: value };
     setNotificationSettings(newSettings);
     notificationService.saveSettings(newSettings);
   }, [notificationSettings]);
+
+  const fetchNotifDiagnostics = useCallback(async () => {
+    const swReg = await navigator.serviceWorker?.getRegistration();
+    const diag = {
+      permission: 'Notification' in window ? Notification.permission : 'N/A',
+      swSupported: 'serviceWorker' in navigator,
+      swRegistered: !!swReg,
+      swActive: !!swReg?.active,
+      swScope: swReg?.scope || 'none',
+    };
+    setNotifDiagnostics(diag);
+    return diag;
+  }, []);
+
+  const handleRequestPermission = useCallback(async () => {
+    if ('Notification' in window) {
+      const result = await Notification.requestPermission();
+      fetchNotifDiagnostics();
+      setTestNotificationStatus({ success: result === 'granted', message: `Permission: ${result}` });
+      setTimeout(() => setTestNotificationStatus(null), 5000);
+    }
+  }, [fetchNotifDiagnostics]);
+
+  const handleTestNotification = useCallback(async () => {
+    setTestNotificationStatus(null);
+    await fetchNotifDiagnostics();
+    try {
+      const result = await notificationService.notify({
+        title: 'Test Notification',
+        body: 'Notifications are working!',
+        type: 'input-needed',
+      });
+      if (result?.sent) {
+        setTestNotificationStatus({ success: true, message: `Sent via ${result.method}` });
+      } else {
+        setTestNotificationStatus({ success: false, message: result?.reason || 'Unknown error' });
+      }
+    } catch (err) {
+      setTestNotificationStatus({ success: false, message: err.message });
+    }
+    // Auto-clear after 5 seconds
+    setTimeout(() => setTestNotificationStatus(null), 5000);
+  }, [fetchNotifDiagnostics]);
 
   const connectionStatusColor = {
     connected: 'text-green-400',
@@ -171,12 +216,10 @@ export default function Settings() {
     disconnected: 'text-red-400',
   };
 
-  const ptyRunning = healthInfo?.pty?.running;
-
   return (
     <div className="flex flex-col h-full bg-gray-900">
       {/* Header */}
-      <div className="flex items-center gap-3 p-4 border-b border-gray-700 safe-area-top">
+      <div className="flex items-center gap-3 p-4 border-b border-gray-700 safe-area-top safe-area-left safe-area-right">
         <button
           onClick={() => navigate('/')}
           className="p-2 -ml-2 text-gray-400 hover:text-white hover:bg-gray-800 rounded-lg transition-colors"
@@ -196,92 +239,7 @@ export default function Settings() {
       </div>
 
       {/* Content */}
-      <div className="flex-1 overflow-y-auto p-4 space-y-6">
-        {/* Claude Code Control */}
-        <div className="bg-gray-800 rounded-xl p-4 space-y-4">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <FolderOpen className="w-5 h-5 text-orange-400" />
-              <h2 className="text-white font-medium">Claude Code</h2>
-            </div>
-            <span className={ptyRunning ? 'text-green-400 text-sm' : 'text-gray-500 text-sm'}>
-              {ptyRunning ? 'Running' : 'Stopped'}
-            </span>
-          </div>
-
-          {/* Current working dir if running */}
-          {ptyRunning && healthInfo?.pty?.workingDir && (
-            <div className="px-3 py-2 bg-gray-700/50 rounded-lg">
-              <p className="text-xs text-gray-400">Current Project</p>
-              <p className="text-sm text-white truncate">{healthInfo.pty.workingDir}</p>
-            </div>
-          )}
-
-          {/* Working Directory Input */}
-          <div className="space-y-2">
-            <label className="text-sm text-gray-400">Project Directory</label>
-            <input
-              type="text"
-              value={workingDirInput}
-              onChange={(e) => setWorkingDirInput(e.target.value)}
-              placeholder="Add project folder name (e.g., claude-pocket)"
-              disabled={ptyRunning}
-              className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:border-orange-500 disabled:opacity-50"
-            />
-          </div>
-
-          {/* Recent Directories */}
-          {recentDirs.length > 0 && !ptyRunning && (
-            <div className="space-y-2">
-              <label className="text-xs text-gray-500">Recent</label>
-              <div className="flex flex-wrap gap-2">
-                {recentDirs.map((dir) => (
-                  <button
-                    key={dir}
-                    onClick={() => handleSelectRecentDir(dir)}
-                    className="px-2 py-1 text-xs bg-gray-700 hover:bg-gray-600 rounded text-gray-300 truncate max-w-[150px]"
-                  >
-                    {dir.split('/').pop() || dir}
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* Start/Stop/Restart Buttons */}
-          <div className="flex gap-2">
-            {!ptyRunning ? (
-              <button
-                onClick={handleStartPty}
-                disabled={starting || connectionState !== 'connected'}
-                className="flex-1 flex items-center justify-center gap-2 px-4 py-3 bg-green-600 hover:bg-green-700 disabled:bg-green-600/50 disabled:text-gray-300 rounded-lg text-white transition-colors"
-              >
-                <Play className="w-5 h-5" />
-                <span>{starting ? 'Starting...' : 'Start Claude Code'}</span>
-              </button>
-            ) : (
-              <>
-                <button
-                  onClick={handleStopPty}
-                  disabled={stopping || connectionState !== 'connected'}
-                  className="flex-1 flex items-center justify-center gap-2 px-4 py-3 bg-red-600 hover:bg-red-700 disabled:bg-red-600/50 rounded-lg text-white transition-colors"
-                >
-                  <Square className="w-4 h-4" />
-                  <span>{stopping ? 'Stopping...' : 'Stop'}</span>
-                </button>
-                <button
-                  onClick={handleRestartPty}
-                  disabled={starting || connectionState !== 'connected'}
-                  className="flex-1 flex items-center justify-center gap-2 px-4 py-3 bg-gray-700 hover:bg-gray-600 disabled:bg-gray-700/50 rounded-lg text-white transition-colors"
-                >
-                  <RefreshCw className={`w-5 h-5 ${starting ? 'animate-spin' : ''}`} />
-                  <span>Restart</span>
-                </button>
-              </>
-            )}
-          </div>
-        </div>
-
+      <div className="flex-1 overflow-y-auto p-4 space-y-6 safe-area-left safe-area-right">
         {/* Connection */}
         <div className="bg-gray-800 rounded-xl p-4 space-y-4">
           <div className="flex items-center gap-2">
@@ -416,7 +374,142 @@ export default function Settings() {
               />
             </button>
           </div>
+
+          {/* Test notification buttons */}
+          <div className="flex gap-2">
+            <button
+              onClick={handleRequestPermission}
+              className="flex-1 px-4 py-2 bg-blue-600/20 hover:bg-blue-600/30 rounded-lg text-blue-400 text-sm transition-colors"
+            >
+              Request Permission
+            </button>
+            <button
+              onClick={handleTestNotification}
+              className="flex-1 px-4 py-2 bg-yellow-600/20 hover:bg-yellow-600/30 rounded-lg text-yellow-400 text-sm transition-colors"
+            >
+              Send Test
+            </button>
+          </div>
+          {testNotificationStatus && (
+            <p className={`text-xs mt-1 ${testNotificationStatus.success ? 'text-green-400' : 'text-red-400'}`}>
+              {testNotificationStatus.success ? '✓' : '✗'} {testNotificationStatus.message}
+            </p>
+          )}
+          {/* Diagnostics */}
+          {notifDiagnostics && (
+            <div className="text-xs text-gray-400 space-y-1 mt-2 p-2 bg-gray-900 rounded">
+              <p>Permission: <span className={notifDiagnostics.permission === 'granted' ? 'text-green-400' : 'text-red-400'}>{notifDiagnostics.permission}</span></p>
+              <p>SW Registered: <span className={notifDiagnostics.swRegistered ? 'text-green-400' : 'text-red-400'}>{notifDiagnostics.swRegistered ? 'yes' : 'no'}</span></p>
+              <p>SW Active: <span className={notifDiagnostics.swActive ? 'text-green-400' : 'text-red-400'}>{notifDiagnostics.swActive ? 'yes' : 'no'}</span></p>
+            </div>
+          )}
+
+          {/* Debug Log */}
+          <div className="mt-4 pt-4 border-t border-gray-700">
+            <div className="flex items-center justify-between mb-2">
+              <div className="flex items-center gap-2">
+                <ScrollText className="w-4 h-4 text-gray-400" />
+                <span className="text-sm text-gray-400">Debug Log</span>
+              </div>
+              <button
+                onClick={() => {
+                  notificationService.clearDebugLog();
+                  setNotifLog([]);
+                }}
+                className="text-xs text-gray-500 hover:text-gray-300"
+              >
+                Clear
+              </button>
+            </div>
+            <div className="bg-gray-900 rounded p-2 max-h-48 overflow-y-auto font-mono text-xs">
+              {notifLog.length === 0 ? (
+                <p className="text-gray-500 italic">No events yet. Waiting for options-detected or task-complete...</p>
+              ) : (
+                notifLog.map((entry, i) => (
+                  <div key={i} className="py-1 border-b border-gray-800 last:border-0">
+                    <span className="text-gray-500">{entry.time}</span>{' '}
+                    <span className="text-blue-400">{entry.message}</span>
+                    {entry.optionCount !== undefined && (
+                      <span className="text-gray-400"> opts={entry.optionCount}</span>
+                    )}
+                    {entry.visibility && (
+                      <span className={entry.visibility === 'visible' ? 'text-yellow-400' : 'text-green-400'}>
+                        {' '}vis={entry.visibility}
+                      </span>
+                    )}
+                    {entry.willNotify !== undefined && (
+                      <span className={entry.willNotify ? 'text-green-400' : 'text-red-400'}>
+                        {' '}notify={entry.willNotify ? 'YES' : 'NO'}
+                      </span>
+                    )}
+                    {entry.duration && (
+                      <span className="text-gray-400"> dur={Math.round(entry.duration / 1000)}s</span>
+                    )}
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
         </div>
+
+        {/* Server Instances */}
+        {serverInstanceList.length > 0 && (
+          <div className="bg-gray-800 rounded-xl p-4 space-y-4">
+            <div className="flex items-center gap-2">
+              <Server className="w-5 h-5 text-purple-400" />
+              <h2 className="text-white font-medium">Server Instances</h2>
+              <span className="px-1.5 py-0.5 text-xs font-medium rounded bg-purple-600 text-white">
+                {serverInstanceList.length}
+              </span>
+            </div>
+            <p className="text-xs text-gray-400">
+              All instances running on the relay server.
+            </p>
+
+            <div className="space-y-2">
+              {serverInstanceList.map((inst) => {
+                const isConnected = (inst.listenerCount || 0) > 0;
+                const isRunning = inst.running;
+                return (
+                  <div
+                    key={inst.instanceId}
+                    className="flex items-center justify-between p-3 bg-gray-700/50 rounded-lg"
+                  >
+                    <div className="flex-1 min-w-0">
+                      <div className="text-sm text-white font-medium truncate">
+                        {inst.instanceId === 'default' ? 'Default' : inst.instanceId}
+                      </div>
+                      <div className="text-xs text-gray-400 truncate">
+                        {inst.workingDir || 'No working directory'}
+                      </div>
+                      <div className="flex items-center gap-2 mt-1">
+                        <span className={`text-xs ${isRunning ? 'text-green-400' : 'text-gray-500'}`}>
+                          {isRunning ? 'Running' : 'Stopped'}
+                        </span>
+                        {isRunning && (
+                          <span className={`text-xs ${isConnected ? 'text-green-400' : 'text-orange-400'}`}>
+                            • {isConnected ? 'Connected' : 'Orphaned'}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => handleStopInstance(inst.instanceId)}
+                      disabled={stoppingInstance === inst.instanceId}
+                      className="ml-2 p-2 text-red-400 hover:bg-red-600/20 rounded-lg transition-colors disabled:opacity-50"
+                    >
+                      {stoppingInstance === inst.instanceId ? (
+                        <Square className="w-4 h-4 animate-pulse" />
+                      ) : (
+                        <X className="w-4 h-4" />
+                      )}
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
 
         {/* Data */}
         <div className="bg-gray-800 rounded-xl p-4 space-y-4">
@@ -426,8 +519,20 @@ export default function Settings() {
           </div>
 
           <button
+            onClick={handleStopAllInstances}
+            disabled={stoppingAll || connectionState !== 'connected'}
+            className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-red-600/20 hover:bg-red-600/30 disabled:opacity-50 rounded-lg text-red-400 transition-colors"
+          >
+            <Square className={`w-5 h-5 ${stoppingAll ? 'animate-pulse' : ''}`} />
+            <span>{stoppingAll ? 'Stopping...' : 'Stop All Server Instances'}</span>
+          </button>
+          <p className="text-xs text-gray-500">
+            Stops all Claude Code PTY processes on the relay server
+          </p>
+
+          <button
             onClick={handleClearHistory}
-            className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-red-600/20 hover:bg-red-600/30 rounded-lg text-red-400 transition-colors"
+            className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-orange-600/20 hover:bg-orange-600/30 rounded-lg text-orange-400 transition-colors"
           >
             <Trash2 className="w-5 h-5" />
             <span>Clear Command History</span>
@@ -435,7 +540,7 @@ export default function Settings() {
 
           <button
             onClick={handleCleanupFiles}
-            disabled={cleaning || connectionState !== 'connected' || !ptyRunning}
+            disabled={cleaning || connectionState !== 'connected'}
             className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-orange-600/20 hover:bg-orange-600/30 disabled:opacity-50 rounded-lg text-orange-400 transition-colors"
           >
             <FileX className={`w-5 h-5 ${cleaning ? 'animate-pulse' : ''}`} />
@@ -469,6 +574,10 @@ export default function Settings() {
               <span className="text-gray-400">App Version</span>
               <span className="text-gray-300">v{version}</span>
             </div>
+            <div className="flex justify-between">
+              <span className="text-gray-400">Android Build</span>
+              <span className="text-gray-300">{versionCode}</span>
+            </div>
             {healthInfo && (
               <div className="flex justify-between">
                 <span className="text-gray-400">Relay Version</span>
@@ -476,7 +585,21 @@ export default function Settings() {
               </div>
             )}
           </div>
+
+          {/* Builds download link */}
+          <a
+            href={getRelayUrl().replace(/^ws/, 'http').replace(/\/ws$/, '') + '/builds'}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex items-center justify-center gap-2 w-full px-4 py-3 bg-cyan-600/20 hover:bg-cyan-600/30 rounded-lg text-cyan-400 transition-colors"
+          >
+            <Download className="w-5 h-5" />
+            <span>Download Builds</span>
+          </a>
         </div>
+
+        {/* Safe area spacer for Android navigation bar */}
+        <div className="safe-area-bottom" />
       </div>
     </div>
   );

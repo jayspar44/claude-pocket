@@ -1,9 +1,12 @@
 import { useState, useEffect } from 'react';
+import { Capacitor } from '@capacitor/core';
+import { App } from '@capacitor/app';
 
 /**
  * Hook to track visual viewport height for mobile keyboard awareness.
  * Uses the Visual Viewport API to detect when the keyboard is shown/hidden.
  * Falls back to window.innerHeight on unsupported browsers.
+ * Also updates when app returns from background (keyboard may have closed).
  */
 export function useViewportHeight() {
   const [viewportHeight, setViewportHeight] = useState(() => {
@@ -32,6 +35,26 @@ export function useViewportHeight() {
       window.addEventListener('resize', updateHeight);
     }
 
+    // Update when page becomes visible (keyboard may have closed while backgrounded)
+    const handleVisibilityChange = () => {
+      if (!document.hidden) {
+        // Small delay to let the viewport settle after becoming visible
+        setTimeout(updateHeight, 100);
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    // For native apps, also listen to Capacitor app state changes
+    let appStateListener = null;
+    if (Capacitor.isNativePlatform()) {
+      appStateListener = App.addListener('appStateChange', ({ isActive }) => {
+        if (isActive) {
+          // Small delay to let the viewport settle
+          setTimeout(updateHeight, 100);
+        }
+      });
+    }
+
     // Initial update
     updateHeight();
 
@@ -42,6 +65,8 @@ export function useViewportHeight() {
       } else {
         window.removeEventListener('resize', updateHeight);
       }
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      appStateListener?.remove();
     };
   }, []);
 

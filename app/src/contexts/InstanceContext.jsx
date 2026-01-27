@@ -1,8 +1,13 @@
 import { createContext, useContext, useState, useCallback, useRef, useEffect, useMemo } from 'react';
-import { Capacitor } from '@capacitor/core';
+import { Capacitor, registerPlugin } from '@capacitor/core';
 import { App } from '@capacitor/app';
 import { notificationService } from '../services/NotificationService';
 import { storage } from '../utils/storage';
+
+// Register the foreground service plugin (Android only)
+const WebSocketService = Capacitor.isNativePlatform()
+  ? registerPlugin('WebSocketService')
+  : null;
 
 const InstanceContext = createContext(null);
 
@@ -21,22 +26,27 @@ const ACTIVE_INSTANCE_KEY = 'active-instance';
 // Default colors for instances
 const INSTANCE_COLORS = ['#f97316', '#3b82f6', '#10b981', '#8b5cf6', '#ef4444', '#06b6d4'];
 
-// Auto-detect relay URL based on app port (for PROD/DEV isolation)
+// Auto-detect relay URL based on build environment and app port
 const getDefaultRelayUrl = () => {
+  const host = import.meta.env.VITE_RELAY_HOST || 'minibox.rattlesnake-mimosa.ts.net';
+  const devRelayPort = import.meta.env.VITE_DEV_RELAY_PORT || '4503';
+  const prodRelayPort = import.meta.env.VITE_PROD_RELAY_PORT || '4501';
+
+  // For native apps (Capacitor), use VITE_APP_ENV set at build time
+  const appEnv = import.meta.env.VITE_APP_ENV;
+  if (appEnv === 'dev') return `ws://${host}:${devRelayPort}/ws`;
+  if (appEnv === 'prod') return `ws://${host}:${prodRelayPort}/ws`;
+
+  // For web, detect from port
   if (typeof window !== 'undefined' && window.location.port) {
     const appPort = window.location.port;
-    const host = window.location.hostname;
+    const webHost = window.location.hostname;
     const devAppPort = import.meta.env.VITE_DEV_APP_PORT || '4502';
-    const devRelayPort = import.meta.env.VITE_DEV_RELAY_PORT || '4503';
-    const prodAppPort = import.meta.env.VITE_PROD_APP_PORT || '4500';
-    const prodRelayPort = import.meta.env.VITE_PROD_RELAY_PORT || '4501';
-
-    // DEV app → DEV relay
-    if (appPort === devAppPort) return `ws://${host}:${devRelayPort}/ws`;
-    // PROD app → PROD relay
-    if (appPort === prodAppPort) return `ws://${host}:${prodRelayPort}/ws`;
+    if (appPort === devAppPort) return `ws://${webHost}:${devRelayPort}/ws`;
+    return `ws://${webHost}:${prodRelayPort}/ws`;
   }
-  return import.meta.env.VITE_RELAY_URL || 'ws://localhost:4501/ws';
+
+  return import.meta.env.VITE_RELAY_URL || `ws://${host}:${prodRelayPort}/ws`;
 };
 
 // Default instance ID must match relay's DEFAULT_INSTANCE_ID
@@ -65,6 +75,8 @@ const createInstanceState = () => ({
   processingStartTime: null,
   error: null,
   ptyError: null,
+  needsInput: false,    // True when options-detected received
+  taskComplete: false,  // True when task-complete received
 });
 
 export function InstanceProvider({ children }) {
@@ -132,6 +144,9 @@ export function InstanceProvider({ children }) {
   const reconnectTimeoutsRef = useRef({});
   const connectionTimeoutsRef = useRef({});
   const heartbeatIntervalsRef = useRef({});
+
+  // Track app visibility for notifications (Capacitor's visibilityState is unreliable)
+  const isAppVisibleRef = useRef(true);
   const pongTimeoutsRef = useRef({});
   const listenersRef = useRef({}); // Map<instanceId, Set<callback>>
   const connectInstanceRef = useRef(null); // Ref for self-referencing in reconnect
@@ -257,6 +272,13 @@ export function InstanceProvider({ children }) {
         reconnectAttemptsRef.current[instanceId] = 0;
         startHeartbeat(instanceId, ws);
 
+        // Start foreground service to keep connection alive when backgrounded (Android only)
+        if (WebSocketService) {
+          WebSocketService.start().catch(err => {
+            console.warn('[InstanceContext] Failed to start foreground service:', err);
+          });
+        }
+
         // Send set-instance message to relay to register this client's instance
         // This tells the relay which PTY instance to route messages to/from
         ws.send(JSON.stringify({
@@ -339,23 +361,57 @@ export function InstanceProvider({ children }) {
               ptyError: errorMsg,
             });
           } else if (message.type === 'options-detected') {
+            const optionCount = message.options?.length || 0;
+            const hasOptions = optionCount > 0;
+
+            // Set needsInput state and clear taskComplete (input takes precedence)
             updateInstanceState(instanceId, {
               detectedOptions: message.options || [],
+              needsInput: hasOptions,
+              taskComplete: hasOptions ? false : undefined, // Clear taskComplete if input needed
             });
-            // Notify if options detected and instance is not active
-            if (message.options?.length > 0 && instanceId !== activeInstanceId) {
+
+            // Log and notify if options detected and app is backgrounded
+            const isVisible = isAppVisibleRef.current;
+            const willNotify = hasOptions && !isVisible;
+            notificationService.log('options-detected', {
+              optionCount,
+              isVisible,
+              willNotify,
+            });
+            if (willNotify) {
+              notificationService.log('Triggering notifyInputNeeded');
               notificationService.notifyInputNeeded({
                 instanceId,
                 optionCount: message.options.length,
-                triggerPhrase: message.triggerPhrase,
               });
             }
           } else if (message.type === 'task-complete') {
-            // Notify on long task completion
-            notificationService.notifyTaskComplete({
-              instanceId,
+            // Set taskComplete state (only if not currently needing input)
+            const currentState = instanceStates[instanceId];
+            const shouldSetComplete = !currentState?.needsInput;
+
+            if (shouldSetComplete) {
+              updateInstanceState(instanceId, { taskComplete: true });
+            }
+
+            // Log and notify on long task completion (only when app is backgrounded)
+            const isVisible = isAppVisibleRef.current;
+            // Only notify if not currently needing input (input takes precedence)
+            const willNotify = !isVisible && shouldSetComplete;
+            notificationService.log('task-complete', {
               duration: message.duration,
+              isVisible,
+              willNotify,
+              needsInputActive: currentState?.needsInput,
             });
+            if (willNotify) {
+              notificationService.log('Triggering notifyTaskComplete');
+              notificationService.notifyTaskComplete({
+                instanceId,
+                duration: message.duration,
+              });
+            }
           } else if (message.type === 'output' || message.type === 'replay') {
             // Mark as unread if not active instance
             if (instanceId !== activeInstanceId) {
@@ -375,7 +431,7 @@ export function InstanceProvider({ children }) {
         connectionState: 'disconnected',
       });
     }
-  }, [instances, activeInstanceId, updateInstanceState, notifyListeners, cleanupTimers, startHeartbeat]);
+  }, [instances, activeInstanceId, instanceStates, updateInstanceState, notifyListeners, cleanupTimers, startHeartbeat]);
 
   // Keep ref updated for self-referencing in reconnect timeout
   useEffect(() => {
@@ -394,6 +450,18 @@ export function InstanceProvider({ children }) {
     if (wsRefs.current[instanceId]) {
       wsRefs.current[instanceId].close(1000, 'Manual disconnect');
       delete wsRefs.current[instanceId];
+    }
+
+    // Stop foreground service if no other connections are active (Android only)
+    if (WebSocketService) {
+      const hasOtherConnections = Object.keys(wsRefs.current).some(
+        id => id !== instanceId && wsRefs.current[id]?.readyState === WebSocket.OPEN
+      );
+      if (!hasOtherConnections) {
+        WebSocketService.stop().catch(err => {
+          console.warn('[InstanceContext] Failed to stop foreground service:', err);
+        });
+      }
     }
 
     updateInstanceState(instanceId, { connectionState: 'disconnected' });
@@ -519,9 +587,14 @@ export function InstanceProvider({ children }) {
     return () => window.removeEventListener('sw-switch-instance', handleSwSwitchInstance);
   }, [instances, switchInstance]);
 
-  // Reconnect when app returns from background
+  // Reconnect when app returns from background + track visibility for notifications
   useEffect(() => {
     const handleVisibilityChange = () => {
+      // Update visibility ref for web platform
+      if (!Capacitor.isNativePlatform()) {
+        isAppVisibleRef.current = document.visibilityState === 'visible';
+      }
+
       if (document.hidden) return;
 
       const ws = wsRefs.current[activeInstanceId];
@@ -540,6 +613,8 @@ export function InstanceProvider({ children }) {
     let appStateListener = null;
     if (Capacitor.isNativePlatform()) {
       appStateListener = App.addListener('appStateChange', ({ isActive }) => {
+        notificationService.log('appStateChange', { isActive, wasVisible: isAppVisibleRef.current });
+        isAppVisibleRef.current = isActive; // Track visibility for native
         if (isActive) handleVisibilityChange();
       });
     }
@@ -571,7 +646,11 @@ export function InstanceProvider({ children }) {
   const submitInput = useCallback((data) => send({ type: 'submit', data }), [send]);
 
   const clearDetectedOptions = useCallback(() => {
-    updateInstanceState(activeInstanceId, { detectedOptions: [] });
+    updateInstanceState(activeInstanceId, {
+      detectedOptions: [],
+      needsInput: false,
+      taskComplete: false, // Also clear task complete on interaction
+    });
   }, [activeInstanceId, updateInstanceState]);
 
   // Ref to track activeInstanceId for stable callback
@@ -618,6 +697,8 @@ export function InstanceProvider({ children }) {
     error: activeInstanceState.error,
     ptyError: activeInstanceState.ptyError,
     detectedOptions: activeInstanceState.detectedOptions,
+    needsInput: activeInstanceState.needsInput,
+    taskComplete: activeInstanceState.taskComplete,
     isConnected: activeInstanceState.connectionState === 'connected',
     isReconnecting: activeInstanceState.connectionState === 'reconnecting',
 

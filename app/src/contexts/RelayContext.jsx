@@ -16,9 +16,13 @@ export function RelayProvider({ children }) {
     error: instance.error,
     ptyError: instance.ptyError,
     detectedOptions: instance.detectedOptions,
+    needsInput: instance.needsInput,
+    taskComplete: instance.taskComplete,
     isConnected: instance.isConnected,
     isReconnecting: instance.isReconnecting,
     activeInstance: instance.activeInstance,
+    activeInstanceId: instance.activeInstanceId,
+    instances: instance.instances,
 
     // Connection actions
     connect: instance.connect,
@@ -32,6 +36,10 @@ export function RelayProvider({ children }) {
     submitInput: instance.submitInput,
     clearDetectedOptions: instance.clearDetectedOptions,
     addMessageListener: instance.addMessageListener,
+
+    // Instance-specific actions (for proper multi-instance routing)
+    addInstanceMessageListener: instance.addInstanceMessageListener,
+    sendToInstance: instance.sendToInstance,
 
     // URL management (for backward compatibility)
     getRelayUrl: instance.getRelayUrl,

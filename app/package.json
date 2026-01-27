@@ -1,7 +1,7 @@
 {
   "name": "claude-pocket-app",
   "private": true,
-  "version": "0.2.3",
+  "version": "0.3.1",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -14,15 +14,10 @@
     "android:local": "node scripts/android-build.js local",
     "android:local-livereload": "node scripts/android-build.js local-livereload",
     "generate:android-assets": "node scripts/generate-android-assets.js",
-    "patch:android": "node scripts/patch-android.js",
-    "sync:android": "npx cap sync android && npm run patch:android",
     "apk": "node scripts/build-apk.js dev debug",
     "apk:dev": "node scripts/build-apk.js dev debug",
     "apk:local": "node scripts/build-apk.js local debug",
-    "apk:prod": "node scripts/build-apk.js prod release",
-    "aab": "node scripts/build-aab.js prod release",
-    "aab:dev": "node scripts/build-aab.js dev release",
-    "aab:prod": "node scripts/build-aab.js prod release"
+    "apk:prod": "node scripts/build-apk.js prod release"
   },
   "dependencies": {
     "@capacitor-community/safe-area": "^8.0.1",

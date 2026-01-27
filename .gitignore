@@ -106,6 +106,12 @@ dist
 android/
 ios/
 
+# Signing keys and credentials
+*.keystore
+*.jks
+keystore/
+gradle.properties
+
 # Claude Code local settings (allow commands to be committed)
 .claude/settings.local.json
 

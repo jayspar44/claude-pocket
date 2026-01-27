@@ -11,17 +11,22 @@ function getRelayBaseUrl() {
     return stored.replace(/^ws:\/\//, 'http://').replace(/\/ws$/, '');
   }
 
-  // Auto-detect based on app port (using env vars with fallbacks)
+  const host = import.meta.env.VITE_RELAY_HOST || 'minibox.rattlesnake-mimosa.ts.net';
+  const devRelayPort = import.meta.env.VITE_DEV_RELAY_PORT || '4503';
+  const prodRelayPort = import.meta.env.VITE_PROD_RELAY_PORT || '4501';
+
+  // For native apps (Capacitor), use VITE_APP_ENV set at build time
+  const appEnv = import.meta.env.VITE_APP_ENV;
+  if (appEnv === 'dev') return `http://${host}:${devRelayPort}`;
+  if (appEnv === 'prod') return `http://${host}:${prodRelayPort}`;
+
+  // For web, detect from port
   if (typeof window !== 'undefined' && window.location.port) {
     const appPort = window.location.port;
-    const host = window.location.hostname;
+    const webHost = window.location.hostname;
     const devAppPort = import.meta.env.VITE_DEV_APP_PORT || '4502';
-    const devRelayPort = import.meta.env.VITE_DEV_RELAY_PORT || '4503';
-    const prodAppPort = import.meta.env.VITE_PROD_APP_PORT || '4500';
-    const prodRelayPort = import.meta.env.VITE_PROD_RELAY_PORT || '4501';
-
-    if (appPort === devAppPort) return `http://${host}:${devRelayPort}`;
-    if (appPort === prodAppPort) return `http://${host}:${prodRelayPort}`;
+    if (appPort === devAppPort) return `http://${webHost}:${devRelayPort}`;
+    return `http://${webHost}:${prodRelayPort}`;
   }
 
   return import.meta.env.VITE_RELAY_API_URL || DEFAULT_RELAY_URL;
@@ -97,6 +102,9 @@ export const instancesApi = {
 
   // Delete an instance
   delete: (instanceId) => relayApi.delete(`/api/instances/${instanceId}`),
+
+  // Stop and delete all instances
+  deleteAll: () => relayApi.delete('/api/instances'),
 };
 
 export default relayApi;

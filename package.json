@@ -1,6 +1,6 @@
 {
   "name": "claude-pocket",
-  "version": "0.2.3",
+  "version": "0.3.1",
   "description": "Mobile-first client for Claude Code CLI",
   "main": "relay/src/index.js",
   "scripts": {
@@ -21,9 +21,6 @@
     "apk:dev": "cd app && npm run apk:dev",
     "apk:local": "cd app && npm run apk:local",
     "apk:prod": "cd app && npm run apk:prod",
-    "aab": "cd app && npm run aab",
-    "aab:dev": "cd app && npm run aab:dev",
-    "aab:prod": "cd app && npm run aab:prod",
     "test:app": "cd app && npm test",
     "deploy": "./scripts/deploy.sh",
     "pm2:start": "pm2 start ecosystem.config.js",

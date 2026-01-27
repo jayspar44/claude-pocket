@@ -44,10 +44,11 @@ const config = {
 
     // Number patterns (relaxed - no capital letter required)
     numberPatterns: [
-      /^(\d)[.):\]]\s+\S/,     // 1. text, 1) text, 1: text
-      /^\[(\d)\]\s+\S/,        // [1] text
-      /^\((\d)\)\s+\S/,        // (1) text
-      /^[>❯►→]\s*(\d)[.)]\s+\S/, // > 1. text, ❯ 1. text (cursor/selection prefix)
+      /^(\d)[.):\]]\s+\S/,              // 1. text, 1) text, 1: text (line start)
+      /^\[(\d)\]\s+\S/,                 // [1] text
+      /^\((\d)\)\s+\S/,                 // (1) text
+      /^[>❯►→›▸▶▷‣⁃]\s*(\d)[.)]\s+\S/, // Selection indicators: > ❯ ► → › ▸ ▶ ▷ ‣ ⁃
+      /\s{2,}(\d)[.)]\s+\S/,            // Inline options: "1. Yes  2. No" (2+ spaces before number)
     ],
 
     // Confidence boosters
@@ -56,11 +57,20 @@ const config = {
       /\s+·\s+/,               // Separator dots
       /connected|failed|pending/i, // Status words
     ],
+
+    // Negative patterns that reduce confidence (documentation/prose indicators)
+    negativePatterns: [
+      /^(?:test|steps?|example|note|tip|warning|todo|usage|instructions?):\s*$/im, // Section headers
+      /^##?\s+/m,              // Markdown headers
+      /^\*{3,}$/m,             // Horizontal rules
+      /\bshould\b.*\bwithout\b/i, // Documentation prose ("should see... without")
+      /\beach\s+\w+\s+should\b/i, // "Each X should" documentation
+    ],
   },
 
   // Long task detection for notifications
   longTask: {
-    thresholdMs: 60000,      // 60s before considering a task "long"
+    thresholdMs: 10000,      // 10s for testing (was 60000)
   },
 
   // CORS configuration

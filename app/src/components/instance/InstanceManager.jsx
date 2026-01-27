@@ -1,15 +1,36 @@
 import { useState, useCallback, useEffect } from 'react';
-import { X, Plus, Trash2, Edit2, Check, Server, FolderOpen } from 'lucide-react';
+import { X, Plus, Trash2, Edit2, Check, Server, FolderOpen, Play, Square, RotateCw, Clock } from 'lucide-react';
 import { useInstance } from '../../contexts/InstanceContext';
+import { healthApi } from '../../api/relay-api';
+import { storage } from '../../utils/storage';
 
-// Build default relay URL from env vars (used for new instances)
+// Default working directory prefix for convenience
+const DEFAULT_WORKING_DIR_PREFIX = '/Users/jayspar/Documents/projects/';
+
+// Build default relay URL matching current app environment
 const getDefaultRelayUrl = () => {
   const host = import.meta.env.VITE_RELAY_HOST || 'minibox.rattlesnake-mimosa.ts.net';
+  const devRelayPort = import.meta.env.VITE_DEV_RELAY_PORT || '4503';
   const prodRelayPort = import.meta.env.VITE_PROD_RELAY_PORT || '4501';
+
+  // For native apps (Capacitor), use VITE_APP_ENV set at build time
+  const appEnv = import.meta.env.VITE_APP_ENV;
+  if (appEnv === 'dev') return `ws://${host}:${devRelayPort}/ws`;
+  if (appEnv === 'prod') return `ws://${host}:${prodRelayPort}/ws`;
+
+  // For web, detect from port
+  if (typeof window !== 'undefined' && window.location.port) {
+    const appPort = window.location.port;
+    const webHost = window.location.hostname;
+    const devAppPort = import.meta.env.VITE_DEV_APP_PORT || '4502';
+    if (appPort === devAppPort) return `ws://${webHost}:${devRelayPort}/ws`;
+    return `ws://${webHost}:${prodRelayPort}/ws`;
+  }
+
   return `ws://${host}:${prodRelayPort}/ws`;
 };
 
-function InstanceManager({ isOpen, onClose, editInstanceId }) {
+function InstanceManager({ isOpen, onClose, editInstanceId, startInAddMode }) {
   const {
     instances,
     activeInstanceId,
@@ -21,6 +42,9 @@ function InstanceManager({ isOpen, onClose, editInstanceId }) {
     getInstanceState,
   } = useInstance();
 
+  const [ptyLoading, setPtyLoading] = useState(false);
+  const [recentDirs, setRecentDirs] = useState(() => storage.getJSON('recent-dirs', []));
+
   const [mode, setMode] = useState('list'); // 'list' | 'add' | 'edit'
   const [editingId, setEditingId] = useState(null);
   const [formData, setFormData] = useState({
@@ -29,7 +53,7 @@ function InstanceManager({ isOpen, onClose, editInstanceId }) {
     color: instanceColors[0],
   });
 
-  // Handle editInstanceId prop
+  // Handle editInstanceId and startInAddMode props
   useEffect(() => {
     if (editInstanceId && isOpen) {
       const instance = instances.find(i => i.id === editInstanceId);
@@ -42,10 +66,18 @@ function InstanceManager({ isOpen, onClose, editInstanceId }) {
         });
         setMode('edit');
       }
+    } else if (isOpen && startInAddMode) {
+      // Open directly in add mode
+      setFormData({
+        name: `Instance ${instances.length + 1}`,
+        workingDir: DEFAULT_WORKING_DIR_PREFIX,
+        color: instanceColors[instances.length % instanceColors.length],
+      });
+      setMode('add');
     } else if (isOpen && !editInstanceId) {
       setMode('list');
     }
-  }, [editInstanceId, isOpen, instances]);
+  }, [editInstanceId, isOpen, instances, startInAddMode, instanceColors]);
 
   const resetForm = useCallback(() => {
     setFormData({
@@ -60,7 +92,7 @@ function InstanceManager({ isOpen, onClose, editInstanceId }) {
   const handleAddClick = useCallback(() => {
     setFormData({
       name: `Instance ${instances.length + 1}`,
-      workingDir: '',
+      workingDir: DEFAULT_WORKING_DIR_PREFIX,
       color: instanceColors[instances.length % instanceColors.length],
     });
     setMode('add');
@@ -76,29 +108,55 @@ function InstanceManager({ isOpen, onClose, editInstanceId }) {
     setMode('edit');
   }, []);
 
+  const addToRecentDirs = useCallback((dir) => {
+    if (!dir || dir === DEFAULT_WORKING_DIR_PREFIX) return;
+    const updated = [dir, ...recentDirs.filter(d => d !== dir)].slice(0, 5);
+    setRecentDirs(updated);
+    storage.setJSON('recent-dirs', updated);
+  }, [recentDirs]);
+
+  const handleSelectRecentDir = useCallback((dir) => {
+    setFormData(prev => ({ ...prev, workingDir: dir }));
+  }, []);
+
   const handleSave = useCallback(() => {
     if (!formData.name.trim()) return;
 
+    const workingDir = formData.workingDir.trim();
+
     if (mode === 'add') {
-      // New instances use the default relay URL (PROD)
+      // New instances use the default relay URL matching current environment
       const newInstance = addInstance(
         formData.name.trim(),
         getDefaultRelayUrl(),
-        formData.workingDir.trim(),
+        workingDir,
         formData.color
       );
       switchInstance(newInstance.id);
+      // Close modal after adding (switch to new instance)
+      resetForm();
+      onClose();
+      // Start the PTY if working directory is set
+      if (workingDir) {
+        healthApi.startPty(workingDir, newInstance.id).catch(error => {
+          console.error('Failed to start PTY:', error);
+        });
+      }
     } else if (mode === 'edit' && editingId) {
       updateInstance(editingId, {
         name: formData.name.trim(),
-        workingDir: formData.workingDir.trim(),
+        workingDir,
         color: formData.color,
       });
+      // Go back to list after editing (don't close modal)
+      resetForm();
     }
 
-    resetForm();
-    onClose();
-  }, [mode, formData, editingId, addInstance, updateInstance, switchInstance, resetForm, onClose]);
+    // Save to recent directories
+    if (workingDir) {
+      addToRecentDirs(workingDir);
+    }
+  }, [mode, formData, editingId, addInstance, updateInstance, switchInstance, resetForm, onClose, addToRecentDirs]);
 
   const handleDelete = useCallback((instanceId) => {
     if (instances.length <= 1) {
@@ -114,6 +172,42 @@ function InstanceManager({ isOpen, onClose, editInstanceId }) {
     resetForm();
     onClose();
   }, [resetForm, onClose]);
+
+  // PTY control handlers
+  const handleStartPty = useCallback(async (instance) => {
+    if (!instance.workingDir) {
+      alert('Please set a working directory for this instance');
+      return;
+    }
+    setPtyLoading(true);
+    try {
+      await healthApi.startPty(instance.workingDir, instance.id);
+    } catch (error) {
+      console.error('Failed to start PTY:', error);
+      alert(error.response?.data?.error || 'Failed to start Claude Code');
+    }
+    setPtyLoading(false);
+  }, []);
+
+  const handleStopPty = useCallback(async (instanceId) => {
+    setPtyLoading(true);
+    try {
+      await healthApi.stopPty(instanceId);
+    } catch (error) {
+      console.error('Failed to stop PTY:', error);
+    }
+    setPtyLoading(false);
+  }, []);
+
+  const handleRestartPty = useCallback(async (instanceId) => {
+    setPtyLoading(true);
+    try {
+      await healthApi.restartPty(undefined, instanceId);
+    } catch (error) {
+      console.error('Failed to restart PTY:', error);
+    }
+    setPtyLoading(false);
+  }, []);
 
   if (!isOpen) return null;
 
@@ -143,12 +237,16 @@ function InstanceManager({ isOpen, onClose, editInstanceId }) {
         </div>
 
         {/* Content */}
-        <div className="flex-1 overflow-y-auto p-4">
+        <div className="flex-1 overflow-y-auto p-4 safe-area-bottom">
           {mode === 'list' ? (
             <div className="space-y-2">
               {instances.map((instance) => {
                 const state = getInstanceState(instance.id);
                 const isActive = instance.id === activeInstanceId;
+                const isConnected = state.connectionState === 'connected';
+                // Use per-instance PTY status, not just active instance
+                const instancePtyStatus = state.ptyStatus;
+                const isPtyRunning = instancePtyStatus?.running;
 
                 return (
                   <div
@@ -191,6 +289,41 @@ function InstanceManager({ isOpen, onClose, editInstanceId }) {
                       }`}
                     />
 
+                    {/* PTY controls for connected instances */}
+                    {isConnected && (
+                      <div className="flex items-center gap-1">
+                        {isPtyRunning ? (
+                          <>
+                            <button
+                              onClick={() => handleStopPty(instance.id)}
+                              disabled={ptyLoading}
+                              className="p-1.5 text-gray-400 hover:text-red-400 hover:bg-gray-600 rounded transition-colors disabled:opacity-50"
+                              title="Stop"
+                            >
+                              <Square className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                              onClick={() => handleRestartPty(instance.id)}
+                              disabled={ptyLoading}
+                              className="p-1.5 text-gray-400 hover:text-yellow-400 hover:bg-gray-600 rounded transition-colors disabled:opacity-50"
+                              title="Restart"
+                            >
+                              <RotateCw className={`w-3.5 h-3.5 ${ptyLoading ? 'animate-spin' : ''}`} />
+                            </button>
+                          </>
+                        ) : (
+                          <button
+                            onClick={() => handleStartPty(instance)}
+                            disabled={ptyLoading || !instance.workingDir}
+                            className="p-1.5 text-gray-400 hover:text-green-400 hover:bg-gray-600 rounded transition-colors disabled:opacity-50"
+                            title="Start"
+                          >
+                            <Play className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+                      </div>
+                    )}
+
                     {/* Edit button */}
                     <button
                       onClick={() => handleEditClick(instance)}
@@ -232,7 +365,7 @@ function InstanceManager({ isOpen, onClose, editInstanceId }) {
                   onChange={(e) => setFormData(prev => ({ ...prev, name: e.target.value }))}
                   placeholder="My Project"
                   className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:border-blue-500"
-                  autoFocus
+                  autoFocus={mode === 'add'}
                 />
               </div>
 
@@ -249,12 +382,34 @@ function InstanceManager({ isOpen, onClose, editInstanceId }) {
                 <p className="text-xs text-gray-500">
                   Path to your project folder where Claude will run
                 </p>
+
+                {/* Recent Directories */}
+                {recentDirs.length > 0 && (
+                  <div className="space-y-1.5 pt-1">
+                    <div className="flex items-center gap-1 text-xs text-gray-500">
+                      <Clock className="w-3 h-3" />
+                      <span>Recent</span>
+                    </div>
+                    <div className="flex flex-wrap gap-1.5">
+                      {recentDirs.map((dir) => (
+                        <button
+                          key={dir}
+                          type="button"
+                          onClick={() => handleSelectRecentDir(dir)}
+                          className="px-2 py-1 text-xs bg-gray-700 hover:bg-gray-600 rounded text-gray-300 truncate max-w-[140px]"
+                        >
+                          {dir.split('/').pop() || dir}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
 
               {/* Color picker */}
-              <div className="space-y-2">
+              <div className="space-y-3">
                 <label className="text-sm text-gray-400">Color</label>
-                <div className="flex gap-2">
+                <div className="flex gap-3">
                   {instanceColors.map((color) => (
                     <button
                       key={color}
@@ -269,7 +424,7 @@ function InstanceManager({ isOpen, onClose, editInstanceId }) {
               </div>
 
               {/* Actions */}
-              <div className="flex gap-3 pt-2">
+              <div className="flex gap-3 pt-4 mt-2">
                 <button
                   onClick={resetForm}
                   className="flex-1 px-4 py-3 bg-gray-700 hover:bg-gray-600 rounded-lg text-white transition-colors"

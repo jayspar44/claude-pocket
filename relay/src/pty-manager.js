@@ -113,7 +113,9 @@ class PtyManager {
         this.queueOutput(data);
 
         // Track last lines for crash diagnosis (strip ANSI codes for readability)
-        const cleanData = data.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '');
+        const cleanData = data
+          .replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '')           // CSI sequences
+          .replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, ''); // OSC sequences (hyperlinks)
         const lines = cleanData.split('\n').filter(l => l.trim());
         for (const line of lines) {
           this.lastOutputLines.push(line.substring(0, 200)); // Limit line length
@@ -374,7 +376,7 @@ class PtyManager {
     if (this.processingStartTime) {
       const processingDuration = Date.now() - this.processingStartTime;
       if (processingDuration >= config.longTask.thresholdMs) {
-        logger.debug({ duration: processingDuration }, 'Long task completed');
+        logger.info({ duration: processingDuration }, 'Long task completed - broadcasting task-complete');
         this.broadcast({
           type: 'task-complete',
           duration: processingDuration,
@@ -400,7 +402,7 @@ class PtyManager {
         triggerPhrase: detection?.triggerPhrase || null,
       });
       if (detection) {
-        logger.debug({ options: detection.options, confidence: detection.confidence }, 'Detected numbered options');
+        logger.info({ options: detection.options, confidence: detection.confidence, context: detection.context }, 'Options detected - broadcasting to clients');
         // Schedule auto-expiry
         this.scheduleOptionExpiry();
       }
@@ -417,7 +419,7 @@ class PtyManager {
     this.optionExpiryTimer = setTimeout(() => {
       this.optionExpiryTimer = null;
       if (this.lastDetectedOptions) {
-        logger.debug('Options expired, clearing');
+        logger.info('Options expired, clearing');
         this.clearDetectedOptions();
       }
     }, config.optionDetection.expiryMs);
@@ -428,8 +430,10 @@ class PtyManager {
     const fullBuffer = this.getBufferedOutput();
     const recentBuffer = fullBuffer.slice(-config.optionDetection.bufferLookback);
 
-    // Strip ANSI codes for clean parsing
-    const clean = recentBuffer.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '');
+    // Strip ANSI codes for clean parsing (CSI and OSC sequences including hyperlinks)
+    const clean = recentBuffer
+      .replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '')           // CSI sequences: ESC[...m
+      .replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, ''); // OSC sequences: ESC]...BEL or ST
 
     // Skip if inside a code block (odd number of ```)
     const codeBlockCount = (clean.match(/```/g) || []).length;
@@ -452,18 +456,20 @@ class PtyManager {
       }
     }
 
-    // Find numbered lines using relaxed patterns
+    // Find numbered options using relaxed patterns
+    // Use global matching to find ALL numbers per line (handles inline options like "1. Yes  2. No")
     const numbers = new Set();
     const lines = clean.split('\n');
 
     for (const line of lines) {
       const trimmed = line.trim();
       for (const pattern of config.optionDetection.numberPatterns) {
-        const match = trimmed.match(pattern);
-        if (match) {
+        // Create global version of pattern to find all matches
+        const globalPattern = new RegExp(pattern.source, 'g');
+        let match;
+        while ((match = globalPattern.exec(trimmed)) !== null) {
           const num = parseInt(match[1]);
           if (num >= 1 && num <= 9) numbers.add(num);
-          break;
         }
       }
     }
@@ -495,6 +501,23 @@ class PtyManager {
     const capitalPattern = /(?:^|\n)\s*(?:(\d)[.):\]]\s+[A-Z]|\[(\d)\]\s+[A-Z]|\((\d)\)\s+[A-Z])/gm;
     if (capitalPattern.test(clean)) {
       confidence += 15;
+    }
+
+    // Reduce confidence for documentation-style content
+    if (config.optionDetection.negativePatterns) {
+      for (const pattern of config.optionDetection.negativePatterns) {
+        if (pattern.test(clean)) {
+          confidence -= 20;
+          break;
+        }
+      }
+    }
+
+    // Reduce confidence if numbered items are too long (documentation prose)
+    const numberedLines = lines.filter(l => /^\s*\d[.):\]]\s+/.test(l.trim()));
+    const avgLength = numberedLines.reduce((sum, l) => sum + l.trim().length, 0) / (numberedLines.length || 1);
+    if (avgLength > 60) {
+      confidence -= 15; // Long lines suggest documentation, not menu options
     }
 
     // Only detect if confidence meets threshold
@@ -536,6 +559,7 @@ class PtyManager {
       workingDir: this.currentWorkingDir,
       gitBranch: getGitBranch(this.currentWorkingDir),  // Dynamic git branch
       processingStartTime: this.processingStartTime,
+      listenerCount: this.listeners.size,
     };
   }
 

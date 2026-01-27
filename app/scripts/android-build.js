@@ -40,14 +40,14 @@ const colors = {
   bgRed: '\x1b[41m',
 };
 
-// Environment configurations - UPDATE APP_ID_BASE with your app ID
-const APP_ID_BASE = '{{APP_ID_BASE}}';
-const APP_NAME = '{{PROJECT_TITLE}}';
+// Environment configurations
+const APP_ID_BASE = 'com.claudecode.pocket';
+const APP_NAME = 'Claude Pocket';
 
 const configs = {
   local: {
     appId: `${APP_ID_BASE}.local`,
-    appName: `${APP_NAME} Local`,
+    appName: `${APP_NAME} (local)`,
     webDir: 'dist',
     server: {
       androidScheme: 'http',
@@ -56,13 +56,13 @@ const configs = {
     color: colors.blue,
     bgColor: colors.bgBlue,
     emoji: '🔵',
-    backend: 'http://10.0.2.2:4501 (local backend)',
+    backend: 'Local relay (10.0.2.2:4501)',
     flavor: 'local',
     buildMode: 'android-local'
   },
   'local-livereload': {
     appId: `${APP_ID_BASE}.local`,
-    appName: `${APP_NAME} Local`,
+    appName: `${APP_NAME} (local)`,
     webDir: 'dist',
     server: {
       url: 'http://10.0.2.2:4500',
@@ -71,32 +71,36 @@ const configs = {
     color: colors.blue,
     bgColor: colors.bgBlue,
     emoji: '🔵',
-    backend: 'http://10.0.2.2:4500 (live-reload)',
+    backend: 'Local relay (10.0.2.2:4500 live-reload)',
     liveReload: true
   },
   dev: {
     appId: `${APP_ID_BASE}.dev`,
-    appName: `${APP_NAME} Dev`,
+    appName: `${APP_NAME} (dev)`,
     webDir: 'dist',
     server: {
-      androidScheme: 'https'
+      androidScheme: 'http',
+      cleartext: true
     },
     color: colors.yellow,
     bgColor: colors.bgYellow,
     emoji: '🟡',
-    backend: 'GCP Dev Backend'
+    backend: 'Minibox DEV relay (:4503)',
+    buildMode: 'production'  // Uses .env.production which has DEV relay URL
   },
   prod: {
     appId: APP_ID_BASE,
     appName: APP_NAME,
     webDir: 'dist',
     server: {
-      androidScheme: 'https'
+      androidScheme: 'http',
+      cleartext: true
     },
     color: colors.green,
     bgColor: colors.bgGreen,
     emoji: '🟢',
-    backend: 'GCP Prod Backend'
+    backend: 'Minibox PROD relay (:4501)',
+    buildMode: 'production'
   }
 };
 
