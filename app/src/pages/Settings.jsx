@@ -1,6 +1,6 @@
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ChevronLeft, Server, Type, Trash2, Info, Check, FileX, Bell, RotateCcw, Square, Download, ScrollText } from 'lucide-react';
+import { ChevronLeft, Server, Type, Trash2, Info, Check, FileX, Bell, RotateCcw, Square, Download, ScrollText, Ghost, X } from 'lucide-react';
 import { useRelay } from '../hooks/useRelay';
 import { healthApi, filesApi, instancesApi } from '../api/relay-api';
 import { version } from '../../../version.json';
@@ -38,6 +38,8 @@ export default function Settings() {
   const [testNotificationStatus, setTestNotificationStatus] = useState(null); // null | { success, message }
   const [notifDiagnostics, setNotifDiagnostics] = useState(null);
   const [notifLog, setNotifLog] = useState(() => notificationService.getDebugLog());
+  const [serverInstances, setServerInstances] = useState(null);
+  const [stoppingInstance, setStoppingInstance] = useState(null);
 
   // Fetch health info periodically
   const fetchHealth = useCallback(() => {
@@ -46,11 +48,26 @@ export default function Settings() {
       .catch(() => setHealthInfo(null));
   }, []);
 
+  // Fetch server instances to find orphans
+  const fetchServerInstances = useCallback(() => {
+    if (connectionState !== 'connected') {
+      setServerInstances(null);
+      return;
+    }
+    instancesApi.list()
+      .then((response) => setServerInstances(response.data))
+      .catch(() => setServerInstances(null));
+  }, [connectionState]);
+
   useEffect(() => {
     fetchHealth();
-    const interval = setInterval(fetchHealth, 3000);
+    fetchServerInstances();
+    const interval = setInterval(() => {
+      fetchHealth();
+      fetchServerInstances();
+    }, 3000);
     return () => clearInterval(interval);
-  }, [fetchHealth, connectionState]);
+  }, [fetchHealth, fetchServerInstances]);
 
   // Refresh notification log periodically
   useEffect(() => {
@@ -110,12 +127,32 @@ export default function Settings() {
     try {
       const response = await instancesApi.deleteAll();
       alert(`Stopped ${response.data.count} instance(s)`);
+      fetchServerInstances();
     } catch (error) {
       console.error('Failed to stop instances:', error);
       alert(error.response?.data?.error || 'Failed to stop instances');
     }
     setStoppingAll(false);
-  }, []);
+  }, [fetchServerInstances]);
+
+  const handleStopInstance = useCallback(async (instanceId) => {
+    setStoppingInstance(instanceId);
+    try {
+      await instancesApi.delete(instanceId);
+      fetchServerInstances();
+    } catch (error) {
+      console.error('Failed to stop instance:', error);
+      alert(error.response?.data?.error || 'Failed to stop instance');
+    }
+    setStoppingInstance(null);
+  }, [fetchServerInstances]);
+
+  // Calculate orphaned instances (running on server but no connected client)
+  const orphanedInstances = useMemo(() => {
+    if (!serverInstances?.instances) return [];
+    const connectedIds = new Set(serverInstances.clients?.map(c => c.instanceId) || []);
+    return serverInstances.instances.filter(inst => !connectedIds.has(inst.instanceId));
+  }, [serverInstances]);
 
   const handleNotificationSettingChange = useCallback((key, value) => {
     const newSettings = { ...notificationSettings, [key]: value };
@@ -408,6 +445,59 @@ export default function Settings() {
             </div>
           </div>
         </div>
+
+        {/* Orphaned Instances */}
+        {orphanedInstances.length > 0 && (
+          <div className="bg-gray-800 rounded-xl p-4 space-y-4">
+            <div className="flex items-center gap-2">
+              <Ghost className="w-5 h-5 text-purple-400" />
+              <h2 className="text-white font-medium">Orphaned Instances</h2>
+              <span className="px-1.5 py-0.5 text-xs font-medium rounded bg-purple-600 text-white">
+                {orphanedInstances.length}
+              </span>
+            </div>
+            <p className="text-xs text-gray-400">
+              These instances are running on the server but have no connected clients.
+            </p>
+
+            <div className="space-y-2">
+              {orphanedInstances.map((inst) => (
+                <div
+                  key={inst.instanceId}
+                  className="flex items-center justify-between p-3 bg-gray-700/50 rounded-lg"
+                >
+                  <div className="flex-1 min-w-0">
+                    <div className="text-sm text-white font-medium truncate">
+                      {inst.instanceId === 'default' ? 'Default' : inst.instanceId}
+                    </div>
+                    <div className="text-xs text-gray-400 truncate">
+                      {inst.workingDir || 'No working directory'}
+                    </div>
+                    <div className="flex items-center gap-2 mt-1">
+                      <span className={`text-xs ${inst.running ? 'text-green-400' : 'text-gray-500'}`}>
+                        {inst.running ? 'Running' : 'Stopped'}
+                      </span>
+                      {inst.running && inst.processingStartTime && (
+                        <span className="text-xs text-yellow-400">Processing...</span>
+                      )}
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => handleStopInstance(inst.instanceId)}
+                    disabled={stoppingInstance === inst.instanceId}
+                    className="ml-2 p-2 text-red-400 hover:bg-red-600/20 rounded-lg transition-colors disabled:opacity-50"
+                  >
+                    {stoppingInstance === inst.instanceId ? (
+                      <Square className="w-4 h-4 animate-pulse" />
+                    ) : (
+                      <X className="w-4 h-4" />
+                    )}
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* Data */}
         <div className="bg-gray-800 rounded-xl p-4 space-y-4">
