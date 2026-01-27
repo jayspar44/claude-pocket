@@ -81,6 +81,9 @@ Run from repo root with `npm run <script>`:
 | `apk:dev` | Build APK (dev config) |
 | `apk:local` | Build APK (local relay) |
 | `apk:prod` | Build APK (prod config) |
+| `aab` | Build AAB for Play Store (prod) |
+| `aab:dev` | Build AAB (dev config) |
+| `aab:prod` | Build AAB (prod config) |
 | `test:app` | Run app tests |
 | `deploy` | Run deploy script |
 | `pm2:start` | Start PM2 services |
@@ -138,6 +141,11 @@ npm run build          # Production build
 | `/api/commands` | GET | List available commands |
 | `/api/files?path=` | GET | List files in directory |
 | `/api/files/upload` | POST | Upload file (multipart) |
+| `/api/files/upload-base64` | POST | Upload file (base64) |
+| `/api/files/cleanup` | DELETE | Cleanup temp files |
+| `/api/builds` | GET | List APK/AAB builds |
+| `/api/builds/:filename` | GET | Download a build |
+| `/api/builds/:filename` | DELETE | Delete a build |
 
 **WebSocket `/ws`:**
 | Direction | Message Types |
@@ -147,10 +155,33 @@ npm run build          # Production build
 
 ## Android Builds
 
+**Prerequisites:** Java JDK 17+, Android SDK (ANDROID_HOME set)
+
+**Build commands:**
+| Command | Output | Description |
+|---------|--------|-------------|
+| `npm run apk:dev` | APK | Dev debug build |
+| `npm run apk:prod` | APK | Prod release build |
+| `npm run aab:dev` | AAB | Dev release for Play Store |
+| `npm run aab:prod` | AAB | Prod release for Play Store |
+
+**Output location:** `~/aabs/` (served via `/api/builds`)
+
+**Download builds:** `http://minibox...:4501/api/builds/` lists all builds with download links
+
+**Android Studio (for debugging):**
 ```bash
 npm run android:local    # Local relay → Android Studio
-npm run apk:local        # Build localDebug APK
-npm run apk:prod         # Build prodRelease APK
+npm run android:dev      # Dev relay → Android Studio
+```
+
+**Release signing:** Set environment variables before AAB builds:
+```bash
+export KEYSTORE_PATH=~/keys/claude-pocket.keystore
+export KEYSTORE_PASSWORD="..."
+export KEY_ALIAS="..."
+export KEY_PASSWORD="..."
+npm run aab:prod
 ```
 
 ## Production Deployment (minibox)

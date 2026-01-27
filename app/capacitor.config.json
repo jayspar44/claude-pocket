@@ -1,25 +1,25 @@
 {
-    "appId": "com.claudecode.pocket",
-    "webDir": "dist",
-    "appName": "Claude Pocket",
-    "server": {
-        "androidScheme": "https"
+  "appId": "com.claudecode.pocket",
+  "appName": "claude-pocket",
+  "webDir": "dist",
+  "server": {
+    "androidScheme": "https"
+  },
+  "plugins": {
+    "Keyboard": {
+      "resize": "native",
+      "style": "dark",
+      "resizeOnFullScreen": true
     },
-    "plugins": {
-        "Keyboard": {
-            "resizeOnFullScreen": true,
-            "style": "dark",
-            "resize": "native"
-        },
-        "StatusBar": {
-            "overlay": true
-        },
-        "SystemBars": {
-            "insetsHandling": "disable"
-        },
-        "LocalNotifications": {
-            "smallIcon": "ic_notification",
-            "sound": "default"
-        }
+    "StatusBar": {
+      "overlay": true
+    },
+    "SystemBars": {
+      "insetsHandling": "disable"
+    },
+    "LocalNotifications": {
+      "smallIcon": "ic_notification",
+      "sound": "default"
     }
+  }
 }
