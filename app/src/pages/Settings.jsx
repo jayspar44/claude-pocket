@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ChevronLeft, Server, Type, Trash2, Info, Check, FileX, Bell, RotateCcw, Square, Download, ScrollText, Ghost, X } from 'lucide-react';
+import { ChevronLeft, Server, Type, Trash2, Info, Check, FileX, Bell, RotateCcw, Square, Download, ScrollText, X } from 'lucide-react';
 import { useRelay } from '../hooks/useRelay';
 import { healthApi, filesApi, instancesApi } from '../api/relay-api';
 import { version } from '../../../version.json';
@@ -155,11 +155,9 @@ export default function Settings() {
     setStoppingInstance(null);
   }, []);
 
-  // Calculate orphaned instances (running on server but no connected client)
-  const orphanedInstances = useMemo(() => {
-    if (!serverInstances?.instances) return [];
-    const connectedIds = new Set(serverInstances.clients?.map(c => c.instanceId) || []);
-    return serverInstances.instances.filter(inst => !connectedIds.has(inst.instanceId));
+  // All server instances (listenerCount determines connection status)
+  const serverInstanceList = useMemo(() => {
+    return serverInstances?.instances || [];
   }, [serverInstances]);
 
   const handleNotificationSettingChange = useCallback((key, value) => {
@@ -454,50 +452,61 @@ export default function Settings() {
           </div>
         </div>
 
-        {/* Orphaned Instances */}
-        {orphanedInstances.length > 0 && (
+        {/* Server Instances */}
+        {serverInstanceList.length > 0 && (
           <div className="bg-gray-800 rounded-xl p-4 space-y-4">
             <div className="flex items-center gap-2">
-              <Ghost className="w-5 h-5 text-purple-400" />
-              <h2 className="text-white font-medium">Orphaned Instances</h2>
+              <Server className="w-5 h-5 text-purple-400" />
+              <h2 className="text-white font-medium">Server Instances</h2>
               <span className="px-1.5 py-0.5 text-xs font-medium rounded bg-purple-600 text-white">
-                {orphanedInstances.length}
+                {serverInstanceList.length}
               </span>
             </div>
             <p className="text-xs text-gray-400">
-              Server instances without connected clients.
+              All instances running on the relay server.
             </p>
 
             <div className="space-y-2">
-              {orphanedInstances.map((inst) => (
-                <div
-                  key={inst.instanceId}
-                  className="flex items-center justify-between p-3 bg-gray-700/50 rounded-lg"
-                >
-                  <div className="flex-1 min-w-0">
-                    <div className="text-sm text-white font-medium truncate">
-                      {inst.instanceId === 'default' ? 'Default' : inst.instanceId}
-                    </div>
-                    <div className="text-xs text-gray-400 truncate">
-                      {inst.workingDir || 'No working directory'}
-                    </div>
-                    <span className={`text-xs ${inst.running ? 'text-green-400' : 'text-gray-500'}`}>
-                      {inst.running ? 'Running' : 'Stopped'}
-                    </span>
-                  </div>
-                  <button
-                    onClick={() => handleStopInstance(inst.instanceId)}
-                    disabled={stoppingInstance === inst.instanceId}
-                    className="ml-2 p-2 text-red-400 hover:bg-red-600/20 rounded-lg transition-colors disabled:opacity-50"
+              {serverInstanceList.map((inst) => {
+                const isConnected = (inst.listenerCount || 0) > 0;
+                const isRunning = inst.running;
+                return (
+                  <div
+                    key={inst.instanceId}
+                    className="flex items-center justify-between p-3 bg-gray-700/50 rounded-lg"
                   >
-                    {stoppingInstance === inst.instanceId ? (
-                      <Square className="w-4 h-4 animate-pulse" />
-                    ) : (
-                      <X className="w-4 h-4" />
-                    )}
-                  </button>
-                </div>
-              ))}
+                    <div className="flex-1 min-w-0">
+                      <div className="text-sm text-white font-medium truncate">
+                        {inst.instanceId === 'default' ? 'Default' : inst.instanceId}
+                      </div>
+                      <div className="text-xs text-gray-400 truncate">
+                        {inst.workingDir || 'No working directory'}
+                      </div>
+                      <div className="flex items-center gap-2 mt-1">
+                        <span className={`text-xs ${isRunning ? 'text-green-400' : 'text-gray-500'}`}>
+                          {isRunning ? 'Running' : 'Stopped'}
+                        </span>
+                        {isRunning && (
+                          <span className={`text-xs ${isConnected ? 'text-green-400' : 'text-orange-400'}`}>
+                            • {isConnected ? 'Connected' : 'Orphaned'}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => handleStopInstance(inst.instanceId)}
+                      disabled={stoppingInstance === inst.instanceId}
+                      className="ml-2 p-2 text-red-400 hover:bg-red-600/20 rounded-lg transition-colors disabled:opacity-50"
+                    >
+                      {stoppingInstance === inst.instanceId ? (
+                        <Square className="w-4 h-4 animate-pulse" />
+                      ) : (
+                        <X className="w-4 h-4" />
+                      )}
+                    </button>
+                  </div>
+                );
+              })}
             </div>
           </div>
         )}

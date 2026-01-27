@@ -559,6 +559,7 @@ class PtyManager {
       workingDir: this.currentWorkingDir,
       gitBranch: getGitBranch(this.currentWorkingDir),  // Dynamic git branch
       processingStartTime: this.processingStartTime,
+      listenerCount: this.listeners.size,
     };
   }
 
