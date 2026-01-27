@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useMemo } from 'react';
+import { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ChevronLeft, Server, Type, Trash2, Info, Check, FileX, Bell, RotateCcw, Square, Download, ScrollText, Ghost, X } from 'lucide-react';
 import { useRelay } from '../hooks/useRelay';
@@ -41,19 +41,22 @@ export default function Settings() {
   const [serverInstances, setServerInstances] = useState(null);
   const [stoppingInstance, setStoppingInstance] = useState(null);
 
-  // Fetch health info periodically
-  const fetchHealth = useCallback(() => {
-    healthApi.check()
-      .then((response) => setHealthInfo(response.data))
-      .catch(() => setHealthInfo(null));
-  }, []);
-
+  // Use ref for connectionState to avoid effect re-running on every state change
+  const connectionStateRef = useRef(connectionState);
   useEffect(() => {
-    fetchHealth();
+    connectionStateRef.current = connectionState;
+  }, [connectionState]);
 
-    // Fetch server instances inline to avoid callback dependency issues
+  // Fetch health and server instances periodically
+  useEffect(() => {
+    const fetchHealth = () => {
+      healthApi.check()
+        .then((response) => setHealthInfo(response.data))
+        .catch(() => setHealthInfo(null));
+    };
+
     const fetchInstances = () => {
-      if (connectionState !== 'connected') {
+      if (connectionStateRef.current !== 'connected') {
         setServerInstances(null);
         return;
       }
@@ -61,14 +64,19 @@ export default function Settings() {
         .then((response) => setServerInstances(response.data))
         .catch(() => setServerInstances(null));
     };
+
+    // Initial fetch
+    fetchHealth();
     fetchInstances();
 
+    // Periodic fetch
     const interval = setInterval(() => {
       fetchHealth();
       fetchInstances();
     }, 3000);
+
     return () => clearInterval(interval);
-  }, [fetchHealth, connectionState]);
+  }, []); // Empty deps - runs once, uses ref for connectionState
 
   // Refresh notification log periodically
   useEffect(() => {
