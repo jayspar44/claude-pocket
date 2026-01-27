@@ -48,26 +48,27 @@ export default function Settings() {
       .catch(() => setHealthInfo(null));
   }, []);
 
-  // Fetch server instances to find orphans
-  const fetchServerInstances = useCallback(() => {
-    if (connectionState !== 'connected') {
-      setServerInstances(null);
-      return;
-    }
-    instancesApi.list()
-      .then((response) => setServerInstances(response.data))
-      .catch(() => setServerInstances(null));
-  }, [connectionState]);
-
   useEffect(() => {
     fetchHealth();
-    fetchServerInstances();
+
+    // Fetch server instances inline to avoid callback dependency issues
+    const fetchInstances = () => {
+      if (connectionState !== 'connected') {
+        setServerInstances(null);
+        return;
+      }
+      instancesApi.list()
+        .then((response) => setServerInstances(response.data))
+        .catch(() => setServerInstances(null));
+    };
+    fetchInstances();
+
     const interval = setInterval(() => {
       fetchHealth();
-      fetchServerInstances();
+      fetchInstances();
     }, 3000);
     return () => clearInterval(interval);
-  }, [fetchHealth, fetchServerInstances]);
+  }, [fetchHealth, connectionState]);
 
   // Refresh notification log periodically
   useEffect(() => {
@@ -127,25 +128,24 @@ export default function Settings() {
     try {
       const response = await instancesApi.deleteAll();
       alert(`Stopped ${response.data.count} instance(s)`);
-      fetchServerInstances();
     } catch (error) {
       console.error('Failed to stop instances:', error);
       alert(error.response?.data?.error || 'Failed to stop instances');
     }
     setStoppingAll(false);
-  }, [fetchServerInstances]);
+  }, []);
 
   const handleStopInstance = useCallback(async (instanceId) => {
     setStoppingInstance(instanceId);
     try {
       await instancesApi.delete(instanceId);
-      fetchServerInstances();
+      // Re-fetch will happen via the interval
     } catch (error) {
       console.error('Failed to stop instance:', error);
       alert(error.response?.data?.error || 'Failed to stop instance');
     }
     setStoppingInstance(null);
-  }, [fetchServerInstances]);
+  }, []);
 
   // Calculate orphaned instances (running on server but no connected client)
   const orphanedInstances = useMemo(() => {
@@ -457,7 +457,7 @@ export default function Settings() {
               </span>
             </div>
             <p className="text-xs text-gray-400">
-              These instances are running on the server but have no connected clients.
+              Server instances without connected clients.
             </p>
 
             <div className="space-y-2">
@@ -473,14 +473,9 @@ export default function Settings() {
                     <div className="text-xs text-gray-400 truncate">
                       {inst.workingDir || 'No working directory'}
                     </div>
-                    <div className="flex items-center gap-2 mt-1">
-                      <span className={`text-xs ${inst.running ? 'text-green-400' : 'text-gray-500'}`}>
-                        {inst.running ? 'Running' : 'Stopped'}
-                      </span>
-                      {inst.running && inst.processingStartTime && (
-                        <span className="text-xs text-yellow-400">Processing...</span>
-                      )}
-                    </div>
+                    <span className={`text-xs ${inst.running ? 'text-green-400' : 'text-gray-500'}`}>
+                      {inst.running ? 'Running' : 'Stopped'}
+                    </span>
                   </div>
                   <button
                     onClick={() => handleStopInstance(inst.instanceId)}
