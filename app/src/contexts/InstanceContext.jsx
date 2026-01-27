@@ -384,7 +384,6 @@ export function InstanceProvider({ children }) {
               notificationService.notifyInputNeeded({
                 instanceId,
                 optionCount: message.options.length,
-                triggerPhrase: message.triggerPhrase,
               });
             }
           } else if (message.type === 'task-complete') {

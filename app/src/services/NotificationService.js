@@ -19,6 +19,8 @@ class NotificationService {
     this.settings = this.loadSettings();
     this.debugLog = []; // In-memory log for debugging
     this.maxLogEntries = 50;
+    this.lastNotificationTime = 0; // Debounce duplicate notifications
+    this.lastNotificationType = null;
   }
 
   // Add entry to debug log
@@ -140,6 +142,25 @@ class NotificationService {
       return { sent: false, reason: 'type-disabled' };
     }
 
+    // Debounce: prevent duplicate notifications within 2 seconds
+    // input-needed takes priority over task-complete
+    const now = Date.now();
+    const timeSinceLastNotification = now - this.lastNotificationTime;
+    if (timeSinceLastNotification < 2000) {
+      // Within debounce window
+      if (type === 'task-complete' && this.lastNotificationType === 'input-needed') {
+        // Skip task-complete if we just sent input-needed
+        console.log('[NotificationService] Blocked: input-needed notification was just sent');
+        return { sent: false, reason: 'debounced-priority' };
+      }
+      if (type === 'task-complete' && this.lastNotificationType === 'task-complete') {
+        // Skip duplicate task-complete
+        console.log('[NotificationService] Blocked: duplicate task-complete within debounce window');
+        return { sent: false, reason: 'debounced-duplicate' };
+      }
+      // input-needed can always go through (and will suppress subsequent task-complete)
+    }
+
     // Don't notify if app is in foreground (DISABLED FOR TESTING)
     // if (document.visibilityState === 'visible') return;
 
@@ -152,6 +173,10 @@ class NotificationService {
 
     const tag = `claude-pocket-${type}-${instanceId || 'default'}`;
     const data = { instanceId, type };
+
+    // Track notification for debouncing
+    this.lastNotificationTime = Date.now();
+    this.lastNotificationType = type;
 
     if (Capacitor.isNativePlatform() && this.LocalNotifications) {
       // Native notification via Capacitor
@@ -188,10 +213,11 @@ class NotificationService {
     }
   }
 
-  async notifyInputNeeded({ instanceId, optionCount, triggerPhrase }) {
-    const title = triggerPhrase || 'Claude needs input';
+  async notifyInputNeeded({ instanceId, optionCount }) {
+    // Always use sensible title - triggerPhrase was unreliable (often "?" or garbage)
+    const title = 'Claude needs input';
     const body = optionCount > 0
-      ? `Select from ${optionCount} options`
+      ? `Select from ${optionCount} option${optionCount > 1 ? 's' : ''}`
       : 'Waiting for your response';
 
     await this.notify({
