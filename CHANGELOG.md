@@ -2,6 +2,21 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+### [0.2.3](https://github.com/jayspar44/claude-pocket/compare/v0.2.2...v0.2.3) (2026-01-27)
+
+
+### Features
+
+* add pwa notifications and auto-detect local/remote execution ([e102c2f](https://github.com/jayspar44/claude-pocket/commit/e102c2fbac71dc6e5d2be5b8189fe9b624ef3882))
+* complete multi-pty support and statusbar improvements ([170230c](https://github.com/jayspar44/claude-pocket/commit/170230ca0df49f8fd702563b09c467cb4bba6b59))
+* merge multi-pty updates and statusbar improvements ([64420f1](https://github.com/jayspar44/claude-pocket/commit/64420f1613da365ba639659cf6cbf754de08711c))
+* options detection improvements and config fixes ([8419650](https://github.com/jayspar44/claude-pocket/commit/8419650b28ea61fd8acc6b667d5850fb53a77e17))
+
+
+### Bug Fixes
+
+* prevent duplicate WebSocket connections ([8cd6a07](https://github.com/jayspar44/claude-pocket/commit/8cd6a0766058e3f626c125fdf9f2d7d33ab1ecba))
+
 ### [0.2.2](https://github.com/jayspar44/claude-pocket/compare/v0.2.1...v0.2.2) (2026-01-24)
 
 
