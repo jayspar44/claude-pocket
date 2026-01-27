@@ -132,6 +132,9 @@ export function InstanceProvider({ children }) {
   const reconnectTimeoutsRef = useRef({});
   const connectionTimeoutsRef = useRef({});
   const heartbeatIntervalsRef = useRef({});
+
+  // Track app visibility for notifications (Capacitor's visibilityState is unreliable)
+  const isAppVisibleRef = useRef(true);
   const pongTimeoutsRef = useRef({});
   const listenersRef = useRef({}); // Map<instanceId, Set<callback>>
   const connectInstanceRef = useRef(null); // Ref for self-referencing in reconnect
@@ -342,8 +345,17 @@ export function InstanceProvider({ children }) {
             updateInstanceState(instanceId, {
               detectedOptions: message.options || [],
             });
-            // Notify if options detected and app is backgrounded
-            if (message.options?.length > 0 && document.visibilityState !== 'visible') {
+            // Log and notify if options detected and app is backgrounded
+            const optionCount = message.options?.length || 0;
+            const isVisible = isAppVisibleRef.current;
+            const willNotify = optionCount > 0 && !isVisible;
+            notificationService.log('options-detected', {
+              optionCount,
+              isVisible,
+              willNotify,
+            });
+            if (willNotify) {
+              notificationService.log('Triggering notifyInputNeeded');
               notificationService.notifyInputNeeded({
                 instanceId,
                 optionCount: message.options.length,
@@ -351,8 +363,16 @@ export function InstanceProvider({ children }) {
               });
             }
           } else if (message.type === 'task-complete') {
-            // Notify on long task completion (only when app is backgrounded)
-            if (document.visibilityState !== 'visible') {
+            // Log and notify on long task completion (only when app is backgrounded)
+            const isVisible = isAppVisibleRef.current;
+            const willNotify = !isVisible;
+            notificationService.log('task-complete', {
+              duration: message.duration,
+              isVisible,
+              willNotify,
+            });
+            if (willNotify) {
+              notificationService.log('Triggering notifyTaskComplete');
               notificationService.notifyTaskComplete({
                 instanceId,
                 duration: message.duration,
@@ -521,9 +541,14 @@ export function InstanceProvider({ children }) {
     return () => window.removeEventListener('sw-switch-instance', handleSwSwitchInstance);
   }, [instances, switchInstance]);
 
-  // Reconnect when app returns from background
+  // Reconnect when app returns from background + track visibility for notifications
   useEffect(() => {
     const handleVisibilityChange = () => {
+      // Update visibility ref for web platform
+      if (!Capacitor.isNativePlatform()) {
+        isAppVisibleRef.current = document.visibilityState === 'visible';
+      }
+
       if (document.hidden) return;
 
       const ws = wsRefs.current[activeInstanceId];
@@ -542,6 +567,8 @@ export function InstanceProvider({ children }) {
     let appStateListener = null;
     if (Capacitor.isNativePlatform()) {
       appStateListener = App.addListener('appStateChange', ({ isActive }) => {
+        notificationService.log('appStateChange', { isActive, wasVisible: isAppVisibleRef.current });
+        isAppVisibleRef.current = isActive; // Track visibility for native
         if (isActive) handleVisibilityChange();
       });
     }

@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ChevronLeft, Server, Type, Trash2, Info, Check, FileX, Bell, RotateCcw, Square, Download } from 'lucide-react';
+import { ChevronLeft, Server, Type, Trash2, Info, Check, FileX, Bell, RotateCcw, Square, Download, ScrollText } from 'lucide-react';
 import { useRelay } from '../hooks/useRelay';
 import { healthApi, filesApi, instancesApi } from '../api/relay-api';
 import { version } from '../../../version.json';
@@ -36,6 +36,7 @@ export default function Settings() {
   const [notificationSettings, setNotificationSettings] = useState(() => notificationService.getSettings());
   const [testNotificationStatus, setTestNotificationStatus] = useState(null); // null | { success, message }
   const [notifDiagnostics, setNotifDiagnostics] = useState(null);
+  const [notifLog, setNotifLog] = useState(() => notificationService.getDebugLog());
 
   // Fetch health info periodically
   const fetchHealth = useCallback(() => {
@@ -49,6 +50,14 @@ export default function Settings() {
     const interval = setInterval(fetchHealth, 3000);
     return () => clearInterval(interval);
   }, [fetchHealth, connectionState]);
+
+  // Refresh notification log periodically
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setNotifLog(notificationService.getDebugLog());
+    }, 1000);
+    return () => clearInterval(interval);
+  }, []);
 
   const handleSaveRelayUrl = useCallback(() => {
     if (!relayUrlInput.trim()) return;
@@ -350,6 +359,53 @@ export default function Settings() {
               <p>SW Active: <span className={notifDiagnostics.swActive ? 'text-green-400' : 'text-red-400'}>{notifDiagnostics.swActive ? 'yes' : 'no'}</span></p>
             </div>
           )}
+
+          {/* Debug Log */}
+          <div className="mt-4 pt-4 border-t border-gray-700">
+            <div className="flex items-center justify-between mb-2">
+              <div className="flex items-center gap-2">
+                <ScrollText className="w-4 h-4 text-gray-400" />
+                <span className="text-sm text-gray-400">Debug Log</span>
+              </div>
+              <button
+                onClick={() => {
+                  notificationService.clearDebugLog();
+                  setNotifLog([]);
+                }}
+                className="text-xs text-gray-500 hover:text-gray-300"
+              >
+                Clear
+              </button>
+            </div>
+            <div className="bg-gray-900 rounded p-2 max-h-48 overflow-y-auto font-mono text-xs">
+              {notifLog.length === 0 ? (
+                <p className="text-gray-500 italic">No events yet. Waiting for options-detected or task-complete...</p>
+              ) : (
+                notifLog.map((entry, i) => (
+                  <div key={i} className="py-1 border-b border-gray-800 last:border-0">
+                    <span className="text-gray-500">{entry.time}</span>{' '}
+                    <span className="text-blue-400">{entry.message}</span>
+                    {entry.optionCount !== undefined && (
+                      <span className="text-gray-400"> opts={entry.optionCount}</span>
+                    )}
+                    {entry.visibility && (
+                      <span className={entry.visibility === 'visible' ? 'text-yellow-400' : 'text-green-400'}>
+                        {' '}vis={entry.visibility}
+                      </span>
+                    )}
+                    {entry.willNotify !== undefined && (
+                      <span className={entry.willNotify ? 'text-green-400' : 'text-red-400'}>
+                        {' '}notify={entry.willNotify ? 'YES' : 'NO'}
+                      </span>
+                    )}
+                    {entry.duration && (
+                      <span className="text-gray-400"> dur={Math.round(entry.duration / 1000)}s</span>
+                    )}
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
         </div>
 
         {/* Data */}

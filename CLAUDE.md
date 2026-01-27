@@ -36,37 +36,20 @@ Mobile App (Capacitor/React) ◄──WebSocket──► Relay Server (Mac)
 
 **Stack:** App: React 19 + Vite 7 + Tailwind 4 + Capacitor 8 | Relay: Node 22 + Express 5 + node-pty
 
-## Execution Context
-
-Claude Code may run from different locations. Determine where you're running before using SSH:
-
-| Running From | How to Tell | Minibox Commands |
-|--------------|-------------|------------------|
-| Local Mac | `hostname` = local machine name | Use `ssh minibox "..."` |
-| Minibox (via SSH) | `hostname` = `MiniBox.local` | Run directly, no SSH needed |
-
-**Common scenario:** SSH from phone (Termux) → minibox → `claude`. In this case, Claude Code runs on minibox and all commands execute locally. No SSH wrapping needed for PM2, deploy scripts, etc.
-
 ## Project Structure
 
 ```
 app/src/                         relay/src/
 ├─ components/                   ├─ index.js (Express + WS)
 │  ├─ terminal/TerminalView      ├─ pty-manager.js
-│  ├─ input/InputBar,QuickActions├─ websocket-handler.js
-│  ├─ command/CommandPalette     ├─ ansi-preprocessor.js
-│  ├─ status/StatusBar           └─ routes/commands.js,files.js
-│  └─ files/FileBrowser
-├─ contexts/RelayContext,Theme
+│  ├─ input/InputBar,QuickActions├─ pty-registry.js
+│  ├─ command/CommandPalette     ├─ websocket-handler.js
+│  ├─ StatusBar.jsx              ├─ ansi-preprocessor.js
+│  └─ files/FileBrowser          └─ routes/commands,files,builds
+├─ contexts/Relay,Instance,Theme
 ├─ pages/Terminal,Settings
 └─ api/relay-api.js
 ```
-
-## Development Environment
-
-- Code and deployment both on `minibox` (Mac Mini on Tailscale)
-- Direct file operations: use Read, Write, Edit, Bash tools
-- Slash commands (`/deploy`, `/logs`, etc.) auto-detect execution context
 
 ## Development
 
@@ -124,7 +107,6 @@ npm run build          # Production build
 | Location | Variable | Default |
 |----------|----------|---------|
 | `relay/.env` | `HOST` | 0.0.0.0 |
-| | `WORKING_DIR` | (required) |
 | | `CLAUDE_COMMAND` | claude |
 | | `ALLOWED_ORIGINS` | * |
 | | `SHELL` | /bin/zsh |
@@ -147,6 +129,7 @@ npm run build          # Production build
 | Endpoint | Method | Description |
 |----------|--------|-------------|
 | `/api/health` | GET | Health check |
+| `/api/instances` | GET/POST/DELETE | Multi-instance management |
 | `/api/pty/status` | GET | PTY process status |
 | `/api/pty/start` | POST | Start PTY process |
 | `/api/pty/stop` | POST | Stop PTY process |
@@ -154,16 +137,13 @@ npm run build          # Production build
 | `/api/pty/buffer` | GET | Get output buffer |
 | `/api/commands` | GET | List available commands |
 | `/api/files?path=` | GET | List files in directory |
-| `/api/files/info?path=` | GET | Get file info |
 | `/api/files/upload` | POST | Upload file (multipart) |
-| `/api/files/upload-base64` | POST | Upload file (base64) |
-| `/api/files/cleanup` | DELETE | Cleanup temp files |
 
 **WebSocket `/ws`:**
 | Direction | Message Types |
 |-----------|---------------|
-| Client→Server | `input` \| `submit` \| `resize` \| `interrupt` \| `restart` \| `status` \| `ping` |
-| Server→Client | `output` \| `replay` \| `status` \| `pty-status` \| `pty-crash` \| `options-detected` \| `pong` |
+| Client→Server | `input` \| `submit` \| `resize` \| `interrupt` \| `restart` \| `status` \| `set-instance` \| `ping` |
+| Server→Client | `output` \| `replay` \| `status` \| `pty-status` \| `pty-crash` \| `options-detected` \| `ready` \| `pong` |
 
 ## Android Builds
 
@@ -206,15 +186,7 @@ ssh minibox "cd ~/Documents/projects/claude-pocket && ./scripts/deploy.sh"
 | DEV App | `http://minibox.rattlesnake-mimosa.ts.net:4502` | 4502 |
 | DEV Relay | `ws://minibox.rattlesnake-mimosa.ts.net:4503/ws` | 4503 |
 
-**PM2 Commands:**
-| Command | Description |
-|---------|-------------|
-| `pm2 status` | Check status |
-| `pm2 logs` | Tail logs |
-| `pm2 restart all` | Restart services |
-| `pm2 stop all` | Stop services |
-| `pm2 delete all` | Kill and remove from PM2 |
-| `pm2 monit` | Live dashboard |
+**PM2 Commands:** `pm2 status` | `pm2 logs` | `pm2 restart all` | `pm2 stop all` | `pm2 delete all` | `pm2 monit`
 
 **Auto-start on boot (first time only):**
 ```bash
@@ -232,7 +204,7 @@ pm2 save       # Save process list
 
 **Patterns:**
 - App: React Context for state, Tailwind for styling, `api/relay-api.js` for REST
-- Relay: Pino logger, JSON WebSocket protocol, single persistent PTY with buffer
+- Relay: Pino logger, JSON WebSocket protocol, multi-instance PTY with buffer
 
 **Commits:** `<type>: <description>`
 
@@ -262,13 +234,7 @@ Uses `standard-version` for semantic versioning based on conventional commits.
 /release --major      # Force major bump
 ```
 
-**How it works:**
-1. Analyzes commits since last tag
-2. Determines bump type from commit prefixes
-3. Updates all version files atomically
-4. Creates commit: `chore(release): X.Y.Z`
-5. Creates tag: `vX.Y.Z`
-6. Pushes commit and tag
+**How it works:** Analyzes commits → determines bump → updates all version files → creates commit + tag → pushes.
 
 **Important:** Never manually create version tags. Always use `/release` to keep version files and tags in sync.
 
@@ -276,35 +242,33 @@ Uses `standard-version` for semantic versioning based on conventional commits.
 
 ### Development
 
-| Command | Usage | Description |
+| Command | Usage | When to Use |
 |---------|-------|-------------|
-| `/feature-start` | `<name> [base]` | Create feature branch |
-| `/commit-push` | `[-m "msg"] [--no-push]` | Commit with lint + security |
-| `/lint-check` | `[--fix]` | ESLint app + relay |
-| `/security-scan` | `[--staged\|--all]` | Scan for secrets |
-| `/code-review` | | 4 parallel agents (Security, Standards, Logic, Perf) |
-| `/pr-flow` | `[--no-fix] [--auto-merge]` | Autonomous PR workflow |
-| `/pr-merge` | `<pr#> [--no-sync]` | Squash merge + cleanup |
-| `/release` | `[--patch\|--minor\|--major\|--first]` | Version bump from commits |
+| `/feature-start` | `<name> [base]` | Starting new work - creates branch from base |
+| `/commit-push` | `[-m "msg"] [--no-push]` | Ready to commit - runs lint+security before push |
+| `/lint-check` | `[--fix]` | Check code quality before committing |
+| `/security-scan` | `[--staged\|--all]` | Verify no secrets before committing |
+| `/code-review` | | Before PR - 4-agent parallel review |
+| `/pr-flow` | `[--no-fix] [--auto-merge]` | End-to-end PR with auto-fix loop |
+| `/pr-merge` | `<pr#> [--no-sync]` | Merge approved PR with branch cleanup |
+| `/release` | `[--patch\|--minor\|--major\|--first]` | After merging to main - bumps version from commits |
 
-### Minibox (PROD + DEV)
+### Minibox Operations
 
-| Command | Usage | Description |
+| Command | Usage | When to Use |
 |---------|-------|-------------|
-| `/deploy` | `--env <prod\|dev> [--skip-confirm]` | Deploy to minibox |
-| `/status` | `--env <prod\|dev> [--health]` | Check PM2 status |
-| `/logs` | `--env <prod\|dev> [--lines N] [--app\|--relay]` | View logs |
-| `/restart` | `--env <prod\|dev> [--app\|--relay\|--all]` | Restart services |
-| `/stop` | `--env <prod\|dev> [--app\|--relay\|--all]` | Stop services |
+| `/deploy` | `--env <prod\|dev> [--skip-confirm]` | Push code to PROD or DEV instance |
+| `/status` | `--env <prod\|dev> [--health]` | Check if services are running |
+| `/logs` | `--env <prod\|dev> [--lines N] [--app\|--relay]` | Debug issues, view recent output |
+| `/restart` | `--env <prod\|dev> [--app\|--relay\|--all]` | After config changes or to fix stuck state |
+| `/stop` | `--env <prod\|dev> [--app\|--relay\|--all]` | Pause services without removing from PM2 |
 
-**Examples:**
-```bash
-/deploy --env prod           # Deploy to PROD
-/status --env dev --health   # DEV status + health check
-/logs --env prod --relay     # PROD relay logs only
-/restart --env dev --app     # Restart DEV app only
-```
+### Build
 
-**Dev Workflow:** `/feature-start` → code → `/commit-push` → `/pr-flow` → `/release`
+| Command | Usage | When to Use |
+|---------|-------|-------------|
+| `/build-aab` | | Building Play Store release (AAB format) |
 
-**Deploy Workflow:** `/deploy --env prod` → `/status --env prod --health` → `/logs --env prod`
+**Workflows:**
+- **Dev:** `/feature-start` → code → `/commit-push` → `/code-review` → `/pr-flow` → `/release`
+- **Deploy:** `/deploy --env prod` → `/status --env prod --health` → `/logs --env prod`

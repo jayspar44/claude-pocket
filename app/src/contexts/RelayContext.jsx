@@ -20,6 +20,7 @@ export function RelayProvider({ children }) {
     isReconnecting: instance.isReconnecting,
     activeInstance: instance.activeInstance,
     activeInstanceId: instance.activeInstanceId,
+    instances: instance.instances,
 
     // Connection actions
     connect: instance.connect,

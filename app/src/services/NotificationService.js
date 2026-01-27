@@ -17,6 +17,32 @@ class NotificationService {
     this.swRegistration = null;
     this.initialized = false;
     this.settings = this.loadSettings();
+    this.debugLog = []; // In-memory log for debugging
+    this.maxLogEntries = 50;
+  }
+
+  // Add entry to debug log
+  log(message, data = {}) {
+    const entry = {
+      time: new Date().toLocaleTimeString('en-US', { hour12: false }),
+      message,
+      ...data,
+    };
+    this.debugLog.unshift(entry); // Add to front
+    if (this.debugLog.length > this.maxLogEntries) {
+      this.debugLog.pop(); // Remove oldest
+    }
+    console.info('[NotificationService]', message, data);
+  }
+
+  // Get debug log for UI display
+  getDebugLog() {
+    return [...this.debugLog];
+  }
+
+  // Clear debug log
+  clearDebugLog() {
+    this.debugLog = [];
   }
 
   loadSettings() {

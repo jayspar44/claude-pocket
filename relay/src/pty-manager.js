@@ -402,7 +402,7 @@ class PtyManager {
         triggerPhrase: detection?.triggerPhrase || null,
       });
       if (detection) {
-        logger.debug({ options: detection.options, confidence: detection.confidence }, 'Detected numbered options');
+        logger.info({ options: detection.options, confidence: detection.confidence, context: detection.context }, 'Options detected - broadcasting to clients');
         // Schedule auto-expiry
         this.scheduleOptionExpiry();
       }
@@ -419,7 +419,7 @@ class PtyManager {
     this.optionExpiryTimer = setTimeout(() => {
       this.optionExpiryTimer = null;
       if (this.lastDetectedOptions) {
-        logger.debug('Options expired, clearing');
+        logger.info('Options expired, clearing');
         this.clearDetectedOptions();
       }
     }, config.optionDetection.expiryMs);

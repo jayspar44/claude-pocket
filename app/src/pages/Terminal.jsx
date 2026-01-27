@@ -18,7 +18,7 @@ function Terminal() {
   const prevViewportHeightRef = useRef(null);
   const wasAtBottomRef = useRef(true);
   const { connectionState, ptyStatus, sendInput, sendResize, sendInterrupt, submitInput, clearAndReplay } = useTerminalRelay(terminalRef);
-  const { connect, detectedOptions, clearDetectedOptions, activeInstance, ptyError } = useRelay();
+  const { connect, detectedOptions, clearDetectedOptions, activeInstance, ptyError, instances } = useRelay();
   const viewportHeight = useViewportHeight();
   const [fontSize] = useState(() => {
     const stored = storage.get('fontSize');
@@ -186,7 +186,7 @@ function Terminal() {
       style={{ height: viewportHeight ? `${viewportHeight}px` : '100dvh' }}
     >
       {/* Status Bar */}
-      <StatusBar connectionState={connectionState} ptyStatus={ptyStatus} onReconnect={connect} workingDir={ptyStatus?.workingDir || activeInstance?.workingDir} ptyError={ptyError} onAddInstance={handleOpenInstanceManager} />
+      <StatusBar connectionState={connectionState} ptyStatus={ptyStatus} onReconnect={connect} workingDir={ptyStatus?.workingDir || activeInstance?.workingDir} ptyError={ptyError} onAddInstance={handleOpenInstanceManager} needsInput={detectedOptions?.length > 0} instanceCount={instances?.length || 1} />
 
       {/* Instance Tab Bar */}
       <InstanceTabBar onManageClick={handleManageInstance} />
