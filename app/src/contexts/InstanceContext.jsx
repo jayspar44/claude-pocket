@@ -9,6 +9,9 @@ const WebSocketService = Capacitor.isNativePlatform()
   ? registerPlugin('WebSocketService')
   : null;
 
+// Track WebSocketService state to prevent multiple start attempts
+let webSocketServiceRunning = false;
+
 const InstanceContext = createContext(null);
 
 // Connection constants
@@ -273,8 +276,10 @@ export function InstanceProvider({ children }) {
         startHeartbeat(instanceId, ws);
 
         // Start foreground service to keep connection alive when backgrounded (Android only)
-        if (WebSocketService) {
+        if (WebSocketService && !webSocketServiceRunning) {
+          webSocketServiceRunning = true;
           WebSocketService.start().catch(err => {
+            webSocketServiceRunning = false;
             console.warn('[InstanceContext] Failed to start foreground service:', err);
           });
         }
@@ -453,14 +458,18 @@ export function InstanceProvider({ children }) {
     }
 
     // Stop foreground service if no other connections are active (Android only)
-    if (WebSocketService) {
+    if (WebSocketService && webSocketServiceRunning) {
       const hasOtherConnections = Object.keys(wsRefs.current).some(
         id => id !== instanceId && wsRefs.current[id]?.readyState === WebSocket.OPEN
       );
       if (!hasOtherConnections) {
-        WebSocketService.stop().catch(err => {
-          console.warn('[InstanceContext] Failed to stop foreground service:', err);
-        });
+        WebSocketService.stop()
+          .then(() => {
+            webSocketServiceRunning = false;
+          })
+          .catch(err => {
+            console.warn('[InstanceContext] Failed to stop foreground service:', err);
+          });
       }
     }
 

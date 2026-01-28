@@ -4,8 +4,8 @@ import { useInstance } from '../../contexts/InstanceContext';
 import { healthApi } from '../../api/relay-api';
 import { storage } from '../../utils/storage';
 
-// Default working directory prefix for convenience
-const DEFAULT_WORKING_DIR_PREFIX = '/Users/jayspar/Documents/projects/';
+// Default working directory prefix (empty - user should specify full path)
+const DEFAULT_WORKING_DIR_PREFIX = '';
 
 // Build default relay URL matching current app environment
 const getDefaultRelayUrl = () => {

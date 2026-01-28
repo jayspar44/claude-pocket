@@ -38,8 +38,8 @@ const frontendDir = join(__dirname, '..');
 const androidDir = join(frontendDir, 'android');
 const configPath = join(frontendDir, 'capacitor.config.json');
 
-// Base output directory for all builds
-const BUILDS_BASE = '/Users/jayspar/Documents/projects/claude-pocket-outputs';
+// Base output directory for all builds (configurable via env var)
+const BUILDS_BASE = process.env.BUILDS_BASE || `${process.env.HOME}/claude-pocket-outputs`;
 
 // OUTPUT_PATH determined after flavor is parsed (below)
 
@@ -263,14 +263,38 @@ function setupSigning() {
     process.exit(1);
   }
 
-  // Insert signing config before buildTypes
+  // Write signing config to gradle.properties (more secure than embedding in build.gradle)
+  const gradlePropertiesPath = join(androidDir, 'gradle.properties');
+  let gradleProperties = '';
+  if (existsSync(gradlePropertiesPath)) {
+    gradleProperties = readFileSync(gradlePropertiesPath, 'utf-8');
+  }
+
+  // Remove any existing signing config from properties
+  gradleProperties = gradleProperties
+    .split('\n')
+    .filter(line => !line.startsWith('RELEASE_'))
+    .join('\n');
+
+  // Add signing config to gradle.properties
+  const signingProps = `
+# Release signing config (auto-generated, do not commit)
+RELEASE_STORE_FILE=${keystorePath}
+RELEASE_STORE_PASSWORD=${keystorePassword}
+RELEASE_KEY_ALIAS=${keyAlias}
+RELEASE_KEY_PASSWORD=${keyPassword}
+`;
+  writeFileSync(gradlePropertiesPath, gradleProperties.trim() + '\n' + signingProps);
+  logStep('success', 'Signing config written to gradle.properties');
+
+  // Update build.gradle to reference gradle.properties
   const signingConfig = `
     signingConfigs {
         release {
-            storeFile file("${keystorePath}")
-            storePassword "${keystorePassword}"
-            keyAlias "${keyAlias}"
-            keyPassword "${keyPassword}"
+            storeFile file(RELEASE_STORE_FILE)
+            storePassword RELEASE_STORE_PASSWORD
+            keyAlias RELEASE_KEY_ALIAS
+            keyPassword RELEASE_KEY_PASSWORD
         }
     }
 
