@@ -47,8 +47,10 @@ export default function Settings() {
     connectionStateRef.current = connectionState;
   }, [connectionState]);
 
-  // Fetch health and server instances periodically
+  // Fetch health and server instances periodically (visibility-aware)
   useEffect(() => {
+    let interval = null;
+
     const fetchHealth = () => {
       healthApi.check()
         .then((response) => setHealthInfo(response.data))
@@ -65,25 +67,83 @@ export default function Settings() {
         .catch(() => setServerInstances(null));
     };
 
-    // Initial fetch
-    fetchHealth();
-    fetchInstances();
-
-    // Periodic fetch
-    const interval = setInterval(() => {
+    const fetchAll = () => {
       fetchHealth();
       fetchInstances();
-    }, 3000);
+    };
 
-    return () => clearInterval(interval);
+    const startPolling = () => {
+      if (interval) clearInterval(interval);
+      interval = setInterval(fetchAll, 5000); // Poll every 5s when visible
+    };
+
+    const stopPolling = () => {
+      if (interval) {
+        clearInterval(interval);
+        interval = null;
+      }
+    };
+
+    const handleVisibilityChange = () => {
+      if (document.hidden) {
+        stopPolling();
+      } else {
+        fetchAll(); // Immediate refresh when becoming visible
+        startPolling();
+      }
+    };
+
+    // Initial fetch and start polling
+    fetchAll();
+    if (!document.hidden) {
+      startPolling();
+    }
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    return () => {
+      stopPolling();
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
   }, []); // Empty deps - runs once, uses ref for connectionState
 
-  // Refresh notification log periodically
+  // Refresh notification log periodically (only when visible)
   useEffect(() => {
-    const interval = setInterval(() => {
-      setNotifLog(notificationService.getDebugLog());
-    }, 1000);
-    return () => clearInterval(interval);
+    let interval = null;
+
+    const startPolling = () => {
+      if (interval) clearInterval(interval);
+      interval = setInterval(() => {
+        setNotifLog(notificationService.getDebugLog());
+      }, 2000); // Reduced to 2s
+    };
+
+    const stopPolling = () => {
+      if (interval) {
+        clearInterval(interval);
+        interval = null;
+      }
+    };
+
+    const handleVisibilityChange = () => {
+      if (document.hidden) {
+        stopPolling();
+      } else {
+        setNotifLog(notificationService.getDebugLog()); // Immediate refresh
+        startPolling();
+      }
+    };
+
+    if (!document.hidden) {
+      startPolling();
+    }
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    return () => {
+      stopPolling();
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
   }, []);
 
   const handleSaveRelayUrl = useCallback(() => {

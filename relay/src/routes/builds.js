@@ -11,8 +11,8 @@ const PROJECT_DIR = path.basename(path.resolve(__dirname, '../../..'));
 const IS_DEV_INSTANCE = PROJECT_DIR.endsWith('-dev');
 const ENVIRONMENT_LABEL = IS_DEV_INSTANCE ? 'DEV' : 'PROD';
 
-// Base output directory for all builds
-const BUILDS_BASE = '/Users/jayspar/Documents/projects/claude-pocket-outputs';
+// Base output directory for all builds (configurable via env var)
+const BUILDS_BASE = process.env.BUILDS_BASE || `${process.env.HOME}/claude-pocket-outputs`;
 
 // PROD relay serves prod builds, DEV relay serves dev builds
 const BUILDS_DIR = process.env.BUILDS_DIR || path.join(BUILDS_BASE, IS_DEV_INSTANCE ? 'dev' : 'prod');
@@ -26,8 +26,18 @@ async function ensureBuildsDir() {
   }
 }
 
-// Get builds list (shared logic)
+// Cache for builds list (5 second TTL)
+let buildsCache = null;
+let buildsCacheTime = 0;
+const BUILDS_CACHE_TTL = 5000;
+
+// Get builds list (shared logic) with caching
 async function getBuilds() {
+  const now = Date.now();
+  if (buildsCache && (now - buildsCacheTime) < BUILDS_CACHE_TTL) {
+    return buildsCache;
+  }
+
   await ensureBuildsDir();
   const entries = await fs.readdir(BUILDS_DIR, { withFileTypes: true });
 
@@ -50,7 +60,18 @@ async function getBuilds() {
 
   // Sort by modified date, newest first
   builds.sort((a, b) => new Date(b.modified) - new Date(a.modified));
+
+  // Update cache
+  buildsCache = builds;
+  buildsCacheTime = now;
+
   return builds;
+}
+
+// Invalidate cache (called when builds are deleted)
+function invalidateBuildsCache() {
+  buildsCache = null;
+  buildsCacheTime = 0;
 }
 
 // List all builds (JSON API)
@@ -277,6 +298,7 @@ router.delete('/:filename', async (req, res) => {
     }
 
     await fs.unlink(fullPath);
+    invalidateBuildsCache();
     logger.info({ filename }, 'Build deleted');
 
     res.json({ success: true, deleted: filename });
