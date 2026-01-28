@@ -39,7 +39,7 @@ const androidDir = join(frontendDir, 'android');
 const configPath = join(frontendDir, 'capacitor.config.json');
 
 // Base output directory for all builds (configurable via env var)
-const BUILDS_BASE = process.env.BUILDS_BASE || `${process.env.HOME}/claude-pocket-outputs`;
+const BUILDS_BASE = process.env.BUILDS_BASE || join(__dirname, '../../../claude-pocket-aabs');
 
 // OUTPUT_PATH determined after flavor is parsed (below)
 

@@ -12,7 +12,7 @@ const IS_DEV_INSTANCE = PROJECT_DIR.endsWith('-dev');
 const ENVIRONMENT_LABEL = IS_DEV_INSTANCE ? 'DEV' : 'PROD';
 
 // Base output directory for all builds (configurable via env var)
-const BUILDS_BASE = process.env.BUILDS_BASE || `${process.env.HOME}/claude-pocket-outputs`;
+const BUILDS_BASE = process.env.BUILDS_BASE || path.resolve(__dirname, '../../../../claude-pocket-aabs');
 
 // PROD relay serves prod builds, DEV relay serves dev builds
 const BUILDS_DIR = process.env.BUILDS_DIR || path.join(BUILDS_BASE, IS_DEV_INSTANCE ? 'dev' : 'prod');
