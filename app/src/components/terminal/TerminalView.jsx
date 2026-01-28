@@ -52,6 +52,10 @@ const SCROLL_CONFIG = {
   // Gesture detection
   TAP_THRESHOLD: 10, // px - max movement to consider a tap
   TAP_TIME_THRESHOLD: 200, // ms - max time to consider a tap
+
+  // Long-press for text selection
+  LONG_PRESS_DURATION: 500, // ms - hold time to trigger selection mode
+  LONG_PRESS_MOVE_THRESHOLD: 10, // px - max movement during long press
 };
 
 /**
@@ -239,6 +243,11 @@ class TerminalScrollHandler {
     this.totalMovement = 0;
     this.accumulatedScroll = 0;
 
+    // Long-press detection for text selection
+    this.longPressTimer = null;
+    this.isLongPress = false;
+    this.startX = 0;
+
     this.updateCellHeight();
     this.bindEvents();
   }
@@ -273,31 +282,64 @@ class TerminalScrollHandler {
     // Only handle touch/pen, let mouse use native
     if (e.pointerType === 'mouse') return;
 
-    // Capture pointer for reliable tracking
-    this.container.setPointerCapture(e.pointerId);
-
     // Stop any ongoing momentum
     this.momentumScroller.stop();
 
     this.pointerId = e.pointerId;
+    this.startX = e.clientX;
     this.startY = e.clientY;
     this.lastY = e.clientY;
     this.lastTime = performance.now();
     this.totalMovement = 0;
     this.accumulatedScroll = 0;
     this.velocityTracker.reset();
+    this.isLongPress = false;
 
-    e.preventDefault();
+    // Start long-press detection timer
+    this.longPressTimer = setTimeout(() => {
+      // Long press detected - enable text selection mode
+      this.isLongPress = true;
+      this.longPressTimer = null;
+
+      // Release pointer capture to allow native selection
+      try {
+        this.container.releasePointerCapture(e.pointerId);
+      } catch {
+        // Ignore - pointer may not be captured yet
+      }
+
+      // Trigger haptic feedback if available
+      if (navigator.vibrate) {
+        navigator.vibrate(50);
+      }
+    }, SCROLL_CONFIG.LONG_PRESS_DURATION);
+
+    // Capture pointer for reliable tracking (will be released if long-press detected)
+    this.container.setPointerCapture(e.pointerId);
+
+    // Don't preventDefault yet - wait to see if it's a long press or scroll
   }
 
   handlePointerMove(e) {
     if (e.pointerId !== this.pointerId) return;
 
+    // If long-press mode is active, let native selection handle it
+    if (this.isLongPress) return;
+
     const now = performance.now();
     const deltaY = e.clientY - this.lastY;
     const deltaTime = now - this.lastTime;
+    const totalDeltaX = Math.abs(e.clientX - this.startX);
+    const totalDeltaY = Math.abs(e.clientY - this.startY);
 
     this.totalMovement += Math.abs(deltaY);
+
+    // Cancel long-press timer if user moved too much (it's a scroll gesture)
+    if (this.longPressTimer && (totalDeltaX > SCROLL_CONFIG.LONG_PRESS_MOVE_THRESHOLD ||
+        totalDeltaY > SCROLL_CONFIG.LONG_PRESS_MOVE_THRESHOLD)) {
+      clearTimeout(this.longPressTimer);
+      this.longPressTimer = null;
+    }
 
     if (deltaTime > 0 && deltaY !== 0) {
       const velocity = deltaY / deltaTime; // px/ms
@@ -322,7 +364,24 @@ class TerminalScrollHandler {
   handlePointerUp(e) {
     if (e.pointerId !== this.pointerId) return;
 
-    this.container.releasePointerCapture(e.pointerId);
+    // Clear long-press timer
+    if (this.longPressTimer) {
+      clearTimeout(this.longPressTimer);
+      this.longPressTimer = null;
+    }
+
+    // If long-press mode, let native selection handle it
+    if (this.isLongPress) {
+      this.pointerId = null;
+      this.isLongPress = false;
+      return;
+    }
+
+    try {
+      this.container.releasePointerCapture(e.pointerId);
+    } catch {
+      // Ignore - pointer may already be released
+    }
 
     const isTap = this.totalMovement < SCROLL_CONFIG.TAP_THRESHOLD &&
                   (performance.now() - this.lastTime + (this.lastTime - (this.startY !== this.lastY ? 0 : this.lastTime))) < SCROLL_CONFIG.TAP_TIME_THRESHOLD;
@@ -340,6 +399,12 @@ class TerminalScrollHandler {
   handlePointerCancel(e) {
     if (e.pointerId !== this.pointerId) return;
 
+    // Clear long-press timer
+    if (this.longPressTimer) {
+      clearTimeout(this.longPressTimer);
+      this.longPressTimer = null;
+    }
+
     try {
       this.container.releasePointerCapture(e.pointerId);
     } catch {
@@ -347,6 +412,7 @@ class TerminalScrollHandler {
     }
 
     this.pointerId = null;
+    this.isLongPress = false;
   }
 
   setFontSize(fontSize) {
@@ -356,6 +422,10 @@ class TerminalScrollHandler {
 
   destroy() {
     this.momentumScroller.stop();
+    if (this.longPressTimer) {
+      clearTimeout(this.longPressTimer);
+      this.longPressTimer = null;
+    }
     this.container.removeEventListener('pointerdown', this.onPointerDown);
     this.container.removeEventListener('pointermove', this.onPointerMove);
     this.container.removeEventListener('pointerup', this.onPointerUp);
