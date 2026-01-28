@@ -1,4 +1,4 @@
-package com.claudecode.pocket.dev;
+package {{PACKAGE_NAME}};
 
 import android.content.Intent;
 import android.os.Build;

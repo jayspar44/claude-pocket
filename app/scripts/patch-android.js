@@ -3,13 +3,23 @@
  * Patch Android project after Capacitor sync
  *
  * This script:
- * 1. Copies custom resources (network_security_config.xml)
- * 2. Patches AndroidManifest.xml to reference them
+ * 1. Copies custom app icons (mipmap resources)
+ * 2. Copies notification icons (drawable resources)
+ * 3. Copies custom Java files with correct package name
+ * 4. Copies network_security_config.xml
+ * 5. Patches AndroidManifest.xml
+ *
+ * Usage:
+ *   node scripts/patch-android.js [appId]
+ *
+ * Arguments:
+ *   appId - The app ID (e.g., com.claudecode.pocket or com.claudecode.pocket.dev)
+ *           Defaults to reading from capacitor.config.json
  *
  * Run after: npx cap sync android
  */
 
-import { existsSync, copyFileSync, readFileSync, writeFileSync, mkdirSync } from 'fs';
+import { existsSync, copyFileSync, readFileSync, writeFileSync, mkdirSync, readdirSync, unlinkSync } from 'fs';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import process from 'node:process';
@@ -22,8 +32,8 @@ const ANDROID_DIR = join(appDir, 'android');
 const RESOURCES_DIR = join(appDir, 'android-resources');
 const MANIFEST_PATH = join(ANDROID_DIR, 'app/src/main/AndroidManifest.xml');
 const XML_DIR = join(ANDROID_DIR, 'app/src/main/res/xml');
-const JAVA_SRC_DIR = join(RESOURCES_DIR, 'java/com/claudecode/pocket/dev');
-const JAVA_DEST_DIR = join(ANDROID_DIR, 'app/src/main/java/com/claudecode/pocket/dev');
+const RES_DIR = join(ANDROID_DIR, 'app/src/main/res');
+const JAVA_BASE_DIR = join(ANDROID_DIR, 'app/src/main/java');
 
 // ANSI colors
 const colors = {
@@ -31,6 +41,7 @@ const colors = {
   green: '\x1b[32m',
   yellow: '\x1b[33m',
   red: '\x1b[31m',
+  cyan: '\x1b[36m',
 };
 
 function log(status, message) {
@@ -38,12 +49,65 @@ function log(status, message) {
     success: `${colors.green}[+]${colors.reset}`,
     warning: `${colors.yellow}[!]${colors.reset}`,
     error: `${colors.red}[x]${colors.reset}`,
+    info: `${colors.cyan}[>]${colors.reset}`,
   };
   console.log(`${icons[status]} ${message}`);
 }
 
+// Get app ID from argument or capacitor.config.json
+function getAppId() {
+  const argAppId = process.argv[2];
+  if (argAppId) {
+    return argAppId;
+  }
+
+  const configPath = join(appDir, 'capacitor.config.json');
+  if (existsSync(configPath)) {
+    const config = JSON.parse(readFileSync(configPath, 'utf-8'));
+    return config.appId;
+  }
+
+  return 'com.claudecode.pocket';
+}
+
+// Convert app ID to package path
+function appIdToPath(appId) {
+  return appId.replace(/\./g, '/');
+}
+
+// Copy directory contents recursively
+function copyDir(src, dest) {
+  if (!existsSync(src)) return 0;
+
+  mkdirSync(dest, { recursive: true });
+  let count = 0;
+
+  const entries = readdirSync(src, { withFileTypes: true });
+  for (const entry of entries) {
+    const srcPath = join(src, entry.name);
+    const destPath = join(dest, entry.name);
+
+    if (entry.isDirectory()) {
+      count += copyDir(srcPath, destPath);
+    } else {
+      copyFileSync(srcPath, destPath);
+      count++;
+    }
+  }
+
+  return count;
+}
+
 function patchAndroid() {
-  console.log('\nPatching Android project...\n');
+  const appId = getAppId();
+  const packagePath = appIdToPath(appId);
+
+  console.log('\n========================================');
+  console.log('  Patching Android project');
+  console.log('========================================');
+  console.log(`  App ID: ${appId}`);
+  console.log(`  Package path: ${packagePath}`);
+  console.log('');
 
   // Check if android directory exists
   if (!existsSync(ANDROID_DIR)) {
@@ -51,7 +115,41 @@ function patchAndroid() {
     process.exit(1);
   }
 
-  // 1. Copy network_security_config.xml
+  // 1. Copy app icons (mipmap resources)
+  const mipmapDensities = ['hdpi', 'mdpi', 'xhdpi', 'xxhdpi', 'xxxhdpi', 'anydpi-v26'];
+  let iconCount = 0;
+
+  for (const density of mipmapDensities) {
+    const srcDir = join(RESOURCES_DIR, `mipmap-${density}`);
+    const destDir = join(RES_DIR, `mipmap-${density}`);
+
+    if (existsSync(srcDir)) {
+      iconCount += copyDir(srcDir, destDir);
+    }
+  }
+
+  if (iconCount > 0) {
+    log('success', `Copied ${iconCount} app icon files`);
+  }
+
+  // 2. Copy notification icons (drawable resources)
+  const drawableDensities = ['hdpi', 'mdpi', 'xhdpi', 'xxhdpi', 'xxxhdpi'];
+  let notifCount = 0;
+
+  for (const density of drawableDensities) {
+    const srcDir = join(RESOURCES_DIR, `drawable-${density}`);
+    const destDir = join(RES_DIR, `drawable-${density}`);
+
+    if (existsSync(srcDir)) {
+      notifCount += copyDir(srcDir, destDir);
+    }
+  }
+
+  if (notifCount > 0) {
+    log('success', `Copied ${notifCount} notification icon files`);
+  }
+
+  // 3. Copy network_security_config.xml
   const networkConfigSrc = join(RESOURCES_DIR, 'xml/network_security_config.xml');
   const networkConfigDest = join(XML_DIR, 'network_security_config.xml');
 
@@ -60,24 +158,32 @@ function patchAndroid() {
     copyFileSync(networkConfigSrc, networkConfigDest);
     log('success', 'Copied network_security_config.xml');
   } else {
-    log('warning', 'network_security_config.xml template not found');
+    log('warning', 'network_security_config.xml not found');
   }
 
-  // 2. Copy custom Java files (MainActivity, WebSocketService, etc.)
-  if (existsSync(JAVA_SRC_DIR)) {
-    mkdirSync(JAVA_DEST_DIR, { recursive: true });
-    const javaFiles = ['MainActivity.java', 'WebSocketService.java', 'WebSocketServicePlugin.java'];
+  // 4. Copy and patch Java files
+  const javaSrcDir = join(RESOURCES_DIR, 'java');
+  const javaDestDir = join(JAVA_BASE_DIR, packagePath);
+  const javaFiles = ['MainActivity.java', 'WebSocketService.java', 'WebSocketServicePlugin.java'];
+
+  if (existsSync(javaSrcDir)) {
+    mkdirSync(javaDestDir, { recursive: true });
+
     for (const file of javaFiles) {
-      const src = join(JAVA_SRC_DIR, file);
-      const dest = join(JAVA_DEST_DIR, file);
-      if (existsSync(src)) {
-        copyFileSync(src, dest);
-        log('success', `Copied ${file}`);
+      const srcPath = join(javaSrcDir, file);
+      const destPath = join(javaDestDir, file);
+
+      if (existsSync(srcPath)) {
+        // Read, replace placeholder, write
+        let content = readFileSync(srcPath, 'utf-8');
+        content = content.replace(/\{\{PACKAGE_NAME\}\}/g, appId);
+        writeFileSync(destPath, content);
+        log('success', `Copied ${file} (package: ${appId})`);
       }
     }
   }
 
-  // 3. Patch AndroidManifest.xml
+  // 5. Patch AndroidManifest.xml
   if (existsSync(MANIFEST_PATH)) {
     let manifest = readFileSync(MANIFEST_PATH, 'utf-8');
     let modified = false;
@@ -89,7 +195,7 @@ function patchAndroid() {
         '<application\n        android:networkSecurityConfig="@xml/network_security_config"\n        '
       );
       modified = true;
-      log('success', 'Added networkSecurityConfig to AndroidManifest.xml');
+      log('success', 'Added networkSecurityConfig to manifest');
     }
 
     // Add FOREGROUND_SERVICE permissions
@@ -133,7 +239,17 @@ function patchAndroid() {
     log('error', 'AndroidManifest.xml not found');
   }
 
-  console.log('\nAndroid patching complete!\n');
+  // 6. Remove old drawable-v24 if it has stale launcher icons
+  const drawableV24 = join(RES_DIR, 'drawable-v24');
+  const staleIcon = join(drawableV24, 'ic_launcher_foreground.xml');
+  if (existsSync(staleIcon)) {
+    unlinkSync(staleIcon);
+    log('success', 'Removed stale ic_launcher_foreground.xml from drawable-v24');
+  }
+
+  console.log('\n========================================');
+  console.log('  Android patching complete!');
+  console.log('========================================\n');
 }
 
 patchAndroid();

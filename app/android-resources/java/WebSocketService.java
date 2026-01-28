@@ -1,4 +1,4 @@
-package com.claudecode.pocket.dev;
+package {{PACKAGE_NAME}};
 
 import android.app.Notification;
 import android.app.NotificationChannel;
@@ -95,7 +95,7 @@ public class WebSocketService extends Service {
         return new NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle("Claude Pocket")
             .setContentText("Connected to relay")
-            .setSmallIcon(android.R.drawable.ic_dialog_info) // Use built-in icon as fallback
+            .setSmallIcon(R.drawable.ic_stat_code)
             .setContentIntent(pendingIntent)
             .setOngoing(true)
             .setPriority(NotificationCompat.PRIORITY_LOW)

@@ -1,4 +1,4 @@
-package com.claudecode.pocket.dev;
+package {{PACKAGE_NAME}};
 
 import android.os.Bundle;
 
