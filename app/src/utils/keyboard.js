@@ -36,3 +36,19 @@ export const setupKeyboardListeners = () => {
     keyboardListeners = [];
   };
 };
+
+// Reset keyboard state - call when app resumes to fix stale keyboard height
+export const resetKeyboardState = () => {
+  if (!Capacitor.isNativePlatform()) {
+    return;
+  }
+
+  // Reset the CSS variable and class in case keyboard was dismissed while app was backgrounded
+  document.documentElement.style.setProperty('--keyboard-height', '0px');
+  document.body.classList.remove('keyboard-visible');
+
+  // Also hide the keyboard to ensure clean state
+  Keyboard.hide().catch(() => {
+    // Ignore errors - keyboard might already be hidden
+  });
+};

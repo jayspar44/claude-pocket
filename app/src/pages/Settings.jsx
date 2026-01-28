@@ -1,7 +1,8 @@
 import { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ChevronLeft, Server, Type, Trash2, Info, Check, FileX, Bell, RotateCcw, Square, Download, ScrollText, X } from 'lucide-react';
+import { ChevronLeft, Server, Type, Trash2, Info, Check, FileX, Bell, RotateCcw, Square, Download, ScrollText, X, Link } from 'lucide-react';
 import { useRelay } from '../hooks/useRelay';
+import { useInstance } from '../contexts/InstanceContext';
 import { healthApi, filesApi, instancesApi } from '../api/relay-api';
 import { version } from '../../../version.json';
 import { versionCode } from '../../android-version.json';
@@ -25,6 +26,7 @@ const envConfig = {
 export default function Settings() {
   const navigate = useNavigate();
   const { getRelayUrl, setRelayUrl, connectionState } = useRelay();
+  const { instances: appInstances, addInstance, connectInstance, switchInstance } = useInstance();
 
   const [relayUrlInput, setRelayUrlInput] = useState(getRelayUrl());
   const [fontSizeInput, setFontSizeInput] = useState(() => {
@@ -214,6 +216,26 @@ export default function Settings() {
     }
     setStoppingInstance(null);
   }, []);
+
+  const handleRestoreInstance = useCallback((serverInst) => {
+    const existing = appInstances.find(a => a.id === serverInst.instanceId);
+
+    if (existing) {
+      // Already in app, just connect and switch
+      connectInstance(serverInst.instanceId);
+      switchInstance(serverInst.instanceId);
+    } else {
+      // Add to app with server's ID, then connect
+      const name = serverInst.instanceId === 'default'
+        ? 'Default (Restored)'
+        : `Restored ${serverInst.instanceId.slice(0, 8)}`;
+      addInstance(name, getRelayUrl(), serverInst.workingDir, null, serverInst.instanceId);
+      connectInstance(serverInst.instanceId);
+      switchInstance(serverInst.instanceId);
+    }
+    // Navigate back to terminal
+    navigate('/');
+  }, [appInstances, addInstance, connectInstance, switchInstance, getRelayUrl, navigate]);
 
   // All server instances (listenerCount determines connection status)
   const serverInstanceList = useMemo(() => {
@@ -553,17 +575,28 @@ export default function Settings() {
                         )}
                       </div>
                     </div>
-                    <button
-                      onClick={() => handleStopInstance(inst.instanceId)}
-                      disabled={stoppingInstance === inst.instanceId}
-                      className="ml-2 p-2 text-red-400 hover:bg-red-600/20 rounded-lg transition-colors disabled:opacity-50"
-                    >
-                      {stoppingInstance === inst.instanceId ? (
-                        <Square className="w-4 h-4 animate-pulse" />
-                      ) : (
-                        <X className="w-4 h-4" />
+                    <div className="flex items-center">
+                      {isRunning && !isConnected && (
+                        <button
+                          onClick={() => handleRestoreInstance(inst)}
+                          className="ml-2 p-2 text-blue-400 hover:bg-blue-600/20 rounded-lg transition-colors"
+                          title="Connect to this instance"
+                        >
+                          <Link className="w-4 h-4" />
+                        </button>
                       )}
-                    </button>
+                      <button
+                        onClick={() => handleStopInstance(inst.instanceId)}
+                        disabled={stoppingInstance === inst.instanceId}
+                        className="ml-2 p-2 text-red-400 hover:bg-red-600/20 rounded-lg transition-colors disabled:opacity-50"
+                      >
+                        {stoppingInstance === inst.instanceId ? (
+                          <Square className="w-4 h-4 animate-pulse" />
+                        ) : (
+                          <X className="w-4 h-4" />
+                        )}
+                      </button>
+                    </div>
                   </div>
                 );
               })}

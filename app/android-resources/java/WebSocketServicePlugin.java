@@ -61,4 +61,26 @@ public class WebSocketServicePlugin extends Plugin {
         result.put("running", WebSocketService.isServiceRunning());
         call.resolve(result);
     }
+
+    @PluginMethod
+    public void exit(PluginCall call) {
+        Log.d(TAG, "Exiting app");
+        try {
+            // Stop the foreground service
+            Intent serviceIntent = new Intent(getContext(), WebSocketService.class);
+            getContext().stopService(serviceIntent);
+
+            JSObject result = new JSObject();
+            result.put("success", true);
+            call.resolve(result);
+
+            // Finish the activity and remove from recents
+            if (getActivity() != null) {
+                getActivity().finishAndRemoveTask();
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "Failed to exit", e);
+            call.reject("Failed to exit: " + e.getMessage());
+        }
+    }
 }

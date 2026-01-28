@@ -59,8 +59,8 @@ const DEFAULT_INSTANCE_ID = 'default';
 const generateId = () => `inst-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
 
 // Create a new instance object
-const createInstance = (name, relayUrl, workingDir, color, useDefaultId = false) => ({
-  id: useDefaultId ? DEFAULT_INSTANCE_ID : generateId(),
+const createInstance = (name, relayUrl, workingDir, color, useDefaultId = false, customId = null) => ({
+  id: customId || (useDefaultId ? DEFAULT_INSTANCE_ID : generateId()),
   name,
   relayUrl,
   workingDir: workingDir || '',
@@ -488,13 +488,23 @@ export function InstanceProvider({ children }) {
   }, []);
 
   // Instance management functions
-  const addInstance = useCallback((name, relayUrl, workingDir, color) => {
+  const addInstance = useCallback((name, relayUrl, workingDir, color, customId = null) => {
+    // Check for duplicate ID first
+    if (customId) {
+      const existing = instances.find(i => i.id === customId);
+      if (existing) {
+        return existing;
+      }
+    }
+
     const colorIndex = instances.length % INSTANCE_COLORS.length;
     const newInstance = createInstance(
       name,
       relayUrl,
       workingDir,
-      color || INSTANCE_COLORS[colorIndex]
+      color || INSTANCE_COLORS[colorIndex],
+      false,
+      customId
     );
     setInstances(prev => [...prev, newInstance]);
     setInstanceStates(prev => ({
@@ -502,7 +512,7 @@ export function InstanceProvider({ children }) {
       [newInstance.id]: createInstanceState(),
     }));
     return newInstance;
-  }, [instances.length]);
+  }, [instances]);
 
   const updateInstance = useCallback((instanceId, updates) => {
     setInstances(prev => prev.map(inst =>
@@ -643,6 +653,21 @@ export function InstanceProvider({ children }) {
     };
   }, [disconnectInstance]);
 
+  // Handle full app exit (disconnect all and close app)
+  const handleAppExit = useCallback(async () => {
+    // Disconnect all instances
+    Object.keys(wsRefs.current).forEach(id => disconnectInstance(id));
+
+    // Exit the app (Android only)
+    if (WebSocketService) {
+      try {
+        await WebSocketService.exit();
+      } catch (err) {
+        console.warn('[InstanceContext] Failed to exit app:', err);
+      }
+    }
+  }, [disconnectInstance]);
+
   // Create convenience methods for active instance
   const connect = useCallback(() => connectInstance(activeInstanceId), [activeInstanceId, connectInstance]);
   const disconnect = useCallback(() => disconnectInstance(activeInstanceId), [activeInstanceId, disconnectInstance]);
@@ -732,6 +757,7 @@ export function InstanceProvider({ children }) {
     disconnectInstance,
     sendToInstance,
     addInstanceMessageListener: addMessageListener,
+    handleAppExit,
 
     // Compatibility with old API
     getRelayUrl,
@@ -761,6 +787,7 @@ export function InstanceProvider({ children }) {
     disconnectInstance,
     sendToInstance,
     addMessageListener,
+    handleAppExit,
     getRelayUrl,
     setRelayUrl,
   ]);

@@ -92,6 +92,15 @@ public class WebSocketService extends Service {
             pendingIntentFlags
         );
 
+        // Exit action intent
+        Intent exitIntent = new Intent(getPackageName() + ".ACTION_EXIT");
+        PendingIntent exitPendingIntent = PendingIntent.getBroadcast(
+            this,
+            1,
+            exitIntent,
+            pendingIntentFlags
+        );
+
         return new NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle("Claude Pocket")
             .setContentText("Connected to relay")
@@ -100,6 +109,7 @@ public class WebSocketService extends Service {
             .setOngoing(true)
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .setCategory(NotificationCompat.CATEGORY_SERVICE)
+            .addAction(android.R.drawable.ic_delete, "Exit", exitPendingIntent)
             .build();
     }
 
