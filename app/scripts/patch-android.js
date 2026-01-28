@@ -164,7 +164,7 @@ function patchAndroid() {
   // 4. Copy and patch Java files
   const javaSrcDir = join(RESOURCES_DIR, 'java');
   const javaDestDir = join(JAVA_BASE_DIR, packagePath);
-  const javaFiles = ['MainActivity.java', 'WebSocketService.java', 'WebSocketServicePlugin.java'];
+  const javaFiles = ['MainActivity.java', 'WebSocketService.java', 'WebSocketServicePlugin.java', 'ExitBroadcastReceiver.java'];
 
   if (existsSync(javaSrcDir)) {
     mkdirSync(javaDestDir, { recursive: true });
@@ -228,6 +228,25 @@ function patchAndroid() {
       );
       modified = true;
       log('success', 'Added WebSocketService declaration');
+    }
+
+    // Add ExitBroadcastReceiver declaration
+    if (!manifest.includes('.ExitBroadcastReceiver')) {
+      manifest = manifest.replace(
+        '</application>',
+        `
+        <!-- Broadcast receiver to handle notification exit action -->
+        <receiver
+            android:name=".ExitBroadcastReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="${appId}.ACTION_EXIT" />
+            </intent-filter>
+        </receiver>
+    </application>`
+      );
+      modified = true;
+      log('success', 'Added ExitBroadcastReceiver declaration');
     }
 
     if (modified) {
