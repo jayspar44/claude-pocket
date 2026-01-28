@@ -154,6 +154,9 @@ export function InstanceProvider({ children }) {
   const listenersRef = useRef({}); // Map<instanceId, Set<callback>>
   const connectInstanceRef = useRef(null); // Ref for self-referencing in reconnect
 
+  // Ref to track activeInstanceId for WebSocket handlers (avoids stale closure)
+  const activeInstanceIdRef = useRef(null);
+
   // Persist instances to storage
   useEffect(() => {
     storage.setJSON(INSTANCES_KEY, instances);
@@ -418,8 +421,8 @@ export function InstanceProvider({ children }) {
               });
             }
           } else if (message.type === 'output' || message.type === 'replay') {
-            // Mark as unread if not active instance
-            if (instanceId !== activeInstanceId) {
+            // Mark as unread if not active instance (use ref to avoid stale closure)
+            if (instanceId !== activeInstanceIdRef.current) {
               updateInstanceState(instanceId, { hasUnread: true });
             }
           }
@@ -436,7 +439,7 @@ export function InstanceProvider({ children }) {
         connectionState: 'disconnected',
       });
     }
-  }, [instances, activeInstanceId, instanceStates, updateInstanceState, notifyListeners, cleanupTimers, startHeartbeat]);
+  }, [instances, instanceStates, updateInstanceState, notifyListeners, cleanupTimers, startHeartbeat]);
 
   // Keep ref updated for self-referencing in reconnect timeout
   useEffect(() => {
@@ -553,7 +556,13 @@ export function InstanceProvider({ children }) {
     if (!instance) return;
 
     setActiveInstanceId(instanceId);
-    updateInstanceState(instanceId, { hasUnread: false });
+    // Clear notification indicators when switching to a tab
+    // (keep detectedOptions so user can still interact with them)
+    updateInstanceState(instanceId, {
+      hasUnread: false,
+      taskComplete: false,
+      needsInput: false,
+    });
 
     // Update lastUsedAt
     setInstances(prev => prev.map(inst =>
@@ -687,8 +696,7 @@ export function InstanceProvider({ children }) {
     });
   }, [activeInstanceId, updateInstanceState]);
 
-  // Ref to track activeInstanceId for stable callback
-  const activeInstanceIdRef = useRef(activeInstanceId);
+  // Keep activeInstanceIdRef in sync for WebSocket handlers and stable callbacks
   useEffect(() => {
     activeInstanceIdRef.current = activeInstanceId;
   }, [activeInstanceId]);
