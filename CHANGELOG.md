@@ -2,6 +2,22 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+## [0.5.0](https://github.com/jayspar44/claude-pocket/compare/v0.4.0...v0.5.0) (2026-01-28)
+
+
+### Features
+
+* add app exit behavior, instance restore, and keyboard fix ([b672d5f](https://github.com/jayspar44/claude-pocket/commit/b672d5fe613e1e96f37c9e8f2a75bf0f0bacca2f))
+* add long-press to select text in terminal ([ae31f76](https://github.com/jayspar44/claude-pocket/commit/ae31f76c062a010661806c5bd51ca23d19dafe1d))
+* add tracked android resources and AAB build script ([9a39903](https://github.com/jayspar44/claude-pocket/commit/9a39903eddcbb6a83327df2fe228f27e6494693b))
+
+
+### Bug Fixes
+
+* git branch update after checkout + long-press copy in terminal ([bbd8927](https://github.com/jayspar44/claude-pocket/commit/bbd8927c74f6899dc177b602bae9c8473f7e9226))
+* resolve tab indicator bugs and add processing spinner ([7e59d00](https://github.com/jayspar44/claude-pocket/commit/7e59d0034373622b6c5d1e0e531a2b9a5fb58f17))
+* update build output path to claude-pocket-aabs ([c697651](https://github.com/jayspar44/claude-pocket/commit/c697651fa144199ac90ac2c55478bcfc0b67d537))
+
 ## [0.4.0](https://github.com/jayspar44/claude-pocket/compare/v0.2.3...v0.4.0) (2026-01-27)
 
 
