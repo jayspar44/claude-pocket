@@ -407,6 +407,9 @@ class PtyManager {
         this.scheduleOptionExpiry();
       }
     }
+
+    // Broadcast updated status (refreshes git branch after commands complete)
+    this.broadcast({ type: 'pty-status', ...this.getStatus() });
   }
 
   scheduleOptionExpiry() {

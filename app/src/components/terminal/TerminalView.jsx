@@ -248,6 +248,10 @@ class TerminalScrollHandler {
     this.isLongPress = false;
     this.startX = 0;
 
+    // Selection mode state (xterm.js-based selection)
+    this.selectionMode = false;
+    this.selectionStartCell = null;
+
     this.updateCellHeight();
     this.bindEvents();
   }
@@ -263,6 +267,18 @@ class TerminalScrollHandler {
     return {
       atTop: buffer.viewportY <= 0,
       atBottom: buffer.viewportY >= buffer.baseY,
+    };
+  }
+
+  getCellFromEvent(e) {
+    const rect = this.container.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+    const cellWidth = rect.width / this.terminal.cols;
+    const cellHeight = rect.height / this.terminal.rows;
+    return {
+      col: Math.floor(x / cellWidth),
+      row: Math.floor(y / cellHeight) + this.terminal.buffer.active.viewportY,
     };
   }
 
@@ -297,16 +313,11 @@ class TerminalScrollHandler {
 
     // Start long-press detection timer
     this.longPressTimer = setTimeout(() => {
-      // Long press detected - enable text selection mode
+      // Long press detected - enter xterm.js selection mode
       this.isLongPress = true;
       this.longPressTimer = null;
-
-      // Release pointer capture to allow native selection
-      try {
-        this.container.releasePointerCapture(e.pointerId);
-      } catch {
-        // Ignore - pointer may not be captured yet
-      }
+      this.selectionMode = true;
+      this.selectionStartCell = this.getCellFromEvent(e);
 
       // Trigger haptic feedback if available
       if (navigator.vibrate) {
@@ -323,7 +334,34 @@ class TerminalScrollHandler {
   handlePointerMove(e) {
     if (e.pointerId !== this.pointerId) return;
 
-    // If long-press mode is active, let native selection handle it
+    // If in selection mode, update xterm.js selection
+    if (this.selectionMode && this.selectionStartCell) {
+      const endCell = this.getCellFromEvent(e);
+      if (endCell) {
+        // Calculate selection parameters
+        const startRow = this.selectionStartCell.row;
+        const startCol = this.selectionStartCell.col;
+        const endRow = endCell.row;
+        const endCol = endCell.col;
+
+        // For multi-line selection, select from start to end
+        if (startRow === endRow) {
+          // Same line: select from min col to max col
+          const minCol = Math.min(startCol, endCol);
+          const length = Math.abs(endCol - startCol) + 1;
+          this.terminal.select(minCol, startRow, length);
+        } else {
+          // Multi-line: use selectLines for full line selection
+          const minRow = Math.min(startRow, endRow);
+          const maxRow = Math.max(startRow, endRow);
+          this.terminal.selectLines(minRow, maxRow);
+        }
+      }
+      e.preventDefault();
+      return;
+    }
+
+    // If long-press mode is active but not in selection mode, let native selection handle it
     if (this.isLongPress) return;
 
     const now = performance.now();
@@ -370,7 +408,28 @@ class TerminalScrollHandler {
       this.longPressTimer = null;
     }
 
-    // If long-press mode, let native selection handle it
+    // If in selection mode, copy selected text and clear selection
+    if (this.selectionMode) {
+      this.selectionMode = false;
+      this.selectionStartCell = null;
+      const selectedText = this.terminal.getSelection();
+      if (selectedText) {
+        navigator.clipboard.writeText(selectedText).catch(() => {
+          // Clipboard write may fail silently on some devices
+        });
+        // Brief haptic feedback to confirm copy
+        if (navigator.vibrate) {
+          navigator.vibrate(30);
+        }
+      }
+      this.terminal.clearSelection();
+      this.pointerId = null;
+      this.isLongPress = false;
+      e.preventDefault();
+      return;
+    }
+
+    // If long-press mode but not selection mode, just reset state
     if (this.isLongPress) {
       this.pointerId = null;
       this.isLongPress = false;
@@ -403,6 +462,13 @@ class TerminalScrollHandler {
     if (this.longPressTimer) {
       clearTimeout(this.longPressTimer);
       this.longPressTimer = null;
+    }
+
+    // Clear selection mode state
+    if (this.selectionMode) {
+      this.selectionMode = false;
+      this.selectionStartCell = null;
+      this.terminal.clearSelection();
     }
 
     try {
