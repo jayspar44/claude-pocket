@@ -36,7 +36,7 @@ const androidDir = join(frontendDir, 'android');
 const configPath = join(frontendDir, 'capacitor.config.json');
 
 // Base output directory for all builds
-const BUILDS_BASE = '/Users/jayspar/Documents/projects/claude-pocket-outputs';
+const BUILDS_BASE = '/Users/jayspar/Documents/projects/claude-pocket-aabs';
 
 // App configuration
 const APP_ID_BASE = 'com.claudecode.pocket';
