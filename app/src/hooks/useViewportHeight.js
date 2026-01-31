@@ -55,8 +55,16 @@ export function useViewportHeight() {
       });
     }
 
-    // Initial update
-    updateHeight();
+    // Initial update - use innerHeight first, then update after delay
+    // This fixes stale visualViewport when switching from another app with keyboard open
+    if (Capacitor.isNativePlatform()) {
+      // On native, use innerHeight initially (more reliable on app launch)
+      setViewportHeight(window.innerHeight);
+      // Then update with visualViewport after keyboard state settles
+      setTimeout(updateHeight, 150);
+    } else {
+      updateHeight();
+    }
 
     return () => {
       if (window.visualViewport) {
