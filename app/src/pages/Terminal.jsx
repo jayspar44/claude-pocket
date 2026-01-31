@@ -250,12 +250,14 @@ function Terminal() {
         isOpen={showFiles}
         onClose={() => setShowFiles(false)}
         onSelect={handleFileSelect}
+        instanceId={activeInstanceId}
       />
 
       <ImagePicker
         isOpen={showImagePicker}
         onClose={() => setShowImagePicker(false)}
         onUpload={handleImageUpload}
+        instanceId={activeInstanceId}
       />
 
       <InstanceManager

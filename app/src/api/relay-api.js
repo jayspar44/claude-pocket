@@ -56,31 +56,32 @@ export const commandsApi = {
 
 // Files API - 60s timeout for uploads
 export const filesApi = {
-  list: (path = '') => relayApi.get('/api/files', { params: { path } }),
-  info: () => relayApi.get('/api/files/info'),
-  upload: (file, path = '', filename) => {
+  list: (path = '', instanceId) => relayApi.get('/api/files', { params: { path, instanceId } }),
+  info: (instanceId) => relayApi.get('/api/files/info', { params: { instanceId } }),
+  upload: (file, path = '', filename, instanceId) => {
     return relayApi.post('/api/files/upload', file, {
-      params: { path, filename },
+      params: { path, filename, instanceId },
       headers: { 'Content-Type': file.type || 'application/octet-stream' },
       timeout: 60000,
     });
   },
   // Upload any file type with explicit content type
-  uploadFile: (data, path = '', filename, contentType = 'application/octet-stream') => {
+  uploadFile: (data, path = '', filename, contentType = 'application/octet-stream', instanceId) => {
     return relayApi.post('/api/files/upload', data, {
-      params: { path, filename },
+      params: { path, filename, instanceId },
       headers: { 'Content-Type': contentType },
       timeout: 60000,
     });
   },
   // Clean up .claude-pocket directory (uploads, temp files)
-  cleanup: () => relayApi.delete('/api/files/cleanup'),
+  cleanup: (instanceId) => relayApi.delete('/api/files/cleanup', { params: { instanceId } }),
   // Upload file as base64 (more reliable over unstable connections)
-  uploadBase64: (base64Data, filename, contentType) => {
+  uploadBase64: (base64Data, filename, contentType, instanceId) => {
     return relayApi.post('/api/files/upload-base64', {
       data: base64Data,
       filename,
       contentType,
+      instanceId,
     }, { timeout: 60000 });
   },
 };

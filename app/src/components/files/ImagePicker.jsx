@@ -3,7 +3,7 @@ import { X, Camera, Image, Upload, Trash2 } from 'lucide-react';
 import { Capacitor } from '@capacitor/core';
 import { filesApi } from '../../api/relay-api';
 
-function ImagePicker({ isOpen, onClose, onUpload }) {
+function ImagePicker({ isOpen, onClose, onUpload, instanceId }) {
   const [preview, setPreview] = useState(null);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState(null);
@@ -57,7 +57,8 @@ function ImagePicker({ isOpen, onClose, onUpload }) {
       const response = await filesApi.uploadBase64(
         base64Data,
         preview.name,
-        preview.file.type
+        preview.file.type,
+        instanceId
       );
 
       console.log('[ImagePicker] Upload success:', response.data);
@@ -70,7 +71,7 @@ function ImagePicker({ isOpen, onClose, onUpload }) {
     } finally {
       setUploading(false);
     }
-  }, [preview, onUpload, onClose]);
+  }, [preview, onUpload, onClose, instanceId]);
 
   const handleClear = useCallback(() => {
     setPreview(null);

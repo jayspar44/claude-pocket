@@ -3,18 +3,20 @@ const fs = require('fs').promises;
 const path = require('path');
 const logger = require('../logger');
 const ptyRegistry = require('../pty-registry');
+const { DEFAULT_INSTANCE_ID } = require('../pty-registry');
 
 const router = express.Router();
 
-// Get working directory from PTY registry (default instance)
-function getWorkingDir() {
-  const defaultInstance = ptyRegistry.getDefault();
-  return defaultInstance?.currentWorkingDir;
+// Get working directory from PTY registry for a specific instance
+function getWorkingDir(instanceId) {
+  const id = instanceId || DEFAULT_INSTANCE_ID;
+  const instance = ptyRegistry.has(id) ? ptyRegistry.get(id) : ptyRegistry.getDefault();
+  return instance?.currentWorkingDir;
 }
 
 // Ensure path is within working directory (security)
-function isPathSafe(requestedPath) {
-  const workingDir = getWorkingDir();
+function isPathSafe(requestedPath, instanceId) {
+  const workingDir = getWorkingDir(instanceId);
   if (!workingDir) return false;
   const resolved = path.resolve(workingDir, requestedPath);
   return resolved.startsWith(workingDir);
@@ -23,14 +25,15 @@ function isPathSafe(requestedPath) {
 // List files in a directory
 router.get('/', async (req, res) => {
   try {
-    const workingDir = getWorkingDir();
+    const instanceId = req.query.instanceId;
+    const workingDir = getWorkingDir(instanceId);
     if (!workingDir) {
       return res.status(503).json({ error: 'PTY not running - no working directory set' });
     }
 
     const requestedPath = req.query.path || '';
 
-    if (!isPathSafe(requestedPath)) {
+    if (!isPathSafe(requestedPath, instanceId)) {
       return res.status(403).json({ error: 'Access denied' });
     }
 
@@ -98,7 +101,8 @@ router.post('/upload', express.raw({ type: '*/*', limit: '10mb' }), async (req, 
   }, 'Upload request received');
 
   try {
-    const workingDir = getWorkingDir();
+    const instanceId = req.query.instanceId;
+    const workingDir = getWorkingDir(instanceId);
     if (!workingDir) {
       return res.status(503).json({ error: 'PTY not running - no working directory set' });
     }
@@ -106,7 +110,7 @@ router.post('/upload', express.raw({ type: '*/*', limit: '10mb' }), async (req, 
     const filename = req.query.filename || `upload-${Date.now()}.png`;
     const destPath = req.query.path || '';
 
-    if (!isPathSafe(destPath)) {
+    if (!isPathSafe(destPath, instanceId)) {
       return res.status(403).json({ error: 'Access denied' });
     }
 
@@ -144,7 +148,8 @@ router.post('/upload', express.raw({ type: '*/*', limit: '10mb' }), async (req, 
 
 // Get working directory info
 router.get('/info', (req, res) => {
-  const workingDir = getWorkingDir();
+  const instanceId = req.query.instanceId;
+  const workingDir = getWorkingDir(instanceId);
   res.json({
     workingDir: workingDir || null,
     separator: path.sep,
@@ -154,12 +159,11 @@ router.get('/info', (req, res) => {
 // Upload file as base64 (more reliable over unstable connections)
 router.post('/upload-base64', express.json({ limit: '15mb' }), async (req, res) => {
   try {
-    const workingDir = getWorkingDir();
+    const { data, filename, contentType, instanceId } = req.body;
+    const workingDir = getWorkingDir(instanceId);
     if (!workingDir) {
       return res.status(503).json({ error: 'PTY not running - no working directory set' });
     }
-
-    const { data, filename, contentType } = req.body;
     if (!data || !filename) {
       return res.status(400).json({ error: 'Missing data or filename' });
     }
@@ -204,7 +208,8 @@ router.post('/upload-base64', express.json({ limit: '15mb' }), async (req, res) 
 // Clean up .claude-pocket directory (uploads, temp files, etc.)
 router.delete('/cleanup', async (req, res) => {
   try {
-    const workingDir = getWorkingDir();
+    const instanceId = req.query.instanceId;
+    const workingDir = getWorkingDir(instanceId);
     if (!workingDir) {
       return res.status(503).json({ error: 'PTY not running - no working directory set' });
     }
