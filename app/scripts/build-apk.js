@@ -212,7 +212,7 @@ function writeConfig() {
         insetsHandling: 'disable'
       },
       LocalNotifications: {
-        smallIcon: 'ic_notification',
+        smallIcon: 'ic_stat_code',
         sound: 'default'
       }
     }

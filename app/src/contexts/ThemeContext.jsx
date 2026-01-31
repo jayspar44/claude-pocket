@@ -1,15 +1,16 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { Capacitor } from '@capacitor/core';
 import { StatusBar, Style } from '@capacitor/status-bar';
+import { storage } from '../utils/storage';
 
 const ThemeContext = createContext();
 
 export const useTheme = () => useContext(ThemeContext);
 
 export const ThemeProvider = ({ children }) => {
-    // Initialize theme from localStorage, default to 'light'
+    // Initialize theme from localStorage (using port-prefixed storage), default to 'light'
     const [theme, setTheme] = useState(() => {
-        return localStorage.getItem('app_pref_theme') || 'light';
+        return storage.get('theme') || 'light';
     });
 
     // Apply theme to document root
@@ -39,9 +40,9 @@ export const ThemeProvider = ({ children }) => {
         }
     }, [theme]);
 
-    // Persist theme to localStorage
+    // Persist theme to localStorage (using port-prefixed storage)
     useEffect(() => {
-        localStorage.setItem('app_pref_theme', theme);
+        storage.set('theme', theme);
     }, [theme]);
 
     const toggleTheme = () => {

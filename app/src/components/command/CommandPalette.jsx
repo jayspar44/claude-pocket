@@ -4,50 +4,53 @@ import { commandsApi } from '../../api/relay-api';
 import { SYSTEM_COMMANDS } from '../../constants/system-commands';
 import { storage } from '../../utils/storage';
 
-const CACHE_KEY = 'repo-cmds';
+// Get cache key for an instance
+const getCacheKey = (instanceId) => `repo-cmds${instanceId ? `-${instanceId}` : ''}`;
 
-// Get cached commands from storage
-function getCachedCommands() {
-  return storage.getJSON(CACHE_KEY, []);
+// Get cached commands from storage for an instance
+function getCachedCommands(instanceId) {
+  return storage.getJSON(getCacheKey(instanceId), []);
 }
 
-// Save commands to storage cache
-function setCachedCommands(commands) {
+// Save commands to storage cache for an instance
+function setCachedCommands(commands, instanceId) {
   try {
-    storage.setJSON(CACHE_KEY, commands);
+    storage.setJSON(getCacheKey(instanceId), commands);
   } catch {
     // Ignore storage errors
   }
 }
 
 // Fetch with retry logic (1 retry with 2s delay)
-async function fetchWithRetry(retries = 1) {
+async function fetchWithRetry(instanceId, retries = 1) {
   try {
-    return await commandsApi.list();
+    return await commandsApi.list(instanceId);
   } catch (err) {
     if (retries > 0) {
       await new Promise(r => setTimeout(r, 2000));
-      return fetchWithRetry(retries - 1);
+      return fetchWithRetry(instanceId, retries - 1);
     }
     throw err;
   }
 }
 
-function CommandPalette({ isOpen, onClose, onSelect }) {
-  // Initialize repo commands from cache
-  const [repoCommands, setRepoCommands] = useState(() => getCachedCommands());
+function CommandPalette({ isOpen, onClose, onSelect, activeInstanceId }) {
+  // Initialize repo commands from cache for the active instance
+  const [repoCommands, setRepoCommands] = useState(() => getCachedCommands(activeInstanceId));
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
-  // Fetch repo commands when opened
+  // Fetch repo commands when opened or when instance changes
   useEffect(() => {
     if (!isOpen) return;
 
+    // Reset to cached commands for this instance
+    setRepoCommands(getCachedCommands(activeInstanceId));
     setLoading(true);
     setError(null);
 
-    fetchWithRetry()
+    fetchWithRetry(activeInstanceId)
       .then((response) => {
         // Mark repo commands with type: 'repo'
         const commands = (response.data.commands || []).map(cmd => ({
@@ -55,7 +58,7 @@ function CommandPalette({ isOpen, onClose, onSelect }) {
           type: 'repo',
         }));
         setRepoCommands(commands);
-        setCachedCommands(commands);
+        setCachedCommands(commands, activeInstanceId);
       })
       .catch((err) => {
         setError('Unable to load project commands');
@@ -65,7 +68,7 @@ function CommandPalette({ isOpen, onClose, onSelect }) {
       .finally(() => {
         setLoading(false);
       });
-  }, [isOpen]);
+  }, [isOpen, activeInstanceId]);
 
   // Filter commands based on search and group by type
   const { filteredSystemCommands, filteredRepoCommands } = useMemo(() => {

@@ -4,11 +4,19 @@
 const MIGRATION_FLAG = 'migrated';
 
 /**
- * Get the current app port from URL
- * Defaults to 4500 (PROD) if no port or standard ports
+ * Get the app environment identifier for storage key prefixing
+ * Uses VITE_APP_ENV for Android/Capacitor builds, falls back to port detection for browser dev
  */
 export function getAppPort() {
-  if (typeof window === 'undefined') return '4500';
+  if (typeof window === 'undefined') return 'prod';
+
+  // In Android/Capacitor, use app env from build config
+  const appEnv = import.meta.env.VITE_APP_ENV;
+  if (appEnv) {
+    return appEnv; // 'prod' or 'dev'
+  }
+
+  // Fallback to port detection for browser development
   const port = window.location.port;
   return (!port || port === '80' || port === '443') ? '4500' : port;
 }

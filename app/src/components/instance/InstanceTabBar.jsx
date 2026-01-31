@@ -29,7 +29,6 @@ export default function InstanceTabBar({ onManageClick }) {
       {instances.map((instance) => {
         const isActive = instance.id === activeInstanceId;
         const state = getInstanceState(instance.id);
-        const hasUnread = state.hasUnread && !isActive;
         const needsInput = (state.needsInput || state.detectedOptions?.length > 0) && !isActive; // Hide bell on active tab
         const taskComplete = state.taskComplete && !needsInput && !isActive; // Only show on inactive tabs
         const isProcessing = state.processingStartTime && !state.needsInput && !state.taskComplete;
@@ -60,11 +59,6 @@ export default function InstanceTabBar({ onManageClick }) {
             {/* Processing indicator */}
             {isProcessing && (
               <span className="w-3 h-3 border-2 border-blue-500 border-t-transparent rounded-full animate-spin flex-shrink-0" />
-            )}
-
-            {/* Unread indicator */}
-            {hasUnread && !isProcessing && (
-              <span className="w-2 h-2 rounded-full bg-blue-500 flex-shrink-0" />
             )}
 
             {/* Needs input indicator */}

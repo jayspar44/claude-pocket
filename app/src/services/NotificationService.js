@@ -189,7 +189,7 @@ class NotificationService {
             body,
             extra: data,
             sound: 'default',
-            smallIcon: 'ic_notification',
+            smallIcon: 'ic_stat_code',
           },
         ],
       });

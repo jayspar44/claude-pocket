@@ -6,8 +6,13 @@ const ptyRegistry = require('../pty-registry');
 
 const router = express.Router();
 
-// Get the current working directory from PTY registry (default instance)
-function getWorkingDir() {
+// Get the working directory for the specified instance (or default)
+function getWorkingDir(instanceId) {
+  if (instanceId) {
+    const instance = ptyRegistry.get(instanceId);
+    return instance?.currentWorkingDir;
+  }
+  // Fallback to default instance for backward compatibility
   const defaultInstance = ptyRegistry.getDefault();
   return defaultInstance?.currentWorkingDir;
 }
@@ -15,8 +20,9 @@ function getWorkingDir() {
 // Get list of available slash commands
 router.get('/', async (req, res) => {
   const startTime = Date.now();
-  const workingDir = getWorkingDir();
-  logger.info({ workingDir }, 'Fetching project commands...');
+  const instanceId = req.query.instanceId;
+  const workingDir = getWorkingDir(instanceId);
+  logger.info({ workingDir, instanceId }, 'Fetching project commands...');
 
   try {
     const commandsDir = path.join(workingDir, '.claude', 'commands');
@@ -99,7 +105,8 @@ router.get('/', async (req, res) => {
 router.get('/:name', async (req, res) => {
   try {
     const { name } = req.params;
-    const workingDir = getWorkingDir();
+    const instanceId = req.query.instanceId;
+    const workingDir = getWorkingDir(instanceId);
     const filePath = path.join(workingDir, '.claude', 'commands', `${name}.md`);
 
     const content = await fs.readFile(filePath, 'utf-8');
