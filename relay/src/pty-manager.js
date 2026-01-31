@@ -261,6 +261,8 @@ class PtyManager {
       if (this.lastDetectedOptions) {
         this.clearDetectedOptions();
       }
+      // Broadcast status immediately so clients know processing started
+      this.broadcast({ type: 'pty-status', ...this.getStatus() });
     }
   }
 

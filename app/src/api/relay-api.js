@@ -44,8 +44,14 @@ relayApi.interceptors.request.use((config) => {
 
 // Commands API - 30s timeout for slow networks
 export const commandsApi = {
-  list: () => relayApi.get('/api/commands', { timeout: 30000 }),
-  get: (name) => relayApi.get(`/api/commands/${name}`, { timeout: 30000 }),
+  list: (instanceId) => relayApi.get('/api/commands', {
+    timeout: 30000,
+    params: instanceId ? { instanceId } : undefined,
+  }),
+  get: (name, instanceId) => relayApi.get(`/api/commands/${name}`, {
+    timeout: 30000,
+    params: instanceId ? { instanceId } : undefined,
+  }),
 };
 
 // Files API - 60s timeout for uploads

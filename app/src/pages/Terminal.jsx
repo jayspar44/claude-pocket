@@ -18,7 +18,7 @@ function Terminal() {
   const prevViewportHeightRef = useRef(null);
   const wasAtBottomRef = useRef(true);
   const { connectionState, ptyStatus, sendInput, sendResize, sendInterrupt, submitInput, clearAndReplay } = useTerminalRelay(terminalRef);
-  const { connect, detectedOptions, clearDetectedOptions, activeInstance, ptyError, instances, needsInput, taskComplete } = useRelay();
+  const { connect, detectedOptions, clearDetectedOptions, activeInstance, activeInstanceId, ptyError, instances, needsInput, taskComplete } = useRelay();
   const viewportHeight = useViewportHeight();
   const [fontSize] = useState(() => {
     const stored = storage.get('fontSize');
@@ -243,6 +243,7 @@ function Terminal() {
         isOpen={showCommands}
         onClose={() => setShowCommands(false)}
         onSelect={handleCommandSelect}
+        activeInstanceId={activeInstanceId}
       />
 
       <MobileFilePicker

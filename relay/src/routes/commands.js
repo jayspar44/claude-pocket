@@ -6,17 +6,39 @@ const ptyRegistry = require('../pty-registry');
 
 const router = express.Router();
 
-// Get the current working directory from PTY registry (default instance)
-function getWorkingDir() {
+// Get the working directory for the specified instance (or default)
+function getWorkingDir(instanceId) {
+  if (instanceId) {
+    // Use has() to check existence without auto-creating
+    if (!ptyRegistry.has(instanceId)) {
+      return null;
+    }
+    const instance = ptyRegistry.get(instanceId);
+    return instance?.currentWorkingDir;
+  }
+  // Fallback to default instance for backward compatibility
   const defaultInstance = ptyRegistry.getDefault();
   return defaultInstance?.currentWorkingDir;
+}
+
+// Validate command name to prevent path traversal
+function isValidCommandName(name) {
+  // Only allow alphanumeric, dash, underscore
+  return /^[a-zA-Z0-9_-]+$/.test(name);
 }
 
 // Get list of available slash commands
 router.get('/', async (req, res) => {
   const startTime = Date.now();
-  const workingDir = getWorkingDir();
-  logger.info({ workingDir }, 'Fetching project commands...');
+  const instanceId = req.query.instanceId;
+  const workingDir = getWorkingDir(instanceId);
+  logger.info({ workingDir, instanceId }, 'Fetching project commands...');
+
+  // Return empty list if no working directory (instance not found or not initialized)
+  if (!workingDir) {
+    logger.info({ instanceId, elapsed: Date.now() - startTime }, 'No working directory, returning empty list');
+    return res.json({ commands: [] });
+  }
 
   try {
     const commandsDir = path.join(workingDir, '.claude', 'commands');
@@ -99,7 +121,19 @@ router.get('/', async (req, res) => {
 router.get('/:name', async (req, res) => {
   try {
     const { name } = req.params;
-    const workingDir = getWorkingDir();
+
+    // Validate command name to prevent path traversal
+    if (!isValidCommandName(name)) {
+      return res.status(400).json({ error: 'Invalid command name' });
+    }
+
+    const instanceId = req.query.instanceId;
+    const workingDir = getWorkingDir(instanceId);
+
+    if (!workingDir) {
+      return res.status(404).json({ error: 'Instance not found or not initialized' });
+    }
+
     const filePath = path.join(workingDir, '.claude', 'commands', `${name}.md`);
 
     const content = await fs.readFile(filePath, 'utf-8');

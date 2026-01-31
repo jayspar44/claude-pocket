@@ -18,8 +18,11 @@ import androidx.core.app.NotificationCompat;
  */
 public class WebSocketService extends Service {
     private static final String TAG = "WebSocketService";
-    private static final String CHANNEL_ID = "websocket_channel";
     private static final int NOTIFICATION_ID = 1;
+
+    private String getChannelId() {
+        return getPackageName() + ".websocket_channel";
+    }
 
     private static boolean isRunning = false;
 
@@ -61,7 +64,7 @@ public class WebSocketService extends Service {
     private void createNotificationChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             NotificationChannel channel = new NotificationChannel(
-                CHANNEL_ID,
+                getChannelId(),
                 "WebSocket Connection",
                 NotificationManager.IMPORTANCE_LOW // Low to avoid sound/vibration
             );
@@ -92,8 +95,9 @@ public class WebSocketService extends Service {
             pendingIntentFlags
         );
 
-        // Exit action intent
-        Intent exitIntent = new Intent(getPackageName() + ".ACTION_EXIT");
+        // Exit action intent - use explicit component for reliable delivery
+        Intent exitIntent = new Intent(this, ExitBroadcastReceiver.class);
+        exitIntent.setAction(getPackageName() + ".ACTION_EXIT");
         PendingIntent exitPendingIntent = PendingIntent.getBroadcast(
             this,
             1,
@@ -101,7 +105,7 @@ public class WebSocketService extends Service {
             pendingIntentFlags
         );
 
-        return new NotificationCompat.Builder(this, CHANNEL_ID)
+        return new NotificationCompat.Builder(this, getChannelId())
             .setContentTitle("Claude Pocket")
             .setContentText("Connected to relay")
             .setSmallIcon(R.drawable.ic_stat_code)
