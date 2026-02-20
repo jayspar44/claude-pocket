@@ -19,6 +19,10 @@ function AppContent() {
 
   // Setup keyboard listeners for native platforms
   useEffect(() => {
+    // Reset keyboard state on initial load to fix stale viewport height
+    // (e.g., when switching from another app that had keyboard open)
+    resetKeyboardState();
+
     const cleanup = setupKeyboardListeners();
     return cleanup;
   }, []);

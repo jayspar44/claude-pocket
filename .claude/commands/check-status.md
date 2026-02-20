@@ -1,10 +1,10 @@
 ---
-description: Check instance status on minibox (PROD or DEV)
+description: Check instance status on minibox (PROD or DEV). Renamed from /status to avoid conflict with Claude Code built-in command.
 allowed-tools: Bash
 argument-hint: --env <prod|dev> [--health]
 ---
 
-# Status - Check Instance Status
+# Check Status - Check Instance Status
 
 Check the status of Claude Pocket services running on minibox.
 
@@ -18,10 +18,10 @@ Check the status of Claude Pocket services running on minibox.
 
 ```bash
 # Check PROD PM2 status
-/status --env prod
+/check-status --env prod
 
 # Check DEV status + health endpoint
-/status --env dev --health
+/check-status --env dev --health
 ```
 
 ## Steps
@@ -33,11 +33,11 @@ Parse the `--env` flag. It is **required** and must be either `prod` or `dev`.
 If missing or invalid:
 ```bash
 echo "Error: --env flag is required"
-echo "Usage: /status --env <prod|dev> [--health]"
+echo "Usage: /check-status --env <prod|dev> [--health]"
 echo ""
 echo "Examples:"
-echo "  /status --env prod           # Check PROD status"
-echo "  /status --env dev --health   # Check DEV status with health check"
+echo "  /check-status --env prod           # Check PROD status"
+echo "  /check-status --env dev --health   # Check DEV status with health check"
 exit 1
 ```
 

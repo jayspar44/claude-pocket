@@ -2,7 +2,7 @@ import { useState, useCallback, useRef } from 'react';
 import { X, FileUp, File, Trash2, Upload } from 'lucide-react';
 import { filesApi } from '../../api/relay-api';
 
-function MobileFilePicker({ isOpen, onClose, onSelect }) {
+function MobileFilePicker({ isOpen, onClose, onSelect, instanceId }) {
   const [selectedFile, setSelectedFile] = useState(null);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState(null);
@@ -36,7 +36,8 @@ function MobileFilePicker({ isOpen, onClose, onSelect }) {
         arrayBuffer,
         '', // Upload to working directory
         selectedFile.name,
-        selectedFile.type || 'application/octet-stream'
+        selectedFile.type || 'application/octet-stream',
+        instanceId
       );
 
       onSelect(response.data.path);
@@ -48,7 +49,7 @@ function MobileFilePicker({ isOpen, onClose, onSelect }) {
     } finally {
       setUploading(false);
     }
-  }, [selectedFile, onSelect, onClose]);
+  }, [selectedFile, onSelect, onClose, instanceId]);
 
   const handleClear = useCallback(() => {
     setSelectedFile(null);

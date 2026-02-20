@@ -289,7 +289,7 @@ Uses `standard-version` for semantic versioning based on conventional commits.
 | Command | Usage | When to Use |
 |---------|-------|-------------|
 | `/deploy` | `--env <prod\|dev> [--skip-confirm]` | Push code to PROD or DEV instance |
-| `/status` | `--env <prod\|dev> [--health]` | Check if services are running |
+| `/check-status` | `--env <prod\|dev> [--health]` | Check if services are running |
 | `/logs` | `--env <prod\|dev> [--lines N] [--app\|--relay]` | Debug issues, view recent output |
 | `/restart` | `--env <prod\|dev> [--app\|--relay\|--all]` | After config changes or to fix stuck state |
 | `/stop` | `--env <prod\|dev> [--app\|--relay\|--all]` | Pause services without removing from PM2 |
@@ -302,4 +302,4 @@ Uses `standard-version` for semantic versioning based on conventional commits.
 
 **Workflows:**
 - **Dev:** `/feature-start` → code → `/commit-push` → `/code-review` → `/pr-flow` → `/release`
-- **Deploy:** `/deploy --env prod` → `/status --env prod --health` → `/logs --env prod`
+- **Deploy:** `/deploy --env prod` → `/check-status --env prod --health` → `/logs --env prod`

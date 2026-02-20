@@ -223,7 +223,7 @@ Level values: 10=trace, 20=debug, 30=info, 40=warn, 50=error
 ## Troubleshooting
 
 ### No Logs Appearing
-- Services might not be running: `/status --env <prod|dev>`
+- Services might not be running: `/check-status --env <prod|dev>`
 - PM2 logs rotated: Check `~/.pm2/logs/` on minibox
 
 ### Connection Timeout
