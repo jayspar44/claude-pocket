@@ -2,6 +2,21 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+### [0.5.1](https://github.com/jayspar44/claude-pocket/compare/v0.5.0...v0.5.1) (2026-02-20)
+
+
+### Features
+
+* add ExitBroadcastReceiver for notification exit action ([ac00699](https://github.com/jayspar44/claude-pocket/commit/ac0069988c079c1da85a7d257a5c6957ecdb4c18))
+* tab-aware command list + fixes ([54b1905](https://github.com/jayspar44/claude-pocket/commit/54b19053aa6e3869ca65741484178e7f41e0485e))
+* tab-aware command list + multiple fixes ([#3](https://github.com/jayspar44/claude-pocket/issues/3)) ([e70d894](https://github.com/jayspar44/claude-pocket/commit/e70d894821282f31866784747c57668b162e67a8))
+
+
+### Bug Fixes
+
+* add path traversal protection and null checks in commands API ([ca02395](https://github.com/jayspar44/claude-pocket/commit/ca02395639040a4ca45a4872725dd55d8cfe9b5d))
+* send terminal dimensions with set-instance to fix mobile rendering ([bfea6ed](https://github.com/jayspar44/claude-pocket/commit/bfea6ed43d3d88614df66f7cf5dfb07003a3715d))
+
 ## [0.5.0](https://github.com/jayspar44/claude-pocket/compare/v0.4.0...v0.5.0) (2026-01-28)
 
 
