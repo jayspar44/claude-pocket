@@ -289,10 +289,14 @@ export function InstanceProvider({ children }) {
 
         // Send set-instance message to relay to register this client's instance
         // This tells the relay which PTY instance to route messages to/from
+        // Include stored terminal dimensions so PTY starts at the correct size
+        const dims = storage.getJSON('terminal-dims', { cols: 50, rows: 24 });
         ws.send(JSON.stringify({
           type: 'set-instance',
           instanceId: instance.id,
           workingDir: instance.workingDir || null,
+          cols: dims.cols,
+          rows: dims.rows,
         }));
       };
 

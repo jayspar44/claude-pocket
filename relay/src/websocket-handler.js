@@ -137,8 +137,10 @@ class WebSocketHandler {
         // Client wants to switch to a specific instance
         const newInstanceId = message.instanceId || DEFAULT_INSTANCE_ID;
         const workingDir = message.workingDir;
+        const clientCols = message.cols || config.pty.cols;
+        const clientRows = message.rows || config.pty.rows;
 
-        logger.info({ clientId: ws.clientId, oldInstanceId: ws.instanceId, newInstanceId, workingDir }, 'Client switching instance');
+        logger.info({ clientId: ws.clientId, oldInstanceId: ws.instanceId, newInstanceId, workingDir, clientCols, clientRows }, 'Client switching instance');
 
         ws.instanceId = newInstanceId;
         ctx.setSkipReplay(true);
@@ -147,8 +149,8 @@ class WebSocketHandler {
 
         // Auto-start PTY if not running but we have a working directory
         if (!ptyManager.isRunning && (workingDir || ptyManager.currentWorkingDir)) {
-          logger.info({ clientId: ws.clientId, instanceId: newInstanceId, workingDir }, 'PTY not running, auto-starting');
-          ptyManager.start(workingDir || ptyManager.currentWorkingDir);
+          logger.info({ clientId: ws.clientId, instanceId: newInstanceId, workingDir, clientCols, clientRows }, 'PTY not running, auto-starting with client dimensions');
+          ptyManager.start(workingDir || ptyManager.currentWorkingDir, clientCols, clientRows);
         } else if (!ptyManager.isRunning && !workingDir && !ptyManager.currentWorkingDir) {
           // No working directory - can't start Claude, send error to client
           logger.warn({ clientId: ws.clientId, instanceId: newInstanceId }, 'Cannot start Claude: no working directory configured');
@@ -161,6 +163,11 @@ class WebSocketHandler {
           // Store pending working dir for next restart
           ptyManager.pendingWorkingDir = workingDir;
           logger.info({ instanceId: newInstanceId, pendingWorkingDir: workingDir }, 'Working directory change queued for next restart');
+        }
+
+        // Resize PTY to client dimensions before sending replay
+        if (ptyManager.isRunning) {
+          ptyManager.resize(clientCols, clientRows);
         }
 
         // Send replay for this instance

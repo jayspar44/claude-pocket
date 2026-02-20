@@ -67,7 +67,7 @@ class PtyManager {
     this.processingStartTime = null;
   }
 
-  start(workingDir) {
+  start(workingDir, cols, rows) {
     if (this.ptyProcess) {
       logger.warn({ instanceId: this.instanceId }, 'PTY process already running');
       return;
@@ -81,19 +81,24 @@ class PtyManager {
       throw new Error('workingDir is required to start PTY');
     }
 
+    const spawnCols = cols || config.pty.cols;
+    const spawnRows = rows || config.pty.rows;
+    this.lastCols = spawnCols;
+    this.lastRows = spawnRows;
+
     this.currentWorkingDir = effectiveWorkingDir;
     this.intentionalStop = false;
 
     // Restore buffer from disk if available
     this.loadBuffer();
 
-    logger.info({ instanceId: this.instanceId, workingDir: effectiveWorkingDir }, 'Starting Claude Code process');
+    logger.info({ instanceId: this.instanceId, workingDir: effectiveWorkingDir, cols: spawnCols, rows: spawnRows }, 'Starting Claude Code process');
 
     try {
       const proc = pty.spawn(config.claudeCommand, [], {
         name: 'xterm-256color',
-        cols: config.pty.cols,
-        rows: config.pty.rows,
+        cols: spawnCols,
+        rows: spawnRows,
         cwd: workingDir,
         env: { ...config.pty.env, PWD: workingDir },
       });
@@ -211,7 +216,7 @@ class PtyManager {
     setTimeout(() => {
       if (!this.ptyProcess && !this.intentionalStop) {
         logger.info('Auto-restarting Claude Code process');
-        this.start(this.currentWorkingDir);
+        this.start(this.currentWorkingDir, this.lastCols, this.lastRows);
       }
     }, AUTO_RESTART_DELAY_MS);
   }

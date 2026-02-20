@@ -6,7 +6,7 @@ const config = {
   // PTY configuration
   pty: {
     shell: process.env.SHELL || '/bin/zsh',
-    cols: 80,
+    cols: 50,
     rows: 24,
     cwd: null, // Set at start time from app Settings
     env: {

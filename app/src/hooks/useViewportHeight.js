@@ -45,12 +45,18 @@ export function useViewportHeight() {
     document.addEventListener('visibilitychange', handleVisibilityChange);
 
     // For native apps, also listen to Capacitor app state changes
+    // Use multiple staggered checks because Android WebView can temporarily
+    // report keyboard-reduced height when switching from another app with keyboard open
     let appStateListener = null;
+    let resumeTimers = [];
     if (Capacitor.isNativePlatform()) {
       appStateListener = App.addListener('appStateChange', ({ isActive }) => {
         if (isActive) {
-          // Small delay to let the viewport settle
-          setTimeout(updateHeight, 100);
+          // Clear any pending timers from previous resume
+          resumeTimers.forEach(t => clearTimeout(t));
+          resumeTimers = [100, 300, 600].map(delay =>
+            setTimeout(updateHeight, delay)
+          );
         }
       });
     }
@@ -66,6 +72,7 @@ export function useViewportHeight() {
         window.removeEventListener('resize', updateHeight);
       }
       document.removeEventListener('visibilitychange', handleVisibilityChange);
+      resumeTimers.forEach(t => clearTimeout(t));
       appStateListener?.remove();
     };
   }, []);
