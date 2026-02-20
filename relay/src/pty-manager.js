@@ -42,6 +42,7 @@ class PtyManager {
     this.isRunning = false;
     this.currentWorkingDir = null;
     this.pendingWorkingDir = null; // For updating workingDir without restart
+    this.deferredStartDir = null; // For deferring PTY start until first resize with real dimensions
     // Batching state
     this.batchQueue = '';
     this.batchTimer = null;
@@ -67,11 +68,19 @@ class PtyManager {
     this.processingStartTime = null;
   }
 
-  start(workingDir) {
+  setDeferredStart(workingDir) {
+    this.deferredStartDir = workingDir;
+    logger.info({ instanceId: this.instanceId, workingDir }, 'Deferred PTY start until first resize with real dimensions');
+  }
+
+  start(workingDir, cols, rows) {
     if (this.ptyProcess) {
       logger.warn({ instanceId: this.instanceId }, 'PTY process already running');
       return;
     }
+
+    // Clear deferred start since we're starting now
+    this.deferredStartDir = null;
 
     // Use pending working dir if set (changed while running)
     const effectiveWorkingDir = this.pendingWorkingDir || workingDir;
@@ -81,19 +90,24 @@ class PtyManager {
       throw new Error('workingDir is required to start PTY');
     }
 
+    const spawnCols = cols || config.pty.cols;
+    const spawnRows = rows || config.pty.rows;
+    this.lastCols = spawnCols;
+    this.lastRows = spawnRows;
+
     this.currentWorkingDir = effectiveWorkingDir;
     this.intentionalStop = false;
 
     // Restore buffer from disk if available
     this.loadBuffer();
 
-    logger.info({ instanceId: this.instanceId, workingDir: effectiveWorkingDir }, 'Starting Claude Code process');
+    logger.info({ instanceId: this.instanceId, workingDir: effectiveWorkingDir, cols: spawnCols, rows: spawnRows }, 'Starting Claude Code process');
 
     try {
       const proc = pty.spawn(config.claudeCommand, [], {
         name: 'xterm-256color',
-        cols: config.pty.cols,
-        rows: config.pty.rows,
+        cols: spawnCols,
+        rows: spawnRows,
         cwd: workingDir,
         env: { ...config.pty.env, PWD: workingDir },
       });
@@ -211,7 +225,7 @@ class PtyManager {
     setTimeout(() => {
       if (!this.ptyProcess && !this.intentionalStop) {
         logger.info('Auto-restarting Claude Code process');
-        this.start(this.currentWorkingDir);
+        this.start(this.currentWorkingDir, this.lastCols, this.lastRows);
       }
     }, AUTO_RESTART_DELAY_MS);
   }
@@ -269,6 +283,8 @@ class PtyManager {
   resize(cols, rows) {
     if (this.ptyProcess) {
       this.ptyProcess.resize(cols, rows);
+      this.lastCols = cols;
+      this.lastRows = rows;
       logger.debug({ cols, rows }, 'Terminal resized');
     }
   }

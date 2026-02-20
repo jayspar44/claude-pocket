@@ -84,6 +84,7 @@ function Terminal() {
 
   const handleResize = useCallback((cols, rows) => {
     sendResize(cols, rows);
+    storage.setJSON('terminal-dims', { cols, rows });
   }, [sendResize]);
 
   const handleSend = useCallback((text) => {

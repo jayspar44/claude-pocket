@@ -15,7 +15,7 @@
       "overlay": true
     },
     "SystemBars": {
-      "insetsHandling": "disable"
+      "insetsHandling": "css"
     },
     "LocalNotifications": {
       "smallIcon": "ic_stat_code",

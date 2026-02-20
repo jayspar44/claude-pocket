@@ -230,6 +230,16 @@ function patchAndroid() {
       log('success', 'Added WebSocketService declaration');
     }
 
+    // Add windowSoftInputMode="adjustResize" to main activity
+    if (!manifest.includes('android:windowSoftInputMode')) {
+      manifest = manifest.replace(
+        'android:launchMode="singleTask"',
+        'android:launchMode="singleTask"\n            android:windowSoftInputMode="adjustResize"'
+      );
+      modified = true;
+      log('success', 'Added windowSoftInputMode="adjustResize" to activity');
+    }
+
     // Add ExitBroadcastReceiver declaration
     if (!manifest.includes('.ExitBroadcastReceiver')) {
       manifest = manifest.replace(

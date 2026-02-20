@@ -38,6 +38,7 @@ function InstanceManager({ isOpen, onClose, editInstanceId, startInAddMode }) {
     updateInstance,
     removeInstance,
     switchInstance,
+    sendToInstance,
     instanceColors,
     getInstanceState,
   } = useInstance();
@@ -134,14 +135,9 @@ function InstanceManager({ isOpen, onClose, editInstanceId, startInAddMode }) {
       );
       switchInstance(newInstance.id);
       // Close modal after adding (switch to new instance)
+      // PTY starts automatically via WebSocket set-instance → deferred start → resize
       resetForm();
       onClose();
-      // Start the PTY if working directory is set
-      if (workingDir) {
-        healthApi.startPty(workingDir, newInstance.id).catch(error => {
-          console.error('Failed to start PTY:', error);
-        });
-      }
     } else if (mode === 'edit' && editingId) {
       updateInstance(editingId, {
         name: formData.name.trim(),
@@ -174,20 +170,27 @@ function InstanceManager({ isOpen, onClose, editInstanceId, startInAddMode }) {
   }, [resetForm, onClose]);
 
   // PTY control handlers
-  const handleStartPty = useCallback(async (instance) => {
+  const handleStartPty = useCallback((instance) => {
     if (!instance.workingDir) {
       alert('Please set a working directory for this instance');
       return;
     }
-    setPtyLoading(true);
-    try {
-      await healthApi.startPty(instance.workingDir, instance.id);
-    } catch (error) {
-      console.error('Failed to start PTY:', error);
-      alert(error.response?.data?.error || 'Failed to start Claude Code');
+    // If already connected, re-send set-instance to trigger deferred PTY start on relay.
+    // switchInstance alone won't re-send set-instance if the WS is already open.
+    const dims = storage.getJSON('terminal-dims', { cols: 50, rows: 24 });
+    const sent = sendToInstance(instance.id, {
+      type: 'set-instance',
+      instanceId: instance.id,
+      workingDir: instance.workingDir,
+      cols: dims.cols,
+      rows: dims.rows,
+    });
+    if (!sent) {
+      // Not connected yet — switchInstance will connect and send set-instance
+      switchInstance(instance.id);
     }
-    setPtyLoading(false);
-  }, []);
+    onClose();
+  }, [switchInstance, sendToInstance, onClose]);
 
   const handleStopPty = useCallback(async (instanceId) => {
     setPtyLoading(true);

@@ -7,7 +7,7 @@ import Settings from './pages/Settings';
 import { InstanceProvider } from './contexts/InstanceContext';
 import { RelayProvider } from './contexts/RelayContext';
 import { ThemeProvider } from './contexts/ThemeContext';
-import { setupKeyboardListeners, resetKeyboardState } from './utils/keyboard';
+import { setupKeyboardListeners } from './utils/keyboard';
 import { migrateStorage } from './utils/storage';
 
 // Run migration before React mounts to ensure storage keys are prefixed by port
@@ -50,22 +50,6 @@ function AppContent() {
       listener.then(l => l.remove());
     };
   }, [location.pathname]);
-
-  // Reset keyboard state when app resumes from background
-  useEffect(() => {
-    if (!Capacitor.isNativePlatform()) return;
-
-    const listener = CapApp.addListener('appStateChange', ({ isActive }) => {
-      if (isActive) {
-        // Reset keyboard state to fix stale keyboard height after backgrounding
-        resetKeyboardState();
-      }
-    });
-
-    return () => {
-      listener.then(l => l.remove());
-    };
-  }, []);
 
   return (
     <div className="h-screen w-screen overflow-hidden bg-gray-900 text-white">
