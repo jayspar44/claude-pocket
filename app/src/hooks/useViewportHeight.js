@@ -6,16 +6,11 @@ import { Keyboard } from '@capacitor/keyboard';
 /**
  * Hook to track visual viewport height for mobile keyboard awareness.
  *
- * Ghost keyboard guard (native only): Android WebView can retain stale IME
- * insets when switching from another app with keyboard open, reporting a
- * reduced viewport even though no keyboard is visible. We track Capacitor
- * keyboardWillShow/keyboardDidHide events: if the viewport shrinks but no
- * keyboardWillShow was received, the shrink is a ghost and ignored.
- *
- * We use `lastFullHeight` (the last visualViewport.height when the keyboard
- * was NOT showing) as the fallback instead of screen.availHeight, because
- * on edge-to-edge Android apps visualViewport.height can differ from
- * screen.availHeight, and using the wrong one creates a gap.
+ * Ghost keyboard handling (native only): Android WebView can retain stale
+ * IME insets when switching from another app with keyboard open. Instead of
+ * fighting the ghost viewport (which the WebView stubbornly maintains), we
+ * make the ghost real by focusing the input — the keyboard fills the gap,
+ * and when the user dismisses it normally the viewport recovers properly.
  */
 export function useViewportHeight() {
   const [viewportHeight, setViewportHeight] = useState(() => {
@@ -27,28 +22,28 @@ export function useViewportHeight() {
 
   useEffect(() => {
     // Tracks whether the keyboard is expected to be showing.
-    // Set true by keyboardWillShow, false by keyboardDidHide and resume.
     let keyboardExpected = false;
 
     // Last known viewport height when keyboard was NOT showing.
-    // Used as fallback when ghost keyboard is detected, instead of
-    // screen.availHeight which can differ on edge-to-edge Android.
     let lastFullHeight = window.visualViewport?.height || window.innerHeight;
 
     const updateHeight = () => {
       const height = window.visualViewport?.height || window.innerHeight;
 
-      // Ghost keyboard guard (native only): viewport shrunk but no
-      // keyboardWillShow received → stale IME insets. Use last good height.
+      // Ghost keyboard detection (native only): viewport shrunk but no
+      // keyboardWillShow received → stale IME insets from another app.
+      // Instead of fighting it, make the ghost real by showing the keyboard.
       if (Capacitor.isNativePlatform() && !keyboardExpected && height < lastFullHeight * 0.85) {
-        setViewportHeight(lastFullHeight);
-        document.body.classList.remove('keyboard-visible');
+        window.dispatchEvent(new CustomEvent('ghost-keyboard'));
+        // Still set the height to what the viewport reports — the keyboard
+        // will fill the gap, so there's no gray space.
+        setViewportHeight(height);
+        document.body.classList.add('keyboard-visible');
         return;
       }
 
       setViewportHeight(height);
 
-      // Track the full height when keyboard is not showing
       if (!keyboardExpected) {
         lastFullHeight = height;
       }
@@ -57,18 +52,18 @@ export function useViewportHeight() {
       document.body.classList.toggle('keyboard-visible', keyboardVisible);
     };
 
-    // On resume: reset keyboard state. The ghost keyboard guard in
-    // updateHeight will reject any stale resize events automatically.
+    // On resume: check for ghost keyboard after a short delay to let
+    // the WebView settle. If the viewport recovered, great. If not,
+    // updateHeight will detect the ghost and trigger keyboard show.
     const handleResume = () => {
       keyboardExpected = false;
       document.documentElement.style.setProperty('--keyboard-height', '0px');
       document.body.classList.remove('keyboard-visible');
-      document.activeElement?.blur();
-      if (Capacitor.isNativePlatform()) {
-        Keyboard.hide().catch(() => {});
-      }
       window.scrollTo(0, 0);
-      setViewportHeight(lastFullHeight);
+
+      // Give the native onResume() IME hide + requestApplyInsets time
+      // to take effect before checking the viewport
+      setTimeout(updateHeight, 300);
     };
 
     if (window.visualViewport) {

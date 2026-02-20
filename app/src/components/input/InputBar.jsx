@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback, forwardRef, useImperativeHandle } from 'react';
+import { useState, useRef, useCallback, useEffect, forwardRef, useImperativeHandle } from 'react';
 import { Send } from 'lucide-react';
 import { useCommandHistory } from '../../hooks/useCommandHistory';
 
@@ -6,6 +6,16 @@ const InputBar = forwardRef(function InputBar({ onSend, disabled = false, placeh
   const [value, setValue] = useState('');
   const textareaRef = useRef(null);
   const { addToHistory, navigateHistory } = useCommandHistory();
+
+  // When ghost keyboard is detected (stale IME insets from another app),
+  // focus the textarea to make the keyboard real instead of showing gray space.
+  useEffect(() => {
+    const handleGhostKeyboard = () => {
+      textareaRef.current?.focus();
+    };
+    window.addEventListener('ghost-keyboard', handleGhostKeyboard);
+    return () => window.removeEventListener('ghost-keyboard', handleGhostKeyboard);
+  }, []);
 
   // Expose insertion API to parent components
   useImperativeHandle(ref, () => ({

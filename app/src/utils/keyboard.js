@@ -9,8 +9,9 @@ export const setupKeyboardListeners = () => {
     return;
   }
 
-  // Set resize mode to body (resizes <body> only, viewport units stay stable)
-  Keyboard.setResizeMode({ mode: 'body' }).catch(err => {
+  // Set resize mode to native (note: resize config is iOS-only,
+  // Android uses windowSoftInputMode from AndroidManifest)
+  Keyboard.setResizeMode({ mode: 'native' }).catch(err => {
     console.warn('Could not set keyboard resize mode:', err);
   });
 

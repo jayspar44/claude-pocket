@@ -7,15 +7,15 @@
   },
   "plugins": {
     "Keyboard": {
-      "resize": "body",
+      "resize": "native",
       "style": "dark",
-      "resizeOnFullScreen": false
+      "resizeOnFullScreen": true
     },
     "StatusBar": {
       "overlay": true
     },
     "SystemBars": {
-      "insetsHandling": "disable"
+      "insetsHandling": "css"
     },
     "LocalNotifications": {
       "smallIcon": "ic_stat_code",
