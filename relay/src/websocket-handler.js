@@ -85,6 +85,10 @@ class WebSocketHandler {
       ws.on('close', () => {
         logger.info({ clientId, instanceId: ws.instanceId }, 'WebSocket client disconnected');
         this.clients.delete(ws);
+        if (ws._deferredStartTimer) {
+          clearTimeout(ws._deferredStartTimer);
+          ws._deferredStartTimer = null;
+        }
         if (ws.ptyListener && ws.currentPtyManager) {
           ws.currentPtyManager.removeListener(ws.ptyListener);
         }
@@ -148,9 +152,25 @@ class WebSocketHandler {
         const ptyManager = ctx.setupPtyListener(newInstanceId);
 
         // Auto-start PTY if not running but we have a working directory
+        // Defer start until first resize arrives with real xterm.js dimensions
+        // to prevent MCP tool calls rendering vertically with stale/fallback dimensions
         if (!ptyManager.isRunning && (workingDir || ptyManager.currentWorkingDir)) {
-          logger.info({ clientId: ws.clientId, instanceId: newInstanceId, workingDir, clientCols, clientRows }, 'PTY not running, auto-starting with client dimensions');
-          ptyManager.start(workingDir || ptyManager.currentWorkingDir, clientCols, clientRows);
+          const dir = workingDir || ptyManager.currentWorkingDir;
+          logger.info({ clientId: ws.clientId, instanceId: newInstanceId, workingDir: dir, clientCols, clientRows }, 'PTY not running, deferring start until resize with real dimensions');
+          ptyManager.setDeferredStart(dir);
+          // Send status so client knows PTY is not yet running
+          this.send(ws, { type: 'pty-status', ...ptyManager.getStatus() });
+          // Fallback: start with set-instance dims if no resize arrives within 3s
+          if (ws._deferredStartTimer) clearTimeout(ws._deferredStartTimer);
+          ws._deferredStartTimer = setTimeout(() => {
+            ws._deferredStartTimer = null;
+            const pm = ptyRegistry.get(newInstanceId);
+            if (!pm.isRunning && pm.deferredStartDir) {
+              logger.info({ instanceId: newInstanceId, clientCols, clientRows }, 'Deferred start fallback: no resize received, starting with set-instance dimensions');
+              pm.start(pm.deferredStartDir, clientCols, clientRows);
+              ctx.sendReplay(pm, newInstanceId);
+            }
+          }, 3000);
         } else if (!ptyManager.isRunning && !workingDir && !ptyManager.currentWorkingDir) {
           // No working directory - can't start Claude, send error to client
           logger.warn({ clientId: ws.clientId, instanceId: newInstanceId }, 'Cannot start Claude: no working directory configured');
@@ -187,7 +207,18 @@ class WebSocketHandler {
       case 'resize': {
         const ptyManager = ptyRegistry.get(instanceId);
         if (message.cols && message.rows) {
-          ptyManager.resize(message.cols, message.rows);
+          // If PTY is deferred, start it now with real xterm.js dimensions
+          if (!ptyManager.isRunning && ptyManager.deferredStartDir) {
+            if (ws._deferredStartTimer) {
+              clearTimeout(ws._deferredStartTimer);
+              ws._deferredStartTimer = null;
+            }
+            logger.info({ instanceId, cols: message.cols, rows: message.rows }, 'Starting deferred PTY with real resize dimensions');
+            ptyManager.start(ptyManager.deferredStartDir, message.cols, message.rows);
+            ctx.sendReplay(ptyManager, instanceId);
+          } else {
+            ptyManager.resize(message.cols, message.rows);
+          }
         }
         break;
       }

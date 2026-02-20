@@ -33,6 +33,9 @@ export function useViewportHeight() {
     // Android WebView retains stale IME insets, reporting a reduced viewport height.
     // Uses screen.availHeight as a sanity reference since it's unaffected by keyboard state.
     const updateHeightOnResume = () => {
+      // Reset keyboard CSS variable immediately (previously done by resetKeyboardState in App.jsx)
+      document.documentElement.style.setProperty('--keyboard-height', '0px');
+
       const height = window.visualViewport?.height || window.innerHeight;
       const maxHeight = window.screen.availHeight;
 
@@ -48,8 +51,8 @@ export function useViewportHeight() {
         setViewportHeight(maxHeight);
         document.body.classList.remove('keyboard-visible');
 
-        // Also schedule a normal update for when the WebView catches up
-        setTimeout(updateHeight, 500);
+        // Staggered updates for when the WebView catches up at different speeds
+        resumeTimers = [100, 300, 600].map(delay => setTimeout(updateHeight, delay));
       } else {
         setViewportHeight(height);
       }
@@ -73,12 +76,15 @@ export function useViewportHeight() {
 
     // For native apps, also listen to Capacitor app state changes
     let appStateListener = null;
-    let resumeTimer = null;
+    let resumeTimers = [];
     if (Capacitor.isNativePlatform()) {
       appStateListener = App.addListener('appStateChange', ({ isActive }) => {
         if (isActive) {
-          if (resumeTimer) clearTimeout(resumeTimer);
-          resumeTimer = setTimeout(updateHeightOnResume, 150);
+          // Clear any pending staggered timers from previous resume
+          resumeTimers.forEach(t => clearTimeout(t));
+          resumeTimers = [];
+          // Short delay before resume handler to let OS settle
+          resumeTimers.push(setTimeout(updateHeightOnResume, 150));
         }
       });
     }
@@ -94,7 +100,7 @@ export function useViewportHeight() {
         window.removeEventListener('resize', updateHeight);
       }
       document.removeEventListener('visibilitychange', handleVisibilityChange);
-      if (resumeTimer) clearTimeout(resumeTimer);
+      resumeTimers.forEach(t => clearTimeout(t));
       appStateListener?.remove();
     };
   }, []);

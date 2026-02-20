@@ -42,6 +42,7 @@ class PtyManager {
     this.isRunning = false;
     this.currentWorkingDir = null;
     this.pendingWorkingDir = null; // For updating workingDir without restart
+    this.deferredStartDir = null; // For deferring PTY start until first resize with real dimensions
     // Batching state
     this.batchQueue = '';
     this.batchTimer = null;
@@ -67,11 +68,19 @@ class PtyManager {
     this.processingStartTime = null;
   }
 
+  setDeferredStart(workingDir) {
+    this.deferredStartDir = workingDir;
+    logger.info({ instanceId: this.instanceId, workingDir }, 'Deferred PTY start until first resize with real dimensions');
+  }
+
   start(workingDir, cols, rows) {
     if (this.ptyProcess) {
       logger.warn({ instanceId: this.instanceId }, 'PTY process already running');
       return;
     }
+
+    // Clear deferred start since we're starting now
+    this.deferredStartDir = null;
 
     // Use pending working dir if set (changed while running)
     const effectiveWorkingDir = this.pendingWorkingDir || workingDir;
