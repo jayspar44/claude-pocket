@@ -7,9 +7,9 @@
   },
   "plugins": {
     "Keyboard": {
-      "resize": "native",
+      "resize": "body",
       "style": "dark",
-      "resizeOnFullScreen": true
+      "resizeOnFullScreen": false
     },
     "StatusBar": {
       "overlay": true
