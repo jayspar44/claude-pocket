@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Capacitor } from '@capacitor/core';
 import { App } from '@capacitor/app';
+import { Keyboard } from '@capacitor/keyboard';
 
 /**
  * Hook to track visual viewport height for mobile keyboard awareness.
@@ -27,6 +28,33 @@ export function useViewportHeight() {
       document.body.classList.toggle('keyboard-visible', keyboardVisible);
     };
 
+    // On app resume, detect and correct ghost keyboard viewport state.
+    // This happens when switching from another app that had the keyboard open -
+    // Android WebView retains stale IME insets, reporting a reduced viewport height.
+    // Uses screen.availHeight as a sanity reference since it's unaffected by keyboard state.
+    const updateHeightOnResume = () => {
+      const height = window.visualViewport?.height || window.innerHeight;
+      const maxHeight = window.screen.availHeight;
+
+      // If viewport is much smaller than screen available height,
+      // the keyboard isn't actually open - it's ghost state
+      if (height < maxHeight * 0.85) {
+        // Dismiss any ghost IME state
+        if (Capacitor.isNativePlatform()) {
+          Keyboard.hide().catch(() => {});
+        }
+
+        // Use screen.availHeight as the correct height
+        setViewportHeight(maxHeight);
+        document.body.classList.remove('keyboard-visible');
+
+        // Also schedule a normal update for when the WebView catches up
+        setTimeout(updateHeight, 500);
+      } else {
+        setViewportHeight(height);
+      }
+    };
+
     // Use Visual Viewport API if available (better keyboard detection)
     if (window.visualViewport) {
       window.visualViewport.addEventListener('resize', updateHeight);
@@ -38,25 +66,19 @@ export function useViewportHeight() {
     // Update when page becomes visible (keyboard may have closed while backgrounded)
     const handleVisibilityChange = () => {
       if (!document.hidden) {
-        // Small delay to let the viewport settle after becoming visible
-        setTimeout(updateHeight, 100);
+        setTimeout(updateHeightOnResume, 100);
       }
     };
     document.addEventListener('visibilitychange', handleVisibilityChange);
 
     // For native apps, also listen to Capacitor app state changes
-    // Use multiple staggered checks because Android WebView can temporarily
-    // report keyboard-reduced height when switching from another app with keyboard open
     let appStateListener = null;
-    let resumeTimers = [];
+    let resumeTimer = null;
     if (Capacitor.isNativePlatform()) {
       appStateListener = App.addListener('appStateChange', ({ isActive }) => {
         if (isActive) {
-          // Clear any pending timers from previous resume
-          resumeTimers.forEach(t => clearTimeout(t));
-          resumeTimers = [100, 300, 600].map(delay =>
-            setTimeout(updateHeight, delay)
-          );
+          if (resumeTimer) clearTimeout(resumeTimer);
+          resumeTimer = setTimeout(updateHeightOnResume, 150);
         }
       });
     }
@@ -72,7 +94,7 @@ export function useViewportHeight() {
         window.removeEventListener('resize', updateHeight);
       }
       document.removeEventListener('visibilitychange', handleVisibilityChange);
-      resumeTimers.forEach(t => clearTimeout(t));
+      if (resumeTimer) clearTimeout(resumeTimer);
       appStateListener?.remove();
     };
   }, []);
