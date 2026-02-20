@@ -5,15 +5,17 @@ import { Keyboard } from '@capacitor/keyboard';
 
 /**
  * Hook to track visual viewport height for mobile keyboard awareness.
- * Uses the Visual Viewport API to detect when the keyboard is shown/hidden.
- * Falls back to window.innerHeight on unsupported browsers.
  *
  * Ghost keyboard guard (native only): Android WebView can retain stale IME
- * insets when switching from another app with keyboard open. This reports a
- * reduced viewport height even though the keyboard isn't visible. We guard
- * against this by tracking Capacitor keyboardWillShow/keyboardDidHide events:
- * if the viewport shrinks significantly but no keyboardWillShow was received,
- * the shrink is treated as a ghost and the full height is used instead.
+ * insets when switching from another app with keyboard open, reporting a
+ * reduced viewport even though no keyboard is visible. We track Capacitor
+ * keyboardWillShow/keyboardDidHide events: if the viewport shrinks but no
+ * keyboardWillShow was received, the shrink is a ghost and ignored.
+ *
+ * We use `lastFullHeight` (the last visualViewport.height when the keyboard
+ * was NOT showing) as the fallback instead of screen.availHeight, because
+ * on edge-to-edge Android apps visualViewport.height can differ from
+ * screen.availHeight, and using the wrong one creates a gap.
  */
 export function useViewportHeight() {
   const [viewportHeight, setViewportHeight] = useState(() => {
@@ -26,32 +28,37 @@ export function useViewportHeight() {
   useEffect(() => {
     // Tracks whether the keyboard is expected to be showing.
     // Set true by keyboardWillShow, false by keyboardDidHide and resume.
-    // On native: viewport shrink without this flag = ghost keyboard → ignored.
     let keyboardExpected = false;
 
-    const getFullHeight = () => window.screen.availHeight;
+    // Last known viewport height when keyboard was NOT showing.
+    // Used as fallback when ghost keyboard is detected, instead of
+    // screen.availHeight which can differ on edge-to-edge Android.
+    let lastFullHeight = window.visualViewport?.height || window.innerHeight;
 
     const updateHeight = () => {
       const height = window.visualViewport?.height || window.innerHeight;
-      const full = getFullHeight();
 
-      // Ghost keyboard guard: viewport reports reduced height but no
-      // keyboardWillShow event was received → stale IME insets from
-      // another app. Use full height instead.
-      if (Capacitor.isNativePlatform() && !keyboardExpected && height < full * 0.85) {
-        setViewportHeight(full);
+      // Ghost keyboard guard (native only): viewport shrunk but no
+      // keyboardWillShow received → stale IME insets. Use last good height.
+      if (Capacitor.isNativePlatform() && !keyboardExpected && height < lastFullHeight * 0.85) {
+        setViewportHeight(lastFullHeight);
         document.body.classList.remove('keyboard-visible');
         return;
       }
 
       setViewportHeight(height);
-      const keyboardVisible = height < full * 0.75;
+
+      // Track the full height when keyboard is not showing
+      if (!keyboardExpected) {
+        lastFullHeight = height;
+      }
+
+      const keyboardVisible = keyboardExpected && height < lastFullHeight * 0.75;
       document.body.classList.toggle('keyboard-visible', keyboardVisible);
     };
 
-    // On resume: reset keyboard state and force full height.
-    // The ghost keyboard guard in updateHeight will reject any subsequent
-    // stale resize events since keyboardExpected is false.
+    // On resume: reset keyboard state. The ghost keyboard guard in
+    // updateHeight will reject any stale resize events automatically.
     const handleResume = () => {
       keyboardExpected = false;
       document.documentElement.style.setProperty('--keyboard-height', '0px');
@@ -61,10 +68,9 @@ export function useViewportHeight() {
         Keyboard.hide().catch(() => {});
       }
       window.scrollTo(0, 0);
-      setViewportHeight(getFullHeight());
+      setViewportHeight(lastFullHeight);
     };
 
-    // Use Visual Viewport API if available (better keyboard detection)
     if (window.visualViewport) {
       window.visualViewport.addEventListener('resize', updateHeight);
       window.visualViewport.addEventListener('scroll', updateHeight);
@@ -72,7 +78,6 @@ export function useViewportHeight() {
       window.addEventListener('resize', updateHeight);
     }
 
-    // Update when page becomes visible (keyboard may have closed while backgrounded)
     const handleVisibilityChange = () => {
       if (!document.hidden) {
         handleResume();
@@ -80,27 +85,25 @@ export function useViewportHeight() {
     };
     document.addEventListener('visibilitychange', handleVisibilityChange);
 
-    // Native keyboard and app state listeners
     let appStateListener = null;
     let keyboardShowListener = null;
     let keyboardHideListener = null;
 
     if (Capacitor.isNativePlatform()) {
-      // Mark keyboard as expected so updateHeight trusts the viewport shrink
       keyboardShowListener = Keyboard.addListener('keyboardWillShow', () => {
         keyboardExpected = true;
       });
 
-      // Keyboard dismissed: clear expected flag and force correct height
       keyboardHideListener = Keyboard.addListener('keyboardDidHide', () => {
         keyboardExpected = false;
         document.documentElement.style.setProperty('--keyboard-height', '0px');
         document.body.classList.remove('keyboard-visible');
-        // Delay to let WebView finish resize animation
         setTimeout(() => {
           const height = window.visualViewport?.height || window.innerHeight;
-          const full = getFullHeight();
-          setViewportHeight(height < full * 0.85 ? full : height);
+          if (height >= lastFullHeight * 0.85) {
+            lastFullHeight = height;
+          }
+          setViewportHeight(lastFullHeight);
           document.body.classList.remove('keyboard-visible');
         }, 100);
       });
@@ -112,7 +115,6 @@ export function useViewportHeight() {
       });
     }
 
-    // Initial update
     updateHeight();
 
     return () => {
