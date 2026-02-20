@@ -7,7 +7,13 @@ import { Keyboard } from '@capacitor/keyboard';
  * Hook to track visual viewport height for mobile keyboard awareness.
  * Uses the Visual Viewport API to detect when the keyboard is shown/hidden.
  * Falls back to window.innerHeight on unsupported browsers.
- * Also updates when app returns from background (keyboard may have closed).
+ *
+ * Ghost keyboard guard (native only): Android WebView can retain stale IME
+ * insets when switching from another app with keyboard open. This reports a
+ * reduced viewport height even though the keyboard isn't visible. We guard
+ * against this by tracking Capacitor keyboardWillShow/keyboardDidHide events:
+ * if the viewport shrinks significantly but no keyboardWillShow was received,
+ * the shrink is treated as a ghost and the full height is used instead.
  */
 export function useViewportHeight() {
   const [viewportHeight, setViewportHeight] = useState(() => {
@@ -18,93 +24,44 @@ export function useViewportHeight() {
   });
 
   useEffect(() => {
-    // Flag to suppress viewport resize events during resume recovery.
-    // Without this, the resume handler sets the correct full height but then
-    // a visualViewport resize event fires with the stale ghost keyboard height,
-    // overwriting the correct value and leaving gray space below the input.
-    let suppressResizeUpdates = false;
+    // Tracks whether the keyboard is expected to be showing.
+    // Set true by keyboardWillShow, false by keyboardDidHide and resume.
+    // On native: viewport shrink without this flag = ghost keyboard → ignored.
+    let keyboardExpected = false;
+
+    const getFullHeight = () => window.screen.availHeight;
 
     const updateHeight = () => {
-      if (suppressResizeUpdates) return;
-
       const height = window.visualViewport?.height || window.innerHeight;
-      setViewportHeight(height);
+      const full = getFullHeight();
 
-      // Set keyboard-visible class when viewport shrinks significantly
-      const fullHeight = window.screen.height;
-      const keyboardVisible = height < fullHeight * 0.75;
+      // Ghost keyboard guard: viewport reports reduced height but no
+      // keyboardWillShow event was received → stale IME insets from
+      // another app. Use full height instead.
+      if (Capacitor.isNativePlatform() && !keyboardExpected && height < full * 0.85) {
+        setViewportHeight(full);
+        document.body.classList.remove('keyboard-visible');
+        return;
+      }
+
+      setViewportHeight(height);
+      const keyboardVisible = height < full * 0.75;
       document.body.classList.toggle('keyboard-visible', keyboardVisible);
     };
 
-    // On app resume, detect and correct ghost keyboard viewport state.
-    // Android WebView retains stale IME insets when returning from background,
-    // reporting a reduced viewport height even though the keyboard isn't visible.
-    const updateHeightOnResume = () => {
-      // Suppress resize listener to prevent it from overwriting our corrections
-      suppressResizeUpdates = true;
-
-      // 1. Immediately reset all keyboard state
+    // On resume: reset keyboard state and force full height.
+    // The ghost keyboard guard in updateHeight will reject any subsequent
+    // stale resize events since keyboardExpected is false.
+    const handleResume = () => {
+      keyboardExpected = false;
       document.documentElement.style.setProperty('--keyboard-height', '0px');
       document.body.classList.remove('keyboard-visible');
-
-      // 2. Force dismiss keyboard: blur active element (tells IME to dismiss)
-      //    + explicit Keyboard.hide() + reset scroll position
       document.activeElement?.blur();
       if (Capacitor.isNativePlatform()) {
         Keyboard.hide().catch(() => {});
       }
       window.scrollTo(0, 0);
-
-      // 3. Set height to expected full height immediately
-      const maxHeight = window.screen.availHeight;
-      setViewportHeight(maxHeight);
-
-      // 4. Poll with rAF until viewport stabilizes to correct height.
-      //    This adapts to actual WebView speed instead of guessing with timeouts.
-      let stableFrames = 0;
-      let frameCount = 0;
-      const MAX_FRAMES = 60; // ~1 second at 60fps
-      const STABLE_THRESHOLD = 3; // 3 consecutive good frames = stable
-
-      const checkViewport = () => {
-        const height = window.visualViewport?.height || window.innerHeight;
-        const full = window.screen.availHeight;
-
-        if (height >= full * 0.85) {
-          // Viewport looks correct
-          stableFrames++;
-          if (stableFrames >= STABLE_THRESHOLD) {
-            // Stable — do final update with real value and re-enable resize listener
-            suppressResizeUpdates = false;
-            updateHeight();
-            return;
-          }
-        } else {
-          stableFrames = 0;
-        }
-
-        frameCount++;
-        if (frameCount < MAX_FRAMES) {
-          resumeRafId = requestAnimationFrame(checkViewport);
-        } else {
-          // Max frames reached — force full height and re-enable resize listener
-          setViewportHeight(full);
-          document.body.classList.remove('keyboard-visible');
-          suppressResizeUpdates = false;
-        }
-      };
-
-      resumeRafId = requestAnimationFrame(checkViewport);
-    };
-
-    // Resume state tracking (used by both visibility change and Capacitor handlers)
-    let resumeRafId = null;
-    let resumeDelayTimer = null;
-
-    const cancelResumePolling = () => {
-      if (resumeRafId) { cancelAnimationFrame(resumeRafId); resumeRafId = null; }
-      if (resumeDelayTimer) { clearTimeout(resumeDelayTimer); resumeDelayTimer = null; }
-      suppressResizeUpdates = false;
+      setViewportHeight(getFullHeight());
     };
 
     // Use Visual Viewport API if available (better keyboard detection)
@@ -118,41 +75,39 @@ export function useViewportHeight() {
     // Update when page becomes visible (keyboard may have closed while backgrounded)
     const handleVisibilityChange = () => {
       if (!document.hidden) {
-        cancelResumePolling();
-        resumeDelayTimer = setTimeout(updateHeightOnResume, 100);
+        handleResume();
       }
     };
     document.addEventListener('visibilitychange', handleVisibilityChange);
 
-    // For native apps, listen to Capacitor keyboard and app state changes
+    // Native keyboard and app state listeners
     let appStateListener = null;
+    let keyboardShowListener = null;
     let keyboardHideListener = null;
+
     if (Capacitor.isNativePlatform()) {
-      // Force viewport update when keyboard hides — Android WebView sometimes
-      // doesn't fire visualViewport resize after keyboard dismiss, leaving
-      // the container at the keyboard-reduced height (gray space below input).
+      // Mark keyboard as expected so updateHeight trusts the viewport shrink
+      keyboardShowListener = Keyboard.addListener('keyboardWillShow', () => {
+        keyboardExpected = true;
+      });
+
+      // Keyboard dismissed: clear expected flag and force correct height
       keyboardHideListener = Keyboard.addListener('keyboardDidHide', () => {
+        keyboardExpected = false;
         document.documentElement.style.setProperty('--keyboard-height', '0px');
         document.body.classList.remove('keyboard-visible');
         // Delay to let WebView finish resize animation
         setTimeout(() => {
-          if (suppressResizeUpdates) return;
           const height = window.visualViewport?.height || window.innerHeight;
-          const full = window.screen.availHeight;
-          if (height < full * 0.85) {
-            setViewportHeight(full);
-          } else {
-            setViewportHeight(height);
-          }
+          const full = getFullHeight();
+          setViewportHeight(height < full * 0.85 ? full : height);
           document.body.classList.remove('keyboard-visible');
         }, 100);
       });
 
       appStateListener = App.addListener('appStateChange', ({ isActive }) => {
         if (isActive) {
-          cancelResumePolling();
-          // Short delay before resume handler to let OS settle
-          resumeDelayTimer = setTimeout(updateHeightOnResume, 150);
+          handleResume();
         }
       });
     }
@@ -168,7 +123,7 @@ export function useViewportHeight() {
         window.removeEventListener('resize', updateHeight);
       }
       document.removeEventListener('visibilitychange', handleVisibilityChange);
-      cancelResumePolling();
+      keyboardShowListener?.remove();
       keyboardHideListener?.remove();
       appStateListener?.remove();
     };
