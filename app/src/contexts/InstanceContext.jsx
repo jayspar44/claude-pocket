@@ -556,10 +556,16 @@ export function InstanceProvider({ children }) {
   }, [instances, activeInstanceId, disconnectInstance]);
 
   const switchInstance = useCallback((instanceId) => {
+    // Always set active instance, even if not yet in instances state.
+    // This handles the race where addInstance + switchInstance are called
+    // in the same event handler — React batches state updates, so instances
+    // may not include the new instance yet. The auto-connect effect below
+    // will connect once the instance appears in state after the re-render.
+    setActiveInstanceId(instanceId);
+
     const instance = instances.find(i => i.id === instanceId);
     if (!instance) return;
 
-    setActiveInstanceId(instanceId);
     // Clear notification indicators when switching to a tab
     // (keep detectedOptions so user can still interact with them)
     updateInstanceState(instanceId, {
@@ -725,6 +731,17 @@ export function InstanceProvider({ children }) {
   const getInstanceState = useCallback((id) => {
     return instanceStates[id] || createInstanceState();
   }, [instanceStates]);
+
+  // Auto-connect when activeInstanceId changes (handles race with addInstance)
+  useEffect(() => {
+    if (!activeInstanceId) return;
+    const instance = instances.find(i => i.id === activeInstanceId);
+    if (!instance) return;
+    const ws = wsRefs.current[activeInstanceId];
+    if (!ws || ws.readyState === WebSocket.CLOSED || ws.readyState === WebSocket.CLOSING) {
+      connectInstance(activeInstanceId);
+    }
+  }, [activeInstanceId, instances, connectInstance]);
 
   const value = useMemo(() => ({
     // Instance management

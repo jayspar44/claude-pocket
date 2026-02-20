@@ -29,33 +29,67 @@ export function useViewportHeight() {
     };
 
     // On app resume, detect and correct ghost keyboard viewport state.
-    // This happens when switching from another app that had the keyboard open -
-    // Android WebView retains stale IME insets, reporting a reduced viewport height.
-    // Uses screen.availHeight as a sanity reference since it's unaffected by keyboard state.
+    // Android WebView retains stale IME insets when returning from background,
+    // reporting a reduced viewport height even though the keyboard isn't visible.
     const updateHeightOnResume = () => {
-      // Reset keyboard CSS variable immediately (previously done by resetKeyboardState in App.jsx)
+      // 1. Immediately reset all keyboard state
       document.documentElement.style.setProperty('--keyboard-height', '0px');
+      document.body.classList.remove('keyboard-visible');
 
-      const height = window.visualViewport?.height || window.innerHeight;
+      // 2. Force dismiss keyboard: blur active element (tells IME to dismiss)
+      //    + explicit Keyboard.hide() + reset scroll position
+      document.activeElement?.blur();
+      if (Capacitor.isNativePlatform()) {
+        Keyboard.hide().catch(() => {});
+      }
+      window.scrollTo(0, 0);
+
+      // 3. Set height to expected full height immediately
       const maxHeight = window.screen.availHeight;
+      setViewportHeight(maxHeight);
 
-      // If viewport is much smaller than screen available height,
-      // the keyboard isn't actually open - it's ghost state
-      if (height < maxHeight * 0.85) {
-        // Dismiss any ghost IME state
-        if (Capacitor.isNativePlatform()) {
-          Keyboard.hide().catch(() => {});
+      // 4. Poll with rAF until viewport stabilizes to correct height.
+      //    This adapts to actual WebView speed instead of guessing with timeouts.
+      let stableFrames = 0;
+      let frameCount = 0;
+      const MAX_FRAMES = 60; // ~1 second at 60fps
+      const STABLE_THRESHOLD = 3; // 3 consecutive good frames = stable
+
+      const checkViewport = () => {
+        const height = window.visualViewport?.height || window.innerHeight;
+        const full = window.screen.availHeight;
+
+        if (height >= full * 0.85) {
+          // Viewport looks correct
+          stableFrames++;
+          if (stableFrames >= STABLE_THRESHOLD) {
+            // Stable — do final update with real value
+            updateHeight();
+            return;
+          }
+        } else {
+          stableFrames = 0;
         }
 
-        // Use screen.availHeight as the correct height
-        setViewportHeight(maxHeight);
-        document.body.classList.remove('keyboard-visible');
+        frameCount++;
+        if (frameCount < MAX_FRAMES) {
+          resumeRafId = requestAnimationFrame(checkViewport);
+        } else {
+          // Max frames reached, accept current viewport
+          updateHeight();
+        }
+      };
 
-        // Staggered updates for when the WebView catches up at different speeds
-        resumeTimers = [100, 300, 600].map(delay => setTimeout(updateHeight, delay));
-      } else {
-        setViewportHeight(height);
-      }
+      resumeRafId = requestAnimationFrame(checkViewport);
+    };
+
+    // Resume state tracking (used by both visibility change and Capacitor handlers)
+    let resumeRafId = null;
+    let resumeDelayTimer = null;
+
+    const cancelResumePolling = () => {
+      if (resumeRafId) { cancelAnimationFrame(resumeRafId); resumeRafId = null; }
+      if (resumeDelayTimer) { clearTimeout(resumeDelayTimer); resumeDelayTimer = null; }
     };
 
     // Use Visual Viewport API if available (better keyboard detection)
@@ -69,22 +103,20 @@ export function useViewportHeight() {
     // Update when page becomes visible (keyboard may have closed while backgrounded)
     const handleVisibilityChange = () => {
       if (!document.hidden) {
-        setTimeout(updateHeightOnResume, 100);
+        cancelResumePolling();
+        resumeDelayTimer = setTimeout(updateHeightOnResume, 100);
       }
     };
     document.addEventListener('visibilitychange', handleVisibilityChange);
 
     // For native apps, also listen to Capacitor app state changes
     let appStateListener = null;
-    let resumeTimers = [];
     if (Capacitor.isNativePlatform()) {
       appStateListener = App.addListener('appStateChange', ({ isActive }) => {
         if (isActive) {
-          // Clear any pending staggered timers from previous resume
-          resumeTimers.forEach(t => clearTimeout(t));
-          resumeTimers = [];
+          cancelResumePolling();
           // Short delay before resume handler to let OS settle
-          resumeTimers.push(setTimeout(updateHeightOnResume, 150));
+          resumeDelayTimer = setTimeout(updateHeightOnResume, 150);
         }
       });
     }
@@ -100,7 +132,7 @@ export function useViewportHeight() {
         window.removeEventListener('resize', updateHeight);
       }
       document.removeEventListener('visibilitychange', handleVisibilityChange);
-      resumeTimers.forEach(t => clearTimeout(t));
+      cancelResumePolling();
       appStateListener?.remove();
     };
   }, []);
