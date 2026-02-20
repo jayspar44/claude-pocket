@@ -18,7 +18,15 @@ export function useViewportHeight() {
   });
 
   useEffect(() => {
+    // Flag to suppress viewport resize events during resume recovery.
+    // Without this, the resume handler sets the correct full height but then
+    // a visualViewport resize event fires with the stale ghost keyboard height,
+    // overwriting the correct value and leaving gray space below the input.
+    let suppressResizeUpdates = false;
+
     const updateHeight = () => {
+      if (suppressResizeUpdates) return;
+
       const height = window.visualViewport?.height || window.innerHeight;
       setViewportHeight(height);
 
@@ -32,6 +40,9 @@ export function useViewportHeight() {
     // Android WebView retains stale IME insets when returning from background,
     // reporting a reduced viewport height even though the keyboard isn't visible.
     const updateHeightOnResume = () => {
+      // Suppress resize listener to prevent it from overwriting our corrections
+      suppressResizeUpdates = true;
+
       // 1. Immediately reset all keyboard state
       document.documentElement.style.setProperty('--keyboard-height', '0px');
       document.body.classList.remove('keyboard-visible');
@@ -63,7 +74,8 @@ export function useViewportHeight() {
           // Viewport looks correct
           stableFrames++;
           if (stableFrames >= STABLE_THRESHOLD) {
-            // Stable — do final update with real value
+            // Stable — do final update with real value and re-enable resize listener
+            suppressResizeUpdates = false;
             updateHeight();
             return;
           }
@@ -75,8 +87,10 @@ export function useViewportHeight() {
         if (frameCount < MAX_FRAMES) {
           resumeRafId = requestAnimationFrame(checkViewport);
         } else {
-          // Max frames reached, accept current viewport
-          updateHeight();
+          // Max frames reached — force full height and re-enable resize listener
+          setViewportHeight(full);
+          document.body.classList.remove('keyboard-visible');
+          suppressResizeUpdates = false;
         }
       };
 
@@ -90,6 +104,7 @@ export function useViewportHeight() {
     const cancelResumePolling = () => {
       if (resumeRafId) { cancelAnimationFrame(resumeRafId); resumeRafId = null; }
       if (resumeDelayTimer) { clearTimeout(resumeDelayTimer); resumeDelayTimer = null; }
+      suppressResizeUpdates = false;
     };
 
     // Use Visual Viewport API if available (better keyboard detection)
@@ -109,9 +124,30 @@ export function useViewportHeight() {
     };
     document.addEventListener('visibilitychange', handleVisibilityChange);
 
-    // For native apps, also listen to Capacitor app state changes
+    // For native apps, listen to Capacitor keyboard and app state changes
     let appStateListener = null;
+    let keyboardHideListener = null;
     if (Capacitor.isNativePlatform()) {
+      // Force viewport update when keyboard hides — Android WebView sometimes
+      // doesn't fire visualViewport resize after keyboard dismiss, leaving
+      // the container at the keyboard-reduced height (gray space below input).
+      keyboardHideListener = Keyboard.addListener('keyboardDidHide', () => {
+        document.documentElement.style.setProperty('--keyboard-height', '0px');
+        document.body.classList.remove('keyboard-visible');
+        // Delay to let WebView finish resize animation
+        setTimeout(() => {
+          if (suppressResizeUpdates) return;
+          const height = window.visualViewport?.height || window.innerHeight;
+          const full = window.screen.availHeight;
+          if (height < full * 0.85) {
+            setViewportHeight(full);
+          } else {
+            setViewportHeight(height);
+          }
+          document.body.classList.remove('keyboard-visible');
+        }, 100);
+      });
+
       appStateListener = App.addListener('appStateChange', ({ isActive }) => {
         if (isActive) {
           cancelResumePolling();
@@ -133,6 +169,7 @@ export function useViewportHeight() {
       }
       document.removeEventListener('visibilitychange', handleVisibilityChange);
       cancelResumePolling();
+      keyboardHideListener?.remove();
       appStateListener?.remove();
     };
   }, []);
