@@ -201,10 +201,12 @@ class WebSocketHandler {
       case 'restart': {
         const ptyManager = ptyRegistry.get(instanceId);
         const workingDir = message.workingDir || ptyManager.currentWorkingDir;
+        const restartCols = message.cols || ptyManager.lastCols;
+        const restartRows = message.rows || ptyManager.lastRows;
         ptyManager.stop();
         ptyManager.clearBuffer();
         ptyManager.resetRestartCounter();
-        ptyManager.start(workingDir);
+        ptyManager.start(workingDir, restartCols, restartRows);
         this.send(ws, { type: 'pty-status', ...ptyManager.getStatus() });
         break;
       }

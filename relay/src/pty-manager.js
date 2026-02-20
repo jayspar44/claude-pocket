@@ -274,6 +274,8 @@ class PtyManager {
   resize(cols, rows) {
     if (this.ptyProcess) {
       this.ptyProcess.resize(cols, rows);
+      this.lastCols = cols;
+      this.lastRows = rows;
       logger.debug({ cols, rows }, 'Terminal resized');
     }
   }
