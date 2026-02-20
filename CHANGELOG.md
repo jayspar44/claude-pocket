@@ -2,6 +2,21 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+### [0.5.2](https://github.com/jayspar44/claude-pocket/compare/v0.5.1...v0.5.2) (2026-02-20)
+
+
+### Bug Fixes
+
+* defer PTY start to first resize and unify keyboard state management ([d1eee07](https://github.com/jayspar44/claude-pocket/commit/d1eee07357cf9d9a42da69e43620ee0ea8a94fdc))
+* preserve terminal dimensions across resize and restart ([c3b4488](https://github.com/jayspar44/claude-pocket/commit/c3b448887ec21aa95d574cb31622a10db0decf44))
+* resolve ghost keyboard viewport on app resume ([0a16c7c](https://github.com/jayspar44/claude-pocket/commit/0a16c7cc63d5be87b6e72eb68b2163d9353d2ded))
+* route all PTY starts through WebSocket deferred path ([2ab5c88](https://github.com/jayspar44/claude-pocket/commit/2ab5c88da4576c4f653ea8c5943f33cd5241806f))
+* show keyboard on ghost detection instead of fighting stale viewport ([4fdb3ad](https://github.com/jayspar44/claude-pocket/commit/4fdb3ad9a91af30733a45d46c893f7ee5ca4081d))
+* suppress viewport resize during resume to prevent ghost keyboard ([812e8a8](https://github.com/jayspar44/claude-pocket/commit/812e8a8e7c3f368ae40daad7a444babc5d8b2ead))
+* switch keyboard resize from native to body mode ([6bba684](https://github.com/jayspar44/claude-pocket/commit/6bba684cd6c2a20954e321dc49d36eeeef4be805))
+* use event-based ghost keyboard guard instead of time-based suppression ([502d49e](https://github.com/jayspar44/claude-pocket/commit/502d49eb9f939fb31f853edb835407fd2eb75ef1))
+* use last known viewport height instead of screen.availHeight ([3066026](https://github.com/jayspar44/claude-pocket/commit/3066026b6a3e655d9994529267c3495391a044c3))
+
 ### [0.5.1](https://github.com/jayspar44/claude-pocket/compare/v0.5.0...v0.5.1) (2026-02-20)
 
 
