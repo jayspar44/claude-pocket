@@ -88,7 +88,7 @@ app.get('/api/instances', (req, res) => {
 });
 
 // Create/get instance with optional auto-start
-app.post('/api/instances', (req, res) => {
+app.post('/api/instances', async (req, res) => {
   try {
     const { instanceId, workingDir, autoStart = false } = req.body;
 
@@ -99,7 +99,7 @@ app.post('/api/instances', (req, res) => {
     const ptyManager = ptyRegistry.get(instanceId, workingDir);
 
     if (autoStart && !ptyManager.isRunning && workingDir) {
-      ptyManager.start(workingDir);
+      await ptyManager.start(workingDir);
     }
 
     res.json({
@@ -188,7 +188,7 @@ app.get('/api/pty/buffer', (req, res) => {
 });
 
 // Restart PTY endpoint
-app.post('/api/pty/restart', (req, res) => {
+app.post('/api/pty/restart', async (req, res) => {
   try {
     const { workingDir, instanceId = DEFAULT_INSTANCE_ID } = req.body || {};
     const ptyManager = ptyRegistry.get(instanceId);
@@ -200,7 +200,7 @@ app.post('/api/pty/restart', (req, res) => {
 
     ptyManager.stop();
     ptyManager.clearBuffer();
-    ptyManager.start(restartDir);
+    await ptyManager.start(restartDir);
     res.json({ success: true, status: ptyManager.getStatus() });
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -208,7 +208,7 @@ app.post('/api/pty/restart', (req, res) => {
 });
 
 // Start PTY with optional working directory
-app.post('/api/pty/start', (req, res) => {
+app.post('/api/pty/start', async (req, res) => {
   try {
     const { workingDir, instanceId = DEFAULT_INSTANCE_ID } = req.body;
     const ptyManager = ptyRegistry.get(instanceId, workingDir);
@@ -221,7 +221,7 @@ app.post('/api/pty/start', (req, res) => {
       return res.status(400).json({ error: 'workingDir required for new instance' });
     }
 
-    ptyManager.start(workingDir || ptyManager.currentWorkingDir);
+    await ptyManager.start(workingDir || ptyManager.currentWorkingDir);
     res.json({ success: true, status: ptyManager.getStatus(), workingDir: ptyManager.currentWorkingDir });
   } catch (error) {
     res.status(500).json({ error: error.message });

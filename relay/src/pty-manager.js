@@ -1,7 +1,7 @@
 const pty = require('node-pty');
 const fs = require('fs');
 const path = require('path');
-const { execSync } = require('child_process');
+const { execSync, execFile } = require('child_process');
 const config = require('./config');
 const logger = require('./logger');
 
@@ -73,7 +73,7 @@ class PtyManager {
     logger.info({ instanceId: this.instanceId, workingDir }, 'Deferred PTY start until first resize with real dimensions');
   }
 
-  start(workingDir, cols, rows) {
+  async start(workingDir, cols, rows) {
     if (this.ptyProcess) {
       logger.warn({ instanceId: this.instanceId }, 'PTY process already running');
       return;
@@ -97,6 +97,27 @@ class PtyManager {
 
     this.currentWorkingDir = effectiveWorkingDir;
     this.intentionalStop = false;
+
+    // Run claude update before starting (best-effort, non-blocking on failure)
+    this.broadcast({ type: 'pty-status', ...this.getStatus(), updating: true });
+    try {
+      await new Promise((resolve, reject) => {
+        execFile(config.claudeCommand, ['update'], {
+          timeout: 30000,
+          env: config.pty.env,
+        }, (error, stdout, stderr) => {
+          if (error) {
+            logger.warn({ error: error.message, stderr }, 'Claude update failed (continuing anyway)');
+          } else {
+            const output = (stdout || '').trim();
+            if (output) logger.info({ output }, 'Claude update completed');
+          }
+          resolve(); // Always resolve — update failure shouldn't block start
+        });
+      });
+    } catch (error) {
+      logger.warn({ error: error.message }, 'Claude update threw unexpectedly (continuing anyway)');
+    }
 
     // Restore buffer from disk if available
     this.loadBuffer();
@@ -222,10 +243,10 @@ class PtyManager {
     // Notify clients of pending restart
     this.broadcast({ type: 'pty-restarting', attempt: this.restartAttempts });
 
-    setTimeout(() => {
+    setTimeout(async () => {
       if (!this.ptyProcess && !this.intentionalStop) {
         logger.info('Auto-restarting Claude Code process');
-        this.start(this.currentWorkingDir, this.lastCols, this.lastRows);
+        await this.start(this.currentWorkingDir, this.lastCols, this.lastRows);
       }
     }, AUTO_RESTART_DELAY_MS);
   }

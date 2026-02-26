@@ -123,7 +123,7 @@ class WebSocketHandler {
     });
   }
 
-  handleMessage(ws, message, ctx) {
+  async handleMessage(ws, message, ctx) {
     const { type, instanceId: msgInstanceId } = message;
 
     // Use message instanceId or client's current instanceId
@@ -162,12 +162,12 @@ class WebSocketHandler {
           this.send(ws, { type: 'pty-status', ...ptyManager.getStatus() });
           // Fallback: start with set-instance dims if no resize arrives within 3s
           if (ws._deferredStartTimer) clearTimeout(ws._deferredStartTimer);
-          ws._deferredStartTimer = setTimeout(() => {
+          ws._deferredStartTimer = setTimeout(async () => {
             ws._deferredStartTimer = null;
             const pm = ptyRegistry.get(newInstanceId);
             if (!pm.isRunning && pm.deferredStartDir) {
               logger.info({ instanceId: newInstanceId, clientCols, clientRows }, 'Deferred start fallback: no resize received, starting with set-instance dimensions');
-              pm.start(pm.deferredStartDir, clientCols, clientRows);
+              await pm.start(pm.deferredStartDir, clientCols, clientRows);
               ctx.sendReplay(pm, newInstanceId);
             }
           }, 3000);
@@ -214,7 +214,7 @@ class WebSocketHandler {
               ws._deferredStartTimer = null;
             }
             logger.info({ instanceId, cols: message.cols, rows: message.rows }, 'Starting deferred PTY with real resize dimensions');
-            ptyManager.start(ptyManager.deferredStartDir, message.cols, message.rows);
+            await ptyManager.start(ptyManager.deferredStartDir, message.cols, message.rows);
             ctx.sendReplay(ptyManager, instanceId);
           } else {
             ptyManager.resize(message.cols, message.rows);
@@ -237,7 +237,7 @@ class WebSocketHandler {
         ptyManager.stop();
         ptyManager.clearBuffer();
         ptyManager.resetRestartCounter();
-        ptyManager.start(workingDir, restartCols, restartRows);
+        await ptyManager.start(workingDir, restartCols, restartRows);
         this.send(ws, { type: 'pty-status', ...ptyManager.getStatus() });
         break;
       }

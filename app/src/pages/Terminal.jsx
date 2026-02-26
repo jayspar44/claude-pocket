@@ -194,7 +194,16 @@ function Terminal() {
 
       {/* Terminal - flex-1 with min-h-0 allows it to shrink/grow */}
       <div className="flex-1 min-h-0 overflow-hidden">
-        {connectionState === 'connected' && !ptyStatus?.running ? (
+        {connectionState === 'connected' && !ptyStatus?.running && ptyStatus?.updating ? (
+          // Updating state - claude update running before start
+          <div className="flex flex-col items-center justify-center h-full text-gray-400 px-6">
+            <div className="w-12 h-12 mb-4 border-4 border-gray-600 border-t-blue-500 rounded-full animate-spin" />
+            <p className="text-center text-lg font-medium text-gray-300 mb-2">Checking for updates</p>
+            <p className="text-center text-sm">
+              Claude Code will start shortly
+            </p>
+          </div>
+        ) : connectionState === 'connected' && !ptyStatus?.running ? (
           // Empty state when connected but no PTY running
           <div className="flex flex-col items-center justify-center h-full text-gray-400 px-6">
             <Server className="w-12 h-12 mb-4 text-gray-600" />
