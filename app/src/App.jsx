@@ -21,7 +21,7 @@ function AppContent() {
   useEffect(() => {
     // Reset keyboard state on initial load to fix stale viewport height
     // (e.g., when switching from another app that had keyboard open)
-    resetKeyboardState();
+    document.documentElement.style.setProperty('--keyboard-height', '0px');
 
     const cleanup = setupKeyboardListeners();
     return cleanup;

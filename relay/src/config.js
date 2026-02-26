@@ -9,11 +9,10 @@ const config = {
     cols: 50,
     rows: 24,
     cwd: null, // Set at start time from app Settings
-    env: {
-      ...process.env,
-      TERM: 'xterm-256color',
-      COLORTERM: 'truecolor',
-    },
+    env: (() => {
+      const { CLAUDECODE, ...env } = process.env;
+      return { ...env, TERM: 'xterm-256color', COLORTERM: 'truecolor' };
+    })(),
   },
 
   // Output buffer configuration (for session resumption)
