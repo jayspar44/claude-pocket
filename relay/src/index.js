@@ -90,13 +90,13 @@ app.get('/api/instances', (req, res) => {
 // Create/get instance with optional auto-start
 app.post('/api/instances', (req, res) => {
   try {
-    const { instanceId, workingDir, autoStart = false } = req.body;
+    const { instanceId, workingDir, autoStart = false, cliType = 'claude' } = req.body;
 
     if (!instanceId) {
       return res.status(400).json({ error: 'instanceId is required' });
     }
 
-    const ptyManager = ptyRegistry.get(instanceId, workingDir);
+    const ptyManager = ptyRegistry.get(instanceId, workingDir, cliType);
 
     if (autoStart && !ptyManager.isRunning && workingDir) {
       ptyManager.start(workingDir);
@@ -210,8 +210,8 @@ app.post('/api/pty/restart', (req, res) => {
 // Start PTY with optional working directory
 app.post('/api/pty/start', (req, res) => {
   try {
-    const { workingDir, instanceId = DEFAULT_INSTANCE_ID } = req.body;
-    const ptyManager = ptyRegistry.get(instanceId, workingDir);
+    const { workingDir, instanceId = DEFAULT_INSTANCE_ID, cliType = 'claude' } = req.body;
+    const ptyManager = ptyRegistry.get(instanceId, workingDir, cliType);
 
     if (ptyManager.getStatus().running) {
       return res.status(400).json({ error: 'PTY already running. Stop it first or use restart.' });
@@ -263,7 +263,7 @@ app.get('/', (req, res) => {
 });
 
 // Don't auto-start PTY - let the user configure and start from the app
-logger.info('PTY auto-start disabled - use /api/pty/start or set-instance WebSocket message to launch Claude Code');
+logger.info('PTY auto-start disabled - use /api/pty/start or set-instance WebSocket message to launch CLI');
 
 // Start server
 server.listen(config.port, config.host, () => {

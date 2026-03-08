@@ -33,13 +33,13 @@ class WebSocketHandler {
       let ptyListener = null;
 
       // Setup PTY listener for this client
-      const setupPtyListener = (instanceId) => {
+      const setupPtyListener = (instanceId, cliType) => {
         // Remove old listener if switching instances
         if (ptyListener && ws.currentPtyManager) {
           ws.currentPtyManager.removeListener(ptyListener);
         }
 
-        const ptyManager = ptyRegistry.get(instanceId);
+        const ptyManager = ptyRegistry.get(instanceId, undefined, cliType);
         ws.currentPtyManager = ptyManager;
 
         ptyListener = (message) => {
@@ -141,15 +141,17 @@ class WebSocketHandler {
         // Client wants to switch to a specific instance
         const newInstanceId = message.instanceId || DEFAULT_INSTANCE_ID;
         const workingDir = message.workingDir;
+        const cliType = message.cliType || 'claude';
         const clientCols = message.cols || config.pty.cols;
         const clientRows = message.rows || config.pty.rows;
 
-        logger.info({ clientId: ws.clientId, oldInstanceId: ws.instanceId, newInstanceId, workingDir, clientCols, clientRows }, 'Client switching instance');
+        logger.info({ clientId: ws.clientId, oldInstanceId: ws.instanceId, newInstanceId, workingDir, cliType, clientCols, clientRows }, 'Client switching instance');
 
         ws.instanceId = newInstanceId;
+        ws.cliType = cliType;
         ctx.setSkipReplay(true);
 
-        const ptyManager = ctx.setupPtyListener(newInstanceId);
+        const ptyManager = ctx.setupPtyListener(newInstanceId, cliType);
 
         // Auto-start PTY if not running but we have a working directory
         // Defer start until first resize arrives with real xterm.js dimensions
@@ -173,7 +175,7 @@ class WebSocketHandler {
           }, 3000);
         } else if (!ptyManager.isRunning && !workingDir && !ptyManager.currentWorkingDir) {
           // No working directory - can't start Claude, send error to client
-          logger.warn({ clientId: ws.clientId, instanceId: newInstanceId }, 'Cannot start Claude: no working directory configured');
+          logger.warn({ clientId: ws.clientId, instanceId: newInstanceId }, 'Cannot start CLI: no working directory configured');
           this.send(ws, {
             type: 'pty-error',
             message: 'No working directory configured. Set a project folder in instance settings.',
