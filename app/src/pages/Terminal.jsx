@@ -18,7 +18,7 @@ function Terminal() {
   const prevViewportHeightRef = useRef(null);
   const wasAtBottomRef = useRef(true);
   const { connectionState, ptyStatus, sendInput, sendResize, sendInterrupt, submitInput, clearAndReplay } = useTerminalRelay(terminalRef);
-  const { connect, detectedOptions, clearDetectedOptions, activeInstance, activeInstanceId, ptyError, instances, needsInput, taskComplete } = useRelay();
+  const { connect, activeInstance, activeInstanceId, ptyError, instances, taskComplete } = useRelay();
   const viewportHeight = useViewportHeight();
   const [fontSize] = useState(() => {
     const stored = storage.get('fontSize');
@@ -136,16 +136,9 @@ function Terminal() {
         clearAndReplay();
         break;
       default:
-        // Handle option-{num} actions
-        if (action.startsWith('option-')) {
-          const num = action.split('-')[1];
-          clearDetectedOptions();  // Clear immediately for responsive UI
-          submitInput(num);        // Use submitInput (sends text + Enter properly)
-        } else {
-          console.warn('Unknown quick action:', action);
-        }
+        console.warn('Unknown quick action:', action);
     }
-  }, [sendInput, sendInterrupt, clearAndReplay, clearDetectedOptions, submitInput]);
+  }, [sendInput, sendInterrupt, clearAndReplay, submitInput]);
 
   const handleCommandSelect = useCallback((command) => {
     // Insert command with trailing space for arguments
@@ -187,7 +180,7 @@ function Terminal() {
       style={{ height: viewportHeight ? `${viewportHeight}px` : '100dvh' }}
     >
       {/* Status Bar */}
-      <StatusBar connectionState={connectionState} ptyStatus={ptyStatus} onReconnect={connect} workingDir={ptyStatus?.workingDir || activeInstance?.workingDir} ptyError={ptyError} onAddInstance={handleOpenInstanceManager} needsInput={needsInput || detectedOptions?.length > 0} taskComplete={taskComplete} instanceCount={instances?.length || 1} />
+      <StatusBar connectionState={connectionState} ptyStatus={ptyStatus} onReconnect={connect} workingDir={ptyStatus?.workingDir || activeInstance?.workingDir} ptyError={ptyError} onAddInstance={handleOpenInstanceManager} taskComplete={taskComplete} instanceCount={instances?.length || 1} cliType={activeInstance?.cliType || 'claude'} />
 
       {/* Instance Tab Bar */}
       <InstanceTabBar onManageClick={handleManageInstance} />
@@ -227,8 +220,6 @@ function Terminal() {
         ctrlActive={ctrlActive}
         onCtrlToggle={() => setCtrlActive(prev => !prev)}
         disabled={connectionState !== 'connected'}
-        detectedOptions={detectedOptions}
-        onDismissOptions={clearDetectedOptions}
       />
 
       {/* Input Bar */}

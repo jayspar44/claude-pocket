@@ -1,5 +1,5 @@
 import { useCallback } from 'react';
-import { Plus, Bell, CheckCircle } from 'lucide-react';
+import { Plus, CheckCircle } from 'lucide-react';
 import { useInstance } from '../../contexts/InstanceContext';
 
 export default function InstanceTabBar({ onManageClick }) {
@@ -29,9 +29,8 @@ export default function InstanceTabBar({ onManageClick }) {
       {instances.map((instance) => {
         const isActive = instance.id === activeInstanceId;
         const state = getInstanceState(instance.id);
-        const needsInput = (state.needsInput || state.detectedOptions?.length > 0) && !isActive; // Hide bell on active tab
-        const taskComplete = state.taskComplete && !needsInput && !isActive; // Only show on inactive tabs
-        const isProcessing = state.processingStartTime && !state.needsInput && !state.taskComplete;
+        const taskComplete = state.taskComplete && !isActive; // Only show on inactive tabs
+        const isProcessing = state.processingStartTime && !state.taskComplete;
 
         return (
           <button
@@ -59,13 +58,6 @@ export default function InstanceTabBar({ onManageClick }) {
             {/* Processing indicator */}
             {isProcessing && (
               <span className="w-3 h-3 border-2 border-blue-500 border-t-transparent rounded-full animate-spin flex-shrink-0" />
-            )}
-
-            {/* Needs input indicator */}
-            {needsInput && (
-              <span className="flex items-center justify-center w-4 h-4 rounded-full bg-orange-500 animate-pulse flex-shrink-0">
-                <Bell className="w-2.5 h-2.5 text-white" />
-              </span>
             )}
 
             {/* Task complete indicator */}
