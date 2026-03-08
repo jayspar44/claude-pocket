@@ -33,8 +33,9 @@ class PtyManager {
    * Create a PTY manager instance
    * @param {string} instanceId - Unique identifier for this instance (used for buffer persistence)
    */
-  constructor(instanceId = 'default') {
+  constructor(instanceId = 'default', cliType = 'claude') {
     this.instanceId = instanceId;
+    this.cliType = cliType;
     this.ptyProcess = null;
     this.outputBuffer = [];
     this.outputBufferSize = 0;
@@ -66,6 +67,10 @@ class PtyManager {
     // Long task tracking for notifications
     this.lastUserInputTime = 0;
     this.processingStartTime = null;
+  }
+
+  get cliLabel() {
+    return this.cliType === 'gemini' ? 'Gemini CLI' : 'Claude Code';
   }
 
   setDeferredStart(workingDir) {
@@ -101,10 +106,11 @@ class PtyManager {
     // Restore buffer from disk if available
     this.loadBuffer();
 
-    logger.info({ instanceId: this.instanceId, workingDir: effectiveWorkingDir, cols: spawnCols, rows: spawnRows }, 'Starting Claude Code process');
+    logger.info({ instanceId: this.instanceId, cliType: this.cliType, workingDir: effectiveWorkingDir, cols: spawnCols, rows: spawnRows }, `Starting ${this.cliLabel} process`);
 
     try {
-      const proc = pty.spawn(config.claudeCommand, [], {
+      const command = this.cliType === 'gemini' ? config.geminiCommand : config.claudeCommand;
+      const proc = pty.spawn(command, [], {
         name: 'xterm-256color',
         cols: spawnCols,
         rows: spawnRows,
@@ -153,15 +159,15 @@ class PtyManager {
 
         // Log with appropriate level based on exit type
         if (this.intentionalStop) {
-          logger.info(exitInfo, 'Claude Code process stopped intentionally');
+          logger.info(exitInfo, `${this.cliLabel} process stopped intentionally`);
         } else if (exitCode === 0) {
-          logger.info(exitInfo, 'Claude Code process exited normally');
+          logger.info(exitInfo, `${this.cliLabel} process exited normally`);
         } else {
           // Include last output lines for crash diagnosis
           logger.error({
             ...exitInfo,
             lastOutput: this.lastOutputLines,
-          }, 'Claude Code process crashed');
+          }, `${this.cliLabel} process crashed`);
 
           // Broadcast crash details to clients for debugging
           this.broadcast({
@@ -186,9 +192,9 @@ class PtyManager {
         }
       });
 
-      logger.info({ pid: proc.pid }, 'Claude Code process started');
+      logger.info({ pid: proc.pid }, `${this.cliLabel} process started`);
     } catch (error) {
-      logger.error({ error: error.message }, 'Failed to start Claude Code process');
+      logger.error({ error: error.message }, `Failed to start ${this.cliLabel} process`);
       throw error;
     }
   }
@@ -206,7 +212,7 @@ class PtyManager {
       logger.error({ attempts: this.restartAttempts }, 'Max restart attempts exceeded, giving up');
       this.broadcast({
         type: 'pty-error',
-        message: 'Claude Code crashed repeatedly. Use restart button to try again.',
+        message: `${this.cliLabel} crashed repeatedly. Use restart button to try again.`,
       });
       return;
     }
@@ -224,7 +230,7 @@ class PtyManager {
 
     setTimeout(() => {
       if (!this.ptyProcess && !this.intentionalStop) {
-        logger.info('Auto-restarting Claude Code process');
+        logger.info(`Auto-restarting ${this.cliLabel} process`);
         this.start(this.currentWorkingDir, this.lastCols, this.lastRows);
       }
     }, AUTO_RESTART_DELAY_MS);
@@ -237,7 +243,7 @@ class PtyManager {
 
   stop() {
     if (this.ptyProcess) {
-      logger.info('Stopping Claude Code process');
+      logger.info(`Stopping ${this.cliLabel} process`);
       this.intentionalStop = true; // Prevent auto-restart
       // Flush any pending batched output
       if (this.batchTimer) {
@@ -573,6 +579,7 @@ class PtyManager {
   getStatus() {
     return {
       instanceId: this.instanceId,
+      cliType: this.cliType,
       running: this.isRunning,
       pid: this.ptyProcess?.pid || null,
       bufferSize: this.outputBufferSize,
