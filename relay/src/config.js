@@ -91,8 +91,9 @@ const config = {
     pingTimeout: 10000,
   },
 
-  // Claude Code command
+  // CLI commands
   claudeCommand: process.env.CLAUDE_COMMAND || 'claude',
+  geminiCommand: process.env.GEMINI_COMMAND || 'gemini',
 };
 
 module.exports = config;
