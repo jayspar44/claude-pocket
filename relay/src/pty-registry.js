@@ -23,9 +23,10 @@ class PtyRegistry {
    * Get or create a PTY instance by ID
    * @param {string} instanceId - The instance identifier
    * @param {string} workingDir - Working directory (required for new instances)
+   * @param {string} cliType - CLI type ('claude' or 'gemini'), defaults to 'claude'
    * @returns {PtyManager} The PTY manager instance
    */
-  get(instanceId, workingDir) {
+  get(instanceId, workingDir, cliType) {
     // Use default instance ID if not provided (backward compatibility)
     const id = instanceId || DEFAULT_INSTANCE_ID;
 
@@ -55,7 +56,7 @@ class PtyRegistry {
 
     // Create new instance
     logger.info({ instanceId: id, workingDir }, 'Creating new PTY instance');
-    const instance = new PtyManager(id);
+    const instance = new PtyManager(id, cliType);
     this.instances.set(id, instance);
 
     return instance;
