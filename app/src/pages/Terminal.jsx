@@ -193,7 +193,7 @@ function Terminal() {
             <Server className="w-12 h-12 mb-4 text-gray-600" />
             <p className="text-center text-lg font-medium text-gray-300 mb-2">No Active Session</p>
             <p className="text-center text-sm mb-4">
-              Start Claude Code from the instance manager to begin
+              Start a CLI session from the instance manager to begin
             </p>
             <button
               onClick={handleOpenInstanceManager}

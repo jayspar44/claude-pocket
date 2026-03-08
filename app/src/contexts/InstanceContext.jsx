@@ -362,13 +362,13 @@ export function InstanceProvider({ children }) {
           } else if (message.type === 'pty-error') {
             // PTY failed to start or crashed repeatedly
             updateInstanceState(instanceId, {
-              ptyError: message.message || 'Claude Code failed to start',
+              ptyError: message.message || 'CLI failed to start',
             });
           } else if (message.type === 'pty-crash') {
             // PTY crashed - show exit code and hint
             const errorMsg = message.exitCode
-              ? `Claude Code crashed (exit ${message.exitCode})`
-              : 'Claude Code crashed unexpectedly';
+              ? `CLI crashed (exit ${message.exitCode})`
+              : 'CLI crashed unexpectedly';
             updateInstanceState(instanceId, {
               ptyError: errorMsg,
             });
