@@ -108,8 +108,8 @@ class PtyManager {
         name: 'xterm-256color',
         cols: spawnCols,
         rows: spawnRows,
-        cwd: workingDir,
-        env: { ...config.pty.env, PWD: workingDir },
+        cwd: effectiveWorkingDir,
+        env: { ...config.pty.env, PWD: effectiveWorkingDir },
       });
 
       this.ptyProcess = proc;
