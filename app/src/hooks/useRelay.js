@@ -14,7 +14,6 @@ export function useTerminalRelay(terminalRef) {
     sendInterrupt,
     submitInput,
     isConnected,
-    clearDetectedOptions,
     activeInstanceId,
     // Use instance-specific functions for proper routing
     addInstanceMessageListener,
@@ -150,7 +149,6 @@ export function useTerminalRelay(terminalRef) {
     sendInterrupt,
     submitInput: handleSubmitInput,
     clearAndReplay: handleClearAndReplay,
-    clearDetectedOptions,
   };
 }
 
