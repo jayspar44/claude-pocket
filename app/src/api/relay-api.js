@@ -91,7 +91,7 @@ export const healthApi = {
   check: () => relayApi.get('/api/health'),
   ptyStatus: (instanceId) => relayApi.get('/api/pty/status', { params: { instanceId } }),
   restartPty: (workingDir, instanceId) => relayApi.post('/api/pty/restart', { workingDir, instanceId }),
-  startPty: (workingDir, instanceId) => relayApi.post('/api/pty/start', { workingDir, instanceId }),
+  startPty: (workingDir, instanceId, cliType) => relayApi.post('/api/pty/start', { workingDir, instanceId, cliType }),
   stopPty: (instanceId, clearBuffer = true) => relayApi.post('/api/pty/stop', { instanceId, clearBuffer }),
 };
 
@@ -101,8 +101,8 @@ export const instancesApi = {
   list: () => relayApi.get('/api/instances'),
 
   // Create or get an instance (optionally auto-start)
-  create: (instanceId, workingDir, autoStart = false) =>
-    relayApi.post('/api/instances', { instanceId, workingDir, autoStart }),
+  create: (instanceId, workingDir, autoStart = false, cliType = 'claude') =>
+    relayApi.post('/api/instances', { instanceId, workingDir, autoStart, cliType }),
 
   // Get specific instance status
   get: (instanceId) => relayApi.get(`/api/instances/${instanceId}`),

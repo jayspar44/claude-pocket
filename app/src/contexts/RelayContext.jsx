@@ -15,8 +15,6 @@ export function RelayProvider({ children }) {
     ptyStatus: instance.ptyStatus,
     error: instance.error,
     ptyError: instance.ptyError,
-    detectedOptions: instance.detectedOptions,
-    needsInput: instance.needsInput,
     taskComplete: instance.taskComplete,
     isConnected: instance.isConnected,
     isReconnecting: instance.isReconnecting,
@@ -34,7 +32,6 @@ export function RelayProvider({ children }) {
     restartPty: instance.restartPty,
     requestReplay: instance.requestReplay,
     submitInput: instance.submitInput,
-    clearDetectedOptions: instance.clearDetectedOptions,
     addMessageListener: instance.addMessageListener,
 
     // Instance-specific actions (for proper multi-instance routing)

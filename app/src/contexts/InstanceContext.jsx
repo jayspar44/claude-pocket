@@ -59,12 +59,13 @@ const DEFAULT_INSTANCE_ID = 'default';
 const generateId = () => `inst-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
 
 // Create a new instance object
-const createInstance = (name, relayUrl, workingDir, color, useDefaultId = false, customId = null) => ({
+const createInstance = (name, relayUrl, workingDir, color, useDefaultId = false, customId = null, cliType = null) => ({
   id: customId || (useDefaultId ? DEFAULT_INSTANCE_ID : generateId()),
   name,
   relayUrl,
   workingDir: workingDir || '',
   color: color || INSTANCE_COLORS[0],
+  cliType: cliType || storage.get('default-cli') || 'claude',
   createdAt: Date.now(),
   lastUsedAt: Date.now(),
 });
@@ -73,12 +74,10 @@ const createInstance = (name, relayUrl, workingDir, color, useDefaultId = false,
 const createInstanceState = () => ({
   connectionState: 'disconnected',
   ptyStatus: null,
-  detectedOptions: [],
   hasUnread: false,
   processingStartTime: null,
   error: null,
   ptyError: null,
-  needsInput: false,    // True when options-detected received
   taskComplete: false,  // True when task-complete received
 });
 
@@ -295,6 +294,7 @@ export function InstanceProvider({ children }) {
           type: 'set-instance',
           instanceId: instance.id,
           workingDir: instance.workingDir || null,
+          cliType: instance.cliType || 'claude',
           cols: dims.cols,
           rows: dims.rows,
         }));
@@ -362,60 +362,26 @@ export function InstanceProvider({ children }) {
           } else if (message.type === 'pty-error') {
             // PTY failed to start or crashed repeatedly
             updateInstanceState(instanceId, {
-              ptyError: message.message || 'Claude Code failed to start',
+              ptyError: message.message || 'CLI failed to start',
             });
           } else if (message.type === 'pty-crash') {
             // PTY crashed - show exit code and hint
             const errorMsg = message.exitCode
-              ? `Claude Code crashed (exit ${message.exitCode})`
-              : 'Claude Code crashed unexpectedly';
+              ? `CLI crashed (exit ${message.exitCode})`
+              : 'CLI crashed unexpectedly';
             updateInstanceState(instanceId, {
               ptyError: errorMsg,
             });
-          } else if (message.type === 'options-detected') {
-            const optionCount = message.options?.length || 0;
-            const hasOptions = optionCount > 0;
-
-            // Set needsInput state and clear taskComplete (input takes precedence)
-            updateInstanceState(instanceId, {
-              detectedOptions: message.options || [],
-              needsInput: hasOptions,
-              taskComplete: hasOptions ? false : undefined, // Clear taskComplete if input needed
-            });
-
-            // Log and notify if options detected and app is backgrounded
-            const isVisible = isAppVisibleRef.current;
-            const willNotify = hasOptions && !isVisible;
-            notificationService.log('options-detected', {
-              optionCount,
-              isVisible,
-              willNotify,
-            });
-            if (willNotify) {
-              notificationService.log('Triggering notifyInputNeeded');
-              notificationService.notifyInputNeeded({
-                instanceId,
-                optionCount: message.options.length,
-              });
-            }
           } else if (message.type === 'task-complete') {
-            // Set taskComplete state (only if not currently needing input)
-            const currentState = instanceStates[instanceId];
-            const shouldSetComplete = !currentState?.needsInput;
-
-            if (shouldSetComplete) {
-              updateInstanceState(instanceId, { taskComplete: true });
-            }
+            updateInstanceState(instanceId, { taskComplete: true });
 
             // Log and notify on long task completion (only when app is backgrounded)
             const isVisible = isAppVisibleRef.current;
-            // Only notify if not currently needing input (input takes precedence)
-            const willNotify = !isVisible && shouldSetComplete;
+            const willNotify = !isVisible;
             notificationService.log('task-complete', {
               duration: message.duration,
               isVisible,
               willNotify,
-              needsInputActive: currentState?.needsInput,
             });
             if (willNotify) {
               notificationService.log('Triggering notifyTaskComplete');
@@ -495,7 +461,7 @@ export function InstanceProvider({ children }) {
   }, []);
 
   // Instance management functions
-  const addInstance = useCallback((name, relayUrl, workingDir, color, customId = null) => {
+  const addInstance = useCallback((name, relayUrl, workingDir, color, customId = null, cliType = null) => {
     // Check for duplicate ID first
     if (customId) {
       const existing = instances.find(i => i.id === customId);
@@ -511,7 +477,8 @@ export function InstanceProvider({ children }) {
       workingDir,
       color || INSTANCE_COLORS[colorIndex],
       false,
-      customId
+      customId,
+      cliType
     );
     setInstances(prev => [...prev, newInstance]);
     setInstanceStates(prev => ({
@@ -567,11 +534,9 @@ export function InstanceProvider({ children }) {
     if (!instance) return;
 
     // Clear notification indicators when switching to a tab
-    // (keep detectedOptions so user can still interact with them)
     updateInstanceState(instanceId, {
       hasUnread: false,
       taskComplete: false,
-      needsInput: false,
     });
 
     // Update lastUsedAt
@@ -698,14 +663,6 @@ export function InstanceProvider({ children }) {
   const requestReplay = useCallback(() => send({ type: 'replay' }), [send]);
   const submitInput = useCallback((data) => send({ type: 'submit', data }), [send]);
 
-  const clearDetectedOptions = useCallback(() => {
-    updateInstanceState(activeInstanceId, {
-      detectedOptions: [],
-      needsInput: false,
-      taskComplete: false, // Also clear task complete on interaction
-    });
-  }, [activeInstanceId, updateInstanceState]);
-
   // Keep activeInstanceIdRef in sync for WebSocket handlers and stable callbacks
   useEffect(() => {
     activeInstanceIdRef.current = activeInstanceId;
@@ -759,8 +716,6 @@ export function InstanceProvider({ children }) {
     ptyStatus: activeInstanceState.ptyStatus,
     error: activeInstanceState.error,
     ptyError: activeInstanceState.ptyError,
-    detectedOptions: activeInstanceState.detectedOptions,
-    needsInput: activeInstanceState.needsInput,
     taskComplete: activeInstanceState.taskComplete,
     isConnected: activeInstanceState.connectionState === 'connected',
     isReconnecting: activeInstanceState.connectionState === 'reconnecting',
@@ -778,7 +733,6 @@ export function InstanceProvider({ children }) {
     restartPty,
     requestReplay,
     submitInput,
-    clearDetectedOptions,
     addMessageListener: addActiveMessageListener,
 
     // Multi-instance actions
@@ -810,7 +764,6 @@ export function InstanceProvider({ children }) {
     restartPty,
     requestReplay,
     submitInput,
-    clearDetectedOptions,
     addActiveMessageListener,
     connectInstance,
     disconnectInstance,

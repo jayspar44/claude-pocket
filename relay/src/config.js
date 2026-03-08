@@ -25,49 +25,6 @@ const config = {
     saveDebounceMs: 500, // Debounce buffer saves
   },
 
-  // Option detection configuration
-  optionDetection: {
-    idleThresholdMs: 800,    // Wait for output to settle before detecting
-    expiryMs: 60000,         // Auto-clear options after 60s
-    minSubstantiveChars: 50, // Min chars to consider "substantive" output
-    bufferLookback: 1500,    // Chars to scan for options
-    confidenceThreshold: 30, // Min confidence score to detect options
-
-    // Trigger phrases that indicate options follow
-    triggerPhrases: [
-      /(?:choose|select|pick)\s+(?:one|an option|from)/i,
-      /which\s+(?:one|option|would you)/i,
-      /enter\s+(?:your\s+)?choice/i,
-      /available\s+options/i,
-      /\?\s*$/m, // Question mark at end of line
-    ],
-
-    // Number patterns (relaxed - no capital letter required)
-    numberPatterns: [
-      /^(\d)[.):\]]\s+\S/,              // 1. text, 1) text, 1: text (line start)
-      /^\[(\d)\]\s+\S/,                 // [1] text
-      /^\((\d)\)\s+\S/,                 // (1) text
-      /^[>❯►→›▸▶▷‣⁃]\s*(\d)[.)]\s+\S/, // Selection indicators: > ❯ ► → › ▸ ▶ ▷ ‣ ⁃
-      /\s{2,}(\d)[.)]\s+\S/,            // Inline options: "1. Yes  2. No" (2+ spaces before number)
-    ],
-
-    // Confidence boosters
-    confidencePatterns: [
-      /[✔✓✗✘●○]/,              // Status indicators
-      /\s+·\s+/,               // Separator dots
-      /connected|failed|pending/i, // Status words
-    ],
-
-    // Negative patterns that reduce confidence (documentation/prose indicators)
-    negativePatterns: [
-      /^(?:test|steps?|example|note|tip|warning|todo|usage|instructions?):\s*$/im, // Section headers
-      /^##?\s+/m,              // Markdown headers
-      /^\*{3,}$/m,             // Horizontal rules
-      /\bshould\b.*\bwithout\b/i, // Documentation prose ("should see... without")
-      /\beach\s+\w+\s+should\b/i, // "Each X should" documentation
-    ],
-  },
-
   // Long task detection for notifications
   longTask: {
     thresholdMs: 10000,      // 10s for testing (was 60000)
@@ -91,8 +48,9 @@ const config = {
     pingTimeout: 10000,
   },
 
-  // Claude Code command
+  // CLI commands
   claudeCommand: process.env.CLAUDE_COMMAND || 'claude',
+  geminiCommand: process.env.GEMINI_COMMAND || 'gemini',
 };
 
 module.exports = config;

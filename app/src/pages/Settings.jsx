@@ -32,6 +32,7 @@ export default function Settings() {
   const [fontSizeInput, setFontSizeInput] = useState(() => {
     return storage.get('fontSize') || '14';
   });
+  const [defaultCli, setDefaultCli] = useState(() => storage.get('default-cli') || 'claude');
   const [healthInfo, setHealthInfo] = useState(null);
   const [saving, setSaving] = useState(false);
   const [cleaning, setCleaning] = useState(false);
@@ -155,6 +156,11 @@ export default function Settings() {
     setTimeout(() => setSaving(false), 500);
   }, [relayUrlInput, setRelayUrl]);
 
+  const handleDefaultCliChange = useCallback((cli) => {
+    setDefaultCli(cli);
+    storage.set('default-cli', cli);
+  }, []);
+
   const handleSaveFontSize = useCallback(() => {
     const size = parseInt(fontSizeInput, 10);
     if (size >= 8 && size <= 24) {
@@ -191,7 +197,7 @@ export default function Settings() {
   }, []);
 
   const handleStopAllInstances = useCallback(async () => {
-    if (!confirm('Stop all Claude Code instances on the relay? This will terminate all running sessions.')) {
+    if (!confirm('Stop all CLI instances on the relay? This will terminate all running sessions.')) {
       return;
     }
     setStoppingAll(true);
@@ -386,6 +392,29 @@ export default function Settings() {
               <span className="w-8 text-center text-white">{fontSizeInput}</span>
             </div>
           </div>
+
+          {/* Default CLI */}
+          <div className="space-y-2">
+            <label className="text-sm text-gray-400">Default CLI for New Instances</label>
+            <div className="flex gap-2">
+              {['claude', 'gemini'].map((cli) => (
+                <button
+                  key={cli}
+                  onClick={() => handleDefaultCliChange(cli)}
+                  className={`flex-1 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+                    defaultCli === cli
+                      ? 'bg-purple-600 text-white'
+                      : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                  }`}
+                >
+                  {cli === 'claude' ? 'Claude' : 'Gemini'}
+                </button>
+              ))}
+            </div>
+            <p className="text-xs text-gray-500">
+              CLI tool used when creating new instances
+            </p>
+          </div>
         </div>
 
         {/* Notifications */}
@@ -505,7 +534,7 @@ export default function Settings() {
             </div>
             <div className="bg-gray-900 rounded p-2 max-h-48 overflow-y-auto font-mono text-xs">
               {notifLog.length === 0 ? (
-                <p className="text-gray-500 italic">No events yet. Waiting for options-detected or task-complete...</p>
+                <p className="text-gray-500 italic">No events yet. Waiting for task-complete...</p>
               ) : (
                 notifLog.map((entry, i) => (
                   <div key={i} className="py-1 border-b border-gray-800 last:border-0">
@@ -620,7 +649,7 @@ export default function Settings() {
             <span>{stoppingAll ? 'Stopping...' : 'Stop All Server Instances'}</span>
           </button>
           <p className="text-xs text-gray-500">
-            Stops all Claude Code PTY processes on the relay server
+            Stops all CLI PTY processes on the relay server
           </p>
 
           <button

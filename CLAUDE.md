@@ -151,7 +151,7 @@ npm run build          # Production build
 | Direction | Message Types |
 |-----------|---------------|
 | Client→Server | `input` \| `submit` \| `resize` \| `interrupt` \| `restart` \| `status` \| `set-instance` \| `ping` |
-| Server→Client | `output` \| `replay` \| `status` \| `pty-status` \| `pty-crash` \| `options-detected` \| `ready` \| `pong` |
+| Server→Client | `output` \| `replay` \| `status` \| `pty-status` \| `pty-crash` \| `ready` \| `pong` |
 
 ## Android Builds
 

@@ -14,7 +14,6 @@ export function useTerminalRelay(terminalRef) {
     sendInterrupt,
     submitInput,
     isConnected,
-    clearDetectedOptions,
     activeInstanceId,
     // Use instance-specific functions for proper routing
     addInstanceMessageListener,
@@ -82,12 +81,12 @@ export function useTerminalRelay(terminalRef) {
 
           case 'pty-status':
             if (!message.running && message.exitCode !== undefined) {
-              terminal.write(`\r\n\x1b[33m[Claude Code exited with code ${message.exitCode}]\x1b[0m\r\n`);
+              terminal.write(`\r\n\x1b[33m[CLI exited with code ${message.exitCode}]\x1b[0m\r\n`);
             }
             break;
 
           case 'pty-restarting':
-            terminal.write(`\r\n\x1b[36m[Auto-restarting Claude Code (attempt ${message.attempt})...]\x1b[0m\r\n`);
+            terminal.write(`\r\n\x1b[36m[Auto-restarting CLI (attempt ${message.attempt})...]\x1b[0m\r\n`);
             break;
 
           case 'pty-error':
@@ -150,7 +149,6 @@ export function useTerminalRelay(terminalRef) {
     sendInterrupt,
     submitInput: handleSubmitInput,
     clearAndReplay: handleClearAndReplay,
-    clearDetectedOptions,
   };
 }
 

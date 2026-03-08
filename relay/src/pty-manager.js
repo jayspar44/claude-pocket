@@ -33,8 +33,9 @@ class PtyManager {
    * Create a PTY manager instance
    * @param {string} instanceId - Unique identifier for this instance (used for buffer persistence)
    */
-  constructor(instanceId = 'default') {
+  constructor(instanceId = 'default', cliType = 'claude') {
     this.instanceId = instanceId;
+    this.cliType = cliType;
     this.ptyProcess = null;
     this.outputBuffer = [];
     this.outputBufferSize = 0;
@@ -55,17 +56,15 @@ class PtyManager {
     // Diagnostics
     this.processStartTime = 0;
     this.lastOutputLines = []; // Keep last 10 lines for crash diagnosis
-    // Option detection state
-    this.lastDetectedOptions = null;
-    this.lastOptionsSetTime = 0; // Track when options were set for grace period
-    // Idle state tracking for option detection
-    this.isIdle = false;
-    this.lastOutputTime = 0;
+    // Idle detection for long task completion
     this.idleTimer = null;
-    this.optionExpiryTimer = null;
     // Long task tracking for notifications
     this.lastUserInputTime = 0;
     this.processingStartTime = null;
+  }
+
+  get cliLabel() {
+    return this.cliType === 'gemini' ? 'Gemini CLI' : 'Claude Code';
   }
 
   setDeferredStart(workingDir) {
@@ -101,15 +100,16 @@ class PtyManager {
     // Restore buffer from disk if available
     this.loadBuffer();
 
-    logger.info({ instanceId: this.instanceId, workingDir: effectiveWorkingDir, cols: spawnCols, rows: spawnRows }, 'Starting Claude Code process');
+    logger.info({ instanceId: this.instanceId, cliType: this.cliType, workingDir: effectiveWorkingDir, cols: spawnCols, rows: spawnRows }, `Starting ${this.cliLabel} process`);
 
     try {
-      const proc = pty.spawn(config.claudeCommand, [], {
+      const command = this.cliType === 'gemini' ? config.geminiCommand : config.claudeCommand;
+      const proc = pty.spawn(command, [], {
         name: 'xterm-256color',
         cols: spawnCols,
         rows: spawnRows,
-        cwd: workingDir,
-        env: { ...config.pty.env, PWD: workingDir },
+        cwd: effectiveWorkingDir,
+        env: { ...config.pty.env, PWD: effectiveWorkingDir },
       });
 
       this.ptyProcess = proc;
@@ -153,15 +153,15 @@ class PtyManager {
 
         // Log with appropriate level based on exit type
         if (this.intentionalStop) {
-          logger.info(exitInfo, 'Claude Code process stopped intentionally');
+          logger.info(exitInfo, `${this.cliLabel} process stopped intentionally`);
         } else if (exitCode === 0) {
-          logger.info(exitInfo, 'Claude Code process exited normally');
+          logger.info(exitInfo, `${this.cliLabel} process exited normally`);
         } else {
           // Include last output lines for crash diagnosis
           logger.error({
             ...exitInfo,
             lastOutput: this.lastOutputLines,
-          }, 'Claude Code process crashed');
+          }, `${this.cliLabel} process crashed`);
 
           // Broadcast crash details to clients for debugging
           this.broadcast({
@@ -186,9 +186,9 @@ class PtyManager {
         }
       });
 
-      logger.info({ pid: proc.pid }, 'Claude Code process started');
+      logger.info({ pid: proc.pid }, `${this.cliLabel} process started`);
     } catch (error) {
-      logger.error({ error: error.message }, 'Failed to start Claude Code process');
+      logger.error({ error: error.message }, `Failed to start ${this.cliLabel} process`);
       throw error;
     }
   }
@@ -206,7 +206,7 @@ class PtyManager {
       logger.error({ attempts: this.restartAttempts }, 'Max restart attempts exceeded, giving up');
       this.broadcast({
         type: 'pty-error',
-        message: 'Claude Code crashed repeatedly. Use restart button to try again.',
+        message: `${this.cliLabel} crashed repeatedly. Use restart button to try again.`,
       });
       return;
     }
@@ -224,7 +224,7 @@ class PtyManager {
 
     setTimeout(() => {
       if (!this.ptyProcess && !this.intentionalStop) {
-        logger.info('Auto-restarting Claude Code process');
+        logger.info(`Auto-restarting ${this.cliLabel} process`);
         this.start(this.currentWorkingDir, this.lastCols, this.lastRows);
       }
     }, AUTO_RESTART_DELAY_MS);
@@ -237,7 +237,7 @@ class PtyManager {
 
   stop() {
     if (this.ptyProcess) {
-      logger.info('Stopping Claude Code process');
+      logger.info(`Stopping ${this.cliLabel} process`);
       this.intentionalStop = true; // Prevent auto-restart
       // Flush any pending batched output
       if (this.batchTimer) {
@@ -250,14 +250,10 @@ class PtyManager {
         this.saveTimer = null;
         this.saveBuffer();
       }
-      // Clear idle and expiry timers
+      // Clear idle timer
       if (this.idleTimer) {
         clearTimeout(this.idleTimer);
         this.idleTimer = null;
-      }
-      if (this.optionExpiryTimer) {
-        clearTimeout(this.optionExpiryTimer);
-        this.optionExpiryTimer = null;
       }
       this.ptyProcess.kill();
       this.ptyProcess = null;
@@ -271,10 +267,6 @@ class PtyManager {
       // Track user input time for long task detection
       this.lastUserInputTime = Date.now();
       this.processingStartTime = Date.now();
-      // Clear detected options when user sends input
-      if (this.lastDetectedOptions) {
-        this.clearDetectedOptions();
-      }
       // Broadcast status immediately so clients know processing started
       this.broadcast({ type: 'pty-status', ...this.getStatus() });
     }
@@ -350,13 +342,16 @@ class PtyManager {
   // Batch output messages to reduce WebSocket overhead
   queueOutput(data) {
     this.batchQueue += data;
-    this.lastOutputTime = Date.now();
-    this.isIdle = false;
 
-    // Schedule idle detection (will run option detection when idle)
-    this.scheduleIdleDetection();
+    // Schedule idle check for long task detection
+    if (this.idleTimer) {
+      clearTimeout(this.idleTimer);
+    }
+    this.idleTimer = setTimeout(() => {
+      this.idleTimer = null;
+      this.checkIdleState();
+    }, 800);
 
-    // If no timer running, start one
     if (!this.batchTimer) {
       this.batchTimer = setTimeout(() => this.flushBatch(), BATCH_DELAY_MS);
     }
@@ -369,28 +364,9 @@ class PtyManager {
       this.batchQueue = '';
     }
     this.batchTimer = null;
-    // Option detection now handled by idle detection in queueOutput()
-  }
-
-  scheduleIdleDetection() {
-    // Clear any pending idle timer
-    if (this.idleTimer) {
-      clearTimeout(this.idleTimer);
-    }
-
-    // Schedule idle check after threshold
-    this.idleTimer = setTimeout(() => {
-      this.idleTimer = null;
-      this.isIdle = true;
-      this.checkIdleState();
-    }, config.optionDetection.idleThresholdMs);
   }
 
   checkIdleState() {
-    // Only detect options when PTY is idle (Claude waiting for input)
-    if (!this.isIdle) return;
-
-    // Check for long task completion
     if (this.processingStartTime) {
       const processingDuration = Date.now() - this.processingStartTime;
       if (processingDuration >= config.longTask.thresholdMs) {
@@ -402,177 +378,13 @@ class PtyManager {
       }
       this.processingStartTime = null;
     }
-
-    const detection = this.detectNumberedOptions();
-
-    // Only broadcast if options changed
-    const optionsKey = detection ? detection.options.join(',') : '';
-    const lastKey = this.lastDetectedOptions ? this.lastDetectedOptions.join(',') : '';
-
-    if (optionsKey !== lastKey) {
-      this.lastDetectedOptions = detection?.options || null;
-      this.lastOptionsSetTime = detection ? Date.now() : 0; // Track when options were set
-      this.broadcast({
-        type: 'options-detected',
-        options: detection?.options || [],
-        confidence: detection?.confidence || 0,
-        context: detection?.context || 'unknown',
-        triggerPhrase: detection?.triggerPhrase || null,
-      });
-      if (detection) {
-        logger.info({ options: detection.options, confidence: detection.confidence, context: detection.context }, 'Options detected - broadcasting to clients');
-        // Schedule auto-expiry
-        this.scheduleOptionExpiry();
-      }
-    }
-
-    // Broadcast updated status (refreshes git branch after commands complete)
     this.broadcast({ type: 'pty-status', ...this.getStatus() });
-  }
-
-  scheduleOptionExpiry() {
-    // Clear any pending expiry
-    if (this.optionExpiryTimer) {
-      clearTimeout(this.optionExpiryTimer);
-    }
-
-    // Auto-clear options after timeout (user hasn't interacted)
-    this.optionExpiryTimer = setTimeout(() => {
-      this.optionExpiryTimer = null;
-      if (this.lastDetectedOptions) {
-        logger.info('Options expired, clearing');
-        this.clearDetectedOptions();
-      }
-    }, config.optionDetection.expiryMs);
-  }
-
-  detectNumberedOptions() {
-    // Get recent buffer content
-    const fullBuffer = this.getBufferedOutput();
-    const recentBuffer = fullBuffer.slice(-config.optionDetection.bufferLookback);
-
-    // Strip ANSI codes for clean parsing (CSI and OSC sequences including hyperlinks)
-    const clean = recentBuffer
-      .replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '')           // CSI sequences: ESC[...m
-      .replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, ''); // OSC sequences: ESC]...BEL or ST
-
-    // Skip if inside a code block (odd number of ```)
-    const codeBlockCount = (clean.match(/```/g) || []).length;
-    if (codeBlockCount % 2 === 1) {
-      return null;
-    }
-
-    let confidence = 0;
-    let context = 'unknown';
-    let triggerPhrase = null;
-
-    // Check for trigger phrases (high confidence)
-    for (const pattern of config.optionDetection.triggerPhrases) {
-      const match = clean.match(pattern);
-      if (match) {
-        confidence += 30;
-        context = pattern.source.includes('\\?') ? 'question' : 'menu';
-        triggerPhrase = match[0].trim();
-        break;
-      }
-    }
-
-    // Find numbered options using relaxed patterns
-    // Use global matching to find ALL numbers per line (handles inline options like "1. Yes  2. No")
-    const numbers = new Set();
-    const lines = clean.split('\n');
-
-    for (const line of lines) {
-      const trimmed = line.trim();
-      for (const pattern of config.optionDetection.numberPatterns) {
-        // Create global version of pattern to find all matches
-        const globalPattern = new RegExp(pattern.source, 'g');
-        let match;
-        while ((match = globalPattern.exec(trimmed)) !== null) {
-          const num = parseInt(match[1]);
-          if (num >= 1 && num <= 9) numbers.add(num);
-        }
-      }
-    }
-
-    if (numbers.size < 2) return null;
-
-    const sorted = Array.from(numbers).sort((a, b) => a - b);
-
-    // Boost confidence for sequential numbers
-    let isSequential = true;
-    for (let i = 1; i < sorted.length; i++) {
-      if (sorted[i] - sorted[i - 1] > 2) {
-        isSequential = false;
-        break;
-      }
-    }
-    if (isSequential && sorted[0] === 1) confidence += 20;
-
-    // Boost for status indicators
-    for (const pattern of config.optionDetection.confidencePatterns) {
-      if (pattern.test(clean)) {
-        confidence += 15;
-        if (context === 'unknown') context = 'menu';
-        break;
-      }
-    }
-
-    // Boost for capital letters after numbers (original heuristic)
-    const capitalPattern = /(?:^|\n)\s*(?:(\d)[.):\]]\s+[A-Z]|\[(\d)\]\s+[A-Z]|\((\d)\)\s+[A-Z])/gm;
-    if (capitalPattern.test(clean)) {
-      confidence += 15;
-    }
-
-    // Reduce confidence for documentation-style content
-    if (config.optionDetection.negativePatterns) {
-      for (const pattern of config.optionDetection.negativePatterns) {
-        if (pattern.test(clean)) {
-          confidence -= 20;
-          break;
-        }
-      }
-    }
-
-    // Reduce confidence if numbered items are too long (documentation prose)
-    const numberedLines = lines.filter(l => /^\s*\d[.):\]]\s+/.test(l.trim()));
-    const avgLength = numberedLines.reduce((sum, l) => sum + l.trim().length, 0) / (numberedLines.length || 1);
-    if (avgLength > 60) {
-      confidence -= 15; // Long lines suggest documentation, not menu options
-    }
-
-    // Only detect if confidence meets threshold
-    if (confidence >= config.optionDetection.confidenceThreshold) {
-      return {
-        options: sorted,
-        confidence,
-        context,
-        triggerPhrase,
-      };
-    }
-
-    return null;
-  }
-
-  clearDetectedOptions() {
-    this.lastDetectedOptions = null;
-    this.broadcast({
-      type: 'options-detected',
-      options: [],
-      confidence: 0,
-      context: 'unknown',
-      triggerPhrase: null,
-    });
-    // Clear expiry timer
-    if (this.optionExpiryTimer) {
-      clearTimeout(this.optionExpiryTimer);
-      this.optionExpiryTimer = null;
-    }
   }
 
   getStatus() {
     return {
       instanceId: this.instanceId,
+      cliType: this.cliType,
       running: this.isRunning,
       pid: this.ptyProcess?.pid || null,
       bufferSize: this.outputBufferSize,

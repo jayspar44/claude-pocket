@@ -1,4 +1,4 @@
-import { StopCircle, CornerDownLeft, FolderOpen, Camera, RotateCcw, ChevronUp, ChevronDown, ChevronLeft, ChevronRight, ArrowUp, X } from 'lucide-react';
+import { StopCircle, CornerDownLeft, FolderOpen, Camera, RotateCcw, ChevronUp, ChevronDown, ChevronLeft, ChevronRight, ArrowUp } from 'lucide-react';
 
 // Row 1: Navigation keys
 const navActions = [
@@ -22,37 +22,9 @@ const actionButtons = [
   { id: 'camera', label: 'Image', icon: Camera, color: 'bg-cyan-600 hover:bg-cyan-700' },
 ];
 
-function QuickActions({ onAction, onOpenCommands, onOpenFiles, onOpenCamera, ctrlActive = false, onCtrlToggle, disabled = false, detectedOptions = [], onDismissOptions }) {
+function QuickActions({ onAction, onOpenCommands, onOpenFiles, onOpenCamera, ctrlActive = false, onCtrlToggle, disabled = false }) {
   return (
     <div className="flex flex-col bg-gray-800 border-t border-gray-700">
-      {/* Row 0: Detected option buttons (dynamic) */}
-      {detectedOptions.length > 0 && (
-        <div className="flex items-center gap-2 px-2 py-1.5 bg-gray-900/50 border-b border-gray-700">
-          <span className="text-xs text-gray-400 shrink-0">Select:</span>
-          <div className="flex items-center gap-1.5 flex-1">
-            {detectedOptions.map((num) => (
-              <button
-                key={num}
-                onClick={() => onAction(`option-${num}`)}
-                disabled={disabled}
-                className="flex-1 max-w-16 flex items-center justify-center py-2.5 text-sm font-bold text-white rounded-lg bg-blue-600 hover:bg-blue-700 active:bg-blue-800 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                aria-label={`Select option ${num}`}
-              >
-                {num}
-              </button>
-            ))}
-          </div>
-          {/* Dismiss button */}
-          <button
-            onClick={onDismissOptions}
-            className="p-1.5 text-gray-400 hover:text-white hover:bg-gray-700 rounded transition-colors shrink-0"
-            aria-label="Dismiss options"
-          >
-            <X className="w-4 h-4" />
-          </button>
-        </div>
-      )}
-
       {/* Row 1: Navigation keys + arrows */}
       <div className="flex items-center gap-1.5 px-2 py-1.5">
         {/* Nav keys */}

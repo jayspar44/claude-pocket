@@ -1,4 +1,4 @@
-import { Wifi, WifiOff, RefreshCw, Settings, Terminal, TerminalSquare, AlertCircle, Layers, Bell, CheckCircle } from 'lucide-react';
+import { Wifi, WifiOff, RefreshCw, Settings, Terminal, TerminalSquare, AlertCircle, Layers, CheckCircle } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { useRelay } from '../contexts/RelayContext';
 
@@ -36,11 +36,11 @@ const connectionConfig = {
 };
 
 const ptyConfig = {
-  running: { color: 'bg-green-500', icon: Terminal, label: 'Claude' },
+  running: { color: 'bg-green-500', icon: Terminal },
   stopped: { color: 'bg-gray-500', icon: TerminalSquare, label: 'Stopped' },
 };
 
-function StatusBar({ connectionState, ptyStatus, workingDir, ptyError, onReconnect, onAddInstance, needsInput, taskComplete, instanceCount }) {
+function StatusBar({ connectionState, ptyStatus, workingDir, ptyError, onReconnect, onAddInstance, taskComplete, instanceCount, cliType }) {
   const { getRelayUrl } = useRelay();
   const connStatus = connectionConfig[connectionState] || connectionConfig.disconnected;
   const ConnIcon = connStatus.icon;
@@ -92,7 +92,7 @@ function StatusBar({ connectionState, ptyStatus, workingDir, ptyError, onReconne
               <div className="flex items-center gap-1.5 h-4">
                 <div className={`w-2 h-2 rounded-full shrink-0 ${ptyError ? 'bg-red-500' : ptyState.color}`} />
                 <PtyIcon className="w-4 h-4 text-gray-400 shrink-0" />
-                <span className="text-xs text-gray-400 leading-4">{ptyState.label}</span>
+                <span className="text-xs text-gray-400 leading-4">{isPtyRunning ? (cliType === 'gemini' ? 'Gemini' : 'Claude') : 'Stopped'}</span>
               </div>
             </>
           )}
@@ -138,12 +138,7 @@ function StatusBar({ connectionState, ptyStatus, workingDir, ptyError, onReconne
             </>
           )}
           {/* Status indicators - show only when single instance (tab bar hidden) */}
-          {instanceCount <= 1 && needsInput && (
-            <span className="flex items-center justify-center w-5 h-5 rounded-full bg-orange-500 animate-pulse shrink-0">
-              <Bell className="w-3 h-3 text-white" />
-            </span>
-          )}
-          {instanceCount <= 1 && !needsInput && taskComplete && (
+          {instanceCount <= 1 && taskComplete && (
             <span className="flex items-center justify-center w-5 h-5 rounded-full bg-green-500 shrink-0">
               <CheckCircle className="w-3 h-3 text-white" />
             </span>
