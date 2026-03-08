@@ -42,6 +42,17 @@ class PtyRegistry {
           'Working directory changed, will apply on restart');
         instance.pendingWorkingDir = workingDir;
       }
+      // Update cliType if provided and different (only when not running)
+      if (cliType && instance.cliType !== cliType) {
+        if (!instance.isRunning) {
+          logger.info({ instanceId: id, oldCliType: instance.cliType, newCliType: cliType },
+            'CLI type changed');
+          instance.cliType = cliType;
+        } else {
+          logger.warn({ instanceId: id, currentCliType: instance.cliType, requestedCliType: cliType },
+            'Cannot change CLI type while running - stop instance first');
+        }
+      }
       return instance;
     }
 
