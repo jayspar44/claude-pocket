@@ -32,6 +32,7 @@ export default function Settings() {
   const [fontSizeInput, setFontSizeInput] = useState(() => {
     return storage.get('fontSize') || '14';
   });
+  const [defaultCli, setDefaultCli] = useState(() => storage.get('default-cli') || 'claude');
   const [healthInfo, setHealthInfo] = useState(null);
   const [saving, setSaving] = useState(false);
   const [cleaning, setCleaning] = useState(false);
@@ -154,6 +155,11 @@ export default function Settings() {
     setRelayUrl(relayUrlInput.trim());
     setTimeout(() => setSaving(false), 500);
   }, [relayUrlInput, setRelayUrl]);
+
+  const handleDefaultCliChange = useCallback((cli) => {
+    setDefaultCli(cli);
+    storage.set('default-cli', cli);
+  }, []);
 
   const handleSaveFontSize = useCallback(() => {
     const size = parseInt(fontSizeInput, 10);
@@ -385,6 +391,29 @@ export default function Settings() {
               />
               <span className="w-8 text-center text-white">{fontSizeInput}</span>
             </div>
+          </div>
+
+          {/* Default CLI */}
+          <div className="space-y-2">
+            <label className="text-sm text-gray-400">Default CLI for New Instances</label>
+            <div className="flex gap-2">
+              {['claude', 'gemini'].map((cli) => (
+                <button
+                  key={cli}
+                  onClick={() => handleDefaultCliChange(cli)}
+                  className={`flex-1 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+                    defaultCli === cli
+                      ? 'bg-purple-600 text-white'
+                      : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                  }`}
+                >
+                  {cli === 'claude' ? 'Claude' : 'Gemini'}
+                </button>
+              ))}
+            </div>
+            <p className="text-xs text-gray-500">
+              CLI tool used when creating new instances
+            </p>
           </div>
         </div>
 
