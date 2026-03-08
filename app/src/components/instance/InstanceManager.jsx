@@ -52,6 +52,7 @@ function InstanceManager({ isOpen, onClose, editInstanceId, startInAddMode }) {
     name: '',
     workingDir: '',
     color: instanceColors[0],
+    cliType: storage.get('default-cli') || 'claude',
   });
 
   // Handle editInstanceId and startInAddMode props
@@ -64,6 +65,7 @@ function InstanceManager({ isOpen, onClose, editInstanceId, startInAddMode }) {
           name: instance.name,
           workingDir: instance.workingDir || '',
           color: instance.color,
+          cliType: instance.cliType || 'claude',
         });
         setMode('edit');
       }
@@ -73,6 +75,7 @@ function InstanceManager({ isOpen, onClose, editInstanceId, startInAddMode }) {
         name: `Instance ${instances.length + 1}`,
         workingDir: DEFAULT_WORKING_DIR_PREFIX,
         color: instanceColors[instances.length % instanceColors.length],
+        cliType: storage.get('default-cli') || 'claude',
       });
       setMode('add');
     } else if (isOpen && !editInstanceId) {
@@ -85,6 +88,7 @@ function InstanceManager({ isOpen, onClose, editInstanceId, startInAddMode }) {
       name: '',
       workingDir: '',
       color: instanceColors[instances.length % instanceColors.length],
+      cliType: storage.get('default-cli') || 'claude',
     });
     setEditingId(null);
     setMode('list');
@@ -95,6 +99,7 @@ function InstanceManager({ isOpen, onClose, editInstanceId, startInAddMode }) {
       name: `Instance ${instances.length + 1}`,
       workingDir: DEFAULT_WORKING_DIR_PREFIX,
       color: instanceColors[instances.length % instanceColors.length],
+      cliType: storage.get('default-cli') || 'claude',
     });
     setMode('add');
   }, [instances.length, instanceColors]);
@@ -105,6 +110,7 @@ function InstanceManager({ isOpen, onClose, editInstanceId, startInAddMode }) {
       name: instance.name,
       workingDir: instance.workingDir || '',
       color: instance.color,
+      cliType: instance.cliType || 'claude',
     });
     setMode('edit');
   }, []);
@@ -131,7 +137,9 @@ function InstanceManager({ isOpen, onClose, editInstanceId, startInAddMode }) {
         formData.name.trim(),
         getDefaultRelayUrl(),
         workingDir,
-        formData.color
+        formData.color,
+        null,
+        formData.cliType
       );
       switchInstance(newInstance.id);
       // Close modal after adding (switch to new instance)
@@ -143,6 +151,7 @@ function InstanceManager({ isOpen, onClose, editInstanceId, startInAddMode }) {
         name: formData.name.trim(),
         workingDir,
         color: formData.color,
+        cliType: formData.cliType,
       });
       // Go back to list after editing (don't close modal)
       resetForm();
@@ -182,6 +191,7 @@ function InstanceManager({ isOpen, onClose, editInstanceId, startInAddMode }) {
       type: 'set-instance',
       instanceId: instance.id,
       workingDir: instance.workingDir,
+      cliType: instance.cliType || 'claude',
       cols: dims.cols,
       rows: dims.rows,
     });
@@ -272,7 +282,12 @@ function InstanceManager({ isOpen, onClose, editInstanceId, startInAddMode }) {
                         onClose();
                       }}
                     >
-                      <p className="text-white font-medium truncate">{instance.name}</p>
+                      <p className="text-white font-medium truncate">
+                        {instance.name}
+                        <span className="text-xs text-gray-400 font-normal ml-1.5">
+                          {(instance.cliType || 'claude') === 'gemini' ? 'Gemini' : 'Claude'}
+                        </span>
+                      </p>
                       {instance.workingDir && (
                         <p className="text-xs text-gray-400 truncate flex items-center gap-1">
                           <FolderOpen className="w-3 h-3" />
@@ -422,6 +437,27 @@ function InstanceManager({ isOpen, onClose, editInstanceId, startInAddMode }) {
                       }`}
                       style={{ backgroundColor: color }}
                     />
+                  ))}
+                </div>
+              </div>
+
+              {/* CLI Type */}
+              <div className="space-y-2">
+                <label className="text-sm text-gray-400">CLI</label>
+                <div className="flex gap-2">
+                  {['claude', 'gemini'].map((cli) => (
+                    <button
+                      key={cli}
+                      type="button"
+                      onClick={() => setFormData(prev => ({ ...prev, cliType: cli }))}
+                      className={`flex-1 px-4 py-2.5 rounded-lg text-sm font-medium transition-colors ${
+                        formData.cliType === cli
+                          ? 'bg-blue-600 text-white'
+                          : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                      }`}
+                    >
+                      {cli === 'claude' ? 'Claude' : 'Gemini'}
+                    </button>
                   ))}
                 </div>
               </div>
