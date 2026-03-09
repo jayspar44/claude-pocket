@@ -9,11 +9,11 @@ const config = {
     cols: 50,
     rows: 24,
     cwd: null, // Set at start time from app Settings
-    env: {
-      ...process.env,
-      TERM: 'xterm-256color',
-      COLORTERM: 'truecolor',
-    },
+    env: (() => {
+      const env = { ...process.env, TERM: 'xterm-256color', COLORTERM: 'truecolor' };
+      delete env.CLAUDECODE; // Prevent "nested session" error when relay runs inside Claude
+      return env;
+    })(),
   },
 
   // Output buffer configuration (for session resumption)
