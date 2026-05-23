@@ -64,7 +64,7 @@ class PtyManager {
   }
 
   get cliLabel() {
-    return this.cliType === 'gemini' ? 'Gemini CLI' : 'Claude Code';
+    return this.cliType === 'antigravity' ? 'Antigravity CLI' : 'Claude Code';
   }
 
   setDeferredStart(workingDir) {
@@ -103,7 +103,7 @@ class PtyManager {
     logger.info({ instanceId: this.instanceId, cliType: this.cliType, workingDir: effectiveWorkingDir, cols: spawnCols, rows: spawnRows }, `Starting ${this.cliLabel} process`);
 
     try {
-      const command = this.cliType === 'gemini' ? config.geminiCommand : config.claudeCommand;
+      const command = this.cliType === 'antigravity' ? config.antigravityCommand : config.claudeCommand;
       const proc = pty.spawn(command, [], {
         name: 'xterm-256color',
         cols: spawnCols,

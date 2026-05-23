@@ -23,7 +23,7 @@ class PtyRegistry {
    * Get or create a PTY instance by ID
    * @param {string} instanceId - The instance identifier
    * @param {string} workingDir - Working directory (required for new instances)
-   * @param {string} cliType - CLI type ('claude' or 'gemini'), defaults to 'claude'
+   * @param {string} cliType - CLI type ('claude' or 'antigravity'), defaults to 'claude'
    * @returns {PtyManager} The PTY manager instance
    */
   get(instanceId, workingDir, cliType) {

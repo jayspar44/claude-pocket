@@ -50,7 +50,7 @@ const config = {
 
   // CLI commands
   claudeCommand: process.env.CLAUDE_COMMAND || 'claude',
-  geminiCommand: process.env.GEMINI_COMMAND || 'gemini',
+  antigravityCommand: process.env.ANTIGRAVITY_COMMAND || 'agy',
 };
 
 module.exports = config;
