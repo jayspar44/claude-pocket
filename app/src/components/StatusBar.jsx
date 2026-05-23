@@ -92,7 +92,7 @@ function StatusBar({ connectionState, ptyStatus, workingDir, ptyError, onReconne
               <div className="flex items-center gap-1.5 h-4">
                 <div className={`w-2 h-2 rounded-full shrink-0 ${ptyError ? 'bg-red-500' : ptyState.color}`} />
                 <PtyIcon className="w-4 h-4 text-gray-400 shrink-0" />
-                <span className="text-xs text-gray-400 leading-4">{isPtyRunning ? (cliType === 'gemini' ? 'Gemini' : 'Claude') : 'Stopped'}</span>
+                <span className="text-xs text-gray-400 leading-4">{isPtyRunning ? (cliType === 'antigravity' ? 'Antigravity' : 'Claude') : 'Stopped'}</span>
               </div>
             </>
           )}

@@ -397,7 +397,7 @@ export default function Settings() {
           <div className="space-y-2">
             <label className="text-sm text-gray-400">Default CLI for New Instances</label>
             <div className="flex gap-2">
-              {['claude', 'gemini'].map((cli) => (
+              {['claude', 'antigravity'].map((cli) => (
                 <button
                   key={cli}
                   onClick={() => handleDefaultCliChange(cli)}
@@ -407,7 +407,7 @@ export default function Settings() {
                       : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
                   }`}
                 >
-                  {cli === 'claude' ? 'Claude' : 'Gemini'}
+                  {cli === 'claude' ? 'Claude' : 'Antigravity'}
                 </button>
               ))}
             </div>

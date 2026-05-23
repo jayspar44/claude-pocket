@@ -285,7 +285,7 @@ function InstanceManager({ isOpen, onClose, editInstanceId, startInAddMode }) {
                       <p className="text-white font-medium truncate">
                         {instance.name}
                         <span className="text-xs text-gray-400 font-normal ml-1.5">
-                          {(instance.cliType || 'claude') === 'gemini' ? 'Gemini' : 'Claude'}
+                          {(instance.cliType || 'claude') === 'antigravity' ? 'Antigravity' : 'Claude'}
                         </span>
                       </p>
                       {instance.workingDir && (
@@ -445,7 +445,7 @@ function InstanceManager({ isOpen, onClose, editInstanceId, startInAddMode }) {
               <div className="space-y-2">
                 <label className="text-sm text-gray-400">CLI</label>
                 <div className="flex gap-2">
-                  {['claude', 'gemini'].map((cli) => (
+                  {['claude', 'antigravity'].map((cli) => (
                     <button
                       key={cli}
                       type="button"
@@ -456,7 +456,7 @@ function InstanceManager({ isOpen, onClose, editInstanceId, startInAddMode }) {
                           : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
                       }`}
                     >
-                      {cli === 'claude' ? 'Claude' : 'Gemini'}
+                      {cli === 'claude' ? 'Claude' : 'Antigravity'}
                     </button>
                   ))}
                 </div>

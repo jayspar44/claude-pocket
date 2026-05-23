@@ -294,7 +294,7 @@ export function InstanceProvider({ children }) {
           type: 'set-instance',
           instanceId: instance.id,
           workingDir: instance.workingDir || null,
-          cliType: instance.cliType || 'claude',
+          cliType: (instance.cliType === 'gemini' ? 'antigravity' : instance.cliType) || 'claude',
           cols: dims.cols,
           rows: dims.rows,
         }));
