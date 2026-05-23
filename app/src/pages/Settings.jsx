@@ -2,7 +2,7 @@ import { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ChevronLeft, Server, Type, Trash2, Info, Check, FileX, Bell, RotateCcw, Square, Download, ScrollText, X, Link } from 'lucide-react';
 import { useRelay } from '../hooks/useRelay';
-import { useInstance } from '../contexts/InstanceContext';
+import { useInstance, normalizeCliType } from '../contexts/InstanceContext';
 import { healthApi, filesApi, instancesApi } from '../api/relay-api';
 import { version } from '../../../version.json';
 import { versionCode } from '../../android-version.json';
@@ -32,7 +32,7 @@ export default function Settings() {
   const [fontSizeInput, setFontSizeInput] = useState(() => {
     return storage.get('fontSize') || '14';
   });
-  const [defaultCli, setDefaultCli] = useState(() => storage.get('default-cli') || 'claude');
+  const [defaultCli, setDefaultCli] = useState(() => normalizeCliType(storage.get('default-cli')) || 'claude');
   const [healthInfo, setHealthInfo] = useState(null);
   const [saving, setSaving] = useState(false);
   const [cleaning, setCleaning] = useState(false);
@@ -49,6 +49,13 @@ export default function Settings() {
   useEffect(() => {
     connectionStateRef.current = connectionState;
   }, [connectionState]);
+
+  // One-time migration: persist 'gemini' -> 'antigravity' in stored default-cli
+  useEffect(() => {
+    if (storage.get('default-cli') === 'gemini') {
+      storage.set('default-cli', 'antigravity');
+    }
+  }, []);
 
   // Fetch health and server instances periodically (visibility-aware)
   useEffect(() => {

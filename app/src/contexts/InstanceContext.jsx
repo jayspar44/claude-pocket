@@ -58,6 +58,9 @@ const DEFAULT_INSTANCE_ID = 'default';
 // Generate unique ID
 const generateId = () => `inst-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
 
+// Backward-compat migration: rename Gemini -> Antigravity (added 2026-05-23)
+export const normalizeCliType = (cliType) => cliType === 'gemini' ? 'antigravity' : cliType;
+
 // Create a new instance object
 const createInstance = (name, relayUrl, workingDir, color, useDefaultId = false, customId = null, cliType = null) => ({
   id: customId || (useDefaultId ? DEFAULT_INSTANCE_ID : generateId()),
@@ -89,7 +92,7 @@ export function InstanceProvider({ children }) {
       if (stored) {
         const parsed = JSON.parse(stored);
         if (Array.isArray(parsed) && parsed.length > 0) {
-          return parsed;
+          return parsed.map(inst => ({ ...inst, cliType: normalizeCliType(inst.cliType) }));
         }
       }
     } catch (e) {
@@ -294,7 +297,7 @@ export function InstanceProvider({ children }) {
           type: 'set-instance',
           instanceId: instance.id,
           workingDir: instance.workingDir || null,
-          cliType: (instance.cliType === 'gemini' ? 'antigravity' : instance.cliType) || 'claude',
+          cliType: instance.cliType || 'claude',
           cols: dims.cols,
           rows: dims.rows,
         }));

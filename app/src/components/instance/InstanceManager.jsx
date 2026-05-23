@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect } from 'react';
 import { X, Plus, Trash2, Edit2, Check, Server, FolderOpen, Play, Square, RotateCw, Clock } from 'lucide-react';
-import { useInstance } from '../../contexts/InstanceContext';
+import { useInstance, normalizeCliType } from '../../contexts/InstanceContext';
 import { healthApi } from '../../api/relay-api';
 import { storage } from '../../utils/storage';
 
@@ -52,7 +52,7 @@ function InstanceManager({ isOpen, onClose, editInstanceId, startInAddMode }) {
     name: '',
     workingDir: '',
     color: instanceColors[0],
-    cliType: storage.get('default-cli') || 'claude',
+    cliType: normalizeCliType(storage.get('default-cli')) || 'claude',
   });
 
   // Handle editInstanceId and startInAddMode props
@@ -75,7 +75,7 @@ function InstanceManager({ isOpen, onClose, editInstanceId, startInAddMode }) {
         name: `Instance ${instances.length + 1}`,
         workingDir: DEFAULT_WORKING_DIR_PREFIX,
         color: instanceColors[instances.length % instanceColors.length],
-        cliType: storage.get('default-cli') || 'claude',
+        cliType: normalizeCliType(storage.get('default-cli')) || 'claude',
       });
       setMode('add');
     } else if (isOpen && !editInstanceId) {
@@ -88,7 +88,7 @@ function InstanceManager({ isOpen, onClose, editInstanceId, startInAddMode }) {
       name: '',
       workingDir: '',
       color: instanceColors[instances.length % instanceColors.length],
-      cliType: storage.get('default-cli') || 'claude',
+      cliType: normalizeCliType(storage.get('default-cli')) || 'claude',
     });
     setEditingId(null);
     setMode('list');
@@ -99,7 +99,7 @@ function InstanceManager({ isOpen, onClose, editInstanceId, startInAddMode }) {
       name: `Instance ${instances.length + 1}`,
       workingDir: DEFAULT_WORKING_DIR_PREFIX,
       color: instanceColors[instances.length % instanceColors.length],
-      cliType: storage.get('default-cli') || 'claude',
+      cliType: normalizeCliType(storage.get('default-cli')) || 'claude',
     });
     setMode('add');
   }, [instances.length, instanceColors]);
