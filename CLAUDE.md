@@ -36,6 +36,29 @@ Mobile App (Capacitor/React) ◄──WebSocket──► Relay Server (Mac)
 
 **Stack:** App: React 19 + Vite 7 + Tailwind 4 + Capacitor 8 | Relay: Node 22 + Express 5 + node-pty
 
+## CLI Prerequisites
+
+The relay spawns either `claude` or `agy` (Antigravity CLI) per instance. Both must be installed and authenticated on the host before instances of that CLI type will work.
+
+**Claude Code:** Install via official installer; ensure `claude` is on `PATH`.
+
+**Antigravity CLI** (replaces Gemini CLI, deprecated 2026-06-18):
+
+```bash
+# Install on minibox (one-time)
+curl -fsSL https://antigravity.google/cli/install.sh | bash
+agy --version    # verify
+
+# First-time auth (one-time, interactive)
+ssh minibox
+agy              # prints authorization URL
+# Open URL in a browser, complete Google Sign-In
+# Token is saved to macOS keychain under the jayspar user
+# PROD and DEV folders share this auth (same user)
+```
+
+If `agy` is missing or unauthenticated, the PTY surfaces the error in the terminal view — same behavior as Claude CLI errors.
+
 ## Project Structure
 
 ```
