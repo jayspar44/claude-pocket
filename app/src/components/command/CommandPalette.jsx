@@ -1,106 +1,55 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useCallback, useMemo } from 'react';
 import { X, Search, Terminal } from 'lucide-react';
-import { commandsApi } from '../../api/relay-api';
-import { SYSTEM_COMMANDS } from '../../constants/system-commands';
-import { storage } from '../../utils/storage';
+import { useCommands } from '../../hooks/useCommands';
 
-// Get cache key for an instance
-const getCacheKey = (instanceId) => `repo-cmds${instanceId ? `-${instanceId}` : ''}`;
+const SOURCE_HEADINGS = {
+  project: 'Project',
+  user: 'User',
+  plugin: 'Plugins',
+  extension: 'Extensions',
+  builtin: 'Built-in',
+};
 
-// Get cached commands from storage for an instance
-function getCachedCommands(instanceId) {
-  return storage.getJSON(getCacheKey(instanceId), []);
-}
-
-// Save commands to storage cache for an instance
-function setCachedCommands(commands, instanceId) {
-  try {
-    storage.setJSON(getCacheKey(instanceId), commands);
-  } catch {
-    // Ignore storage errors
+function badgeText(cmd) {
+  if (cmd.source === 'plugin' || cmd.source === 'extension') {
+    return cmd.sourceLabel ? `${cmd.source}: ${cmd.sourceLabel}` : cmd.source;
   }
+  return cmd.source;
 }
 
-// Fetch with retry logic (1 retry with 2s delay)
-async function fetchWithRetry(instanceId, retries = 1) {
-  try {
-    return await commandsApi.list(instanceId);
-  } catch (err) {
-    if (retries > 0) {
-      await new Promise(r => setTimeout(r, 2000));
-      return fetchWithRetry(instanceId, retries - 1);
-    }
-    throw err;
-  }
-}
-
-function CommandPalette({ isOpen, onClose, onSelect, activeInstanceId }) {
-  // Initialize repo commands from cache for the active instance
-  const [repoCommands, setRepoCommands] = useState(() => getCachedCommands(activeInstanceId));
+function CommandPalette({ isOpen, onClose, onSelect, activeInstanceId, cliType }) {
   const [search, setSearch] = useState('');
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState(null);
+  const { commands, loading, error } = useCommands(activeInstanceId, cliType, { enabled: isOpen });
 
-  // Fetch repo commands when opened or when instance changes
-  useEffect(() => {
-    if (!isOpen) return;
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return commands;
+    return commands.filter((c) =>
+      c.name.toLowerCase().includes(q) ||
+      (c.description && c.description.toLowerCase().includes(q))
+    );
+  }, [commands, search]);
 
-    // Reset to cached commands for this instance
-    setRepoCommands(getCachedCommands(activeInstanceId));
-    setLoading(true);
-    setError(null);
-
-    fetchWithRetry(activeInstanceId)
-      .then((response) => {
-        // Mark repo commands with type: 'repo'
-        const commands = (response.data.commands || []).map(cmd => ({
-          ...cmd,
-          type: 'repo',
-        }));
-        setRepoCommands(commands);
-        setCachedCommands(commands, activeInstanceId);
-      })
-      .catch((err) => {
-        setError('Unable to load project commands');
-        console.error('Failed to load commands:', err);
-        // Keep using cached commands on error
-      })
-      .finally(() => {
-        setLoading(false);
-      });
-  }, [isOpen, activeInstanceId]);
-
-  // Filter commands based on search and group by type
-  const { filteredSystemCommands, filteredRepoCommands } = useMemo(() => {
-    const searchLower = search.trim().toLowerCase();
-
-    const filterFn = (cmd) => {
-      if (!searchLower) return true;
-      return cmd.name.toLowerCase().includes(searchLower) ||
-        (cmd.description && cmd.description.toLowerCase().includes(searchLower));
-    };
-
-    return {
-      filteredSystemCommands: SYSTEM_COMMANDS.filter(filterFn),
-      filteredRepoCommands: repoCommands.filter(filterFn),
-    };
-  }, [repoCommands, search]);
+  const grouped = useMemo(() => {
+    const out = { project: [], user: [], plugin: [], extension: [], builtin: [] };
+    for (const c of filtered) {
+      if (out[c.source]) out[c.source].push(c);
+    }
+    return out;
+  }, [filtered]);
 
   const handleSelect = useCallback((command) => {
-    // Pass command object to parent, let parent handle closing
     onSelect(command);
     setSearch('');
   }, [onSelect]);
 
   const handleKeyDown = useCallback((e) => {
-    if (e.key === 'Escape') {
-      onClose();
-    }
+    if (e.key === 'Escape') onClose();
   }, [onClose]);
 
   if (!isOpen) return null;
 
-  const hasNoResults = filteredSystemCommands.length === 0 && filteredRepoCommands.length === 0;
+  const hasNoResults = filtered.length === 0;
 
   return (
     <div
@@ -112,7 +61,6 @@ function CommandPalette({ isOpen, onClose, onSelect, activeInstanceId }) {
         className="w-full max-w-lg bg-gray-800 rounded-t-2xl max-h-[70vh] flex flex-col animate-slide-up"
         onClick={(e) => e.stopPropagation()}
       >
-        {/* Header */}
         <div className="flex items-center justify-between px-4 py-2 border-b border-gray-700">
           <div className="flex items-center gap-1.5">
             <span className="text-base font-bold text-purple-400">/</span>
@@ -126,7 +74,6 @@ function CommandPalette({ isOpen, onClose, onSelect, activeInstanceId }) {
           </button>
         </div>
 
-        {/* Search */}
         <div className="p-4 border-b border-gray-700">
           <div className="relative">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
@@ -141,85 +88,54 @@ function CommandPalette({ isOpen, onClose, onSelect, activeInstanceId }) {
           </div>
         </div>
 
-        {/* Commands list */}
         <div className="flex-1 overflow-y-auto p-2">
-          {hasNoResults ? (
+          {hasNoResults && !loading ? (
             <div className="text-center py-8 text-gray-400">
-              {search ? 'No commands found' : 'No commands available'}
+              {search ? 'No commands found' : (error || 'No commands available')}
             </div>
           ) : (
             <div className="space-y-4">
-              {/* System Commands - always shown */}
-              {filteredSystemCommands.length > 0 && (
-                <div>
-                  <h3 className="px-3 py-1 text-xs font-semibold text-gray-500 uppercase tracking-wider">
-                    System Commands
-                  </h3>
-                  <div className="space-y-1 mt-1">
-                    {filteredSystemCommands.map((command) => (
-                      <button
-                        key={`system-${command.name}`}
-                        onClick={() => handleSelect(command)}
-                        className="w-full flex items-center gap-2 p-2 rounded-lg hover:bg-gray-700 transition-colors text-left"
-                      >
-                        <div className="flex-shrink-0 w-6 h-6 flex items-center justify-center bg-gray-600/30 rounded-lg">
-                          <Terminal className="w-3.5 h-3.5 text-gray-400" />
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <p className="text-white font-medium">/{command.name}</p>
-                          {command.description && (
-                            <p className="text-sm text-gray-400 truncate">
-                              {command.description}
-                            </p>
-                          )}
-                        </div>
-                      </button>
-                    ))}
+              {Object.entries(grouped).map(([source, list]) => (
+                list.length > 0 && (
+                  <div key={source}>
+                    <h3 className="px-3 py-1 text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                      {SOURCE_HEADINGS[source]}
+                    </h3>
+                    <div className="space-y-1 mt-1">
+                      {list.map((command) => (
+                        <button
+                          key={`${source}-${command.name}`}
+                          onClick={() => handleSelect(command)}
+                          className="w-full flex items-center gap-2 p-2 rounded-lg hover:bg-gray-700 transition-colors text-left"
+                        >
+                          <div className="flex-shrink-0 w-6 h-6 flex items-center justify-center bg-gray-600/30 rounded-lg">
+                            <Terminal className="w-3.5 h-3.5 text-gray-400" />
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2">
+                              <p className="text-white font-medium">/{command.name}</p>
+                              {command.argumentHint && (
+                                <span className="text-xs text-gray-500">{command.argumentHint}</span>
+                              )}
+                              <span className="ml-auto text-[10px] text-gray-500 px-1.5 py-0.5 bg-gray-700 rounded">
+                                {badgeText(command)}
+                              </span>
+                            </div>
+                            {command.description && (
+                              <p className="text-sm text-gray-400 truncate">{command.description}</p>
+                            )}
+                          </div>
+                        </button>
+                      ))}
+                    </div>
                   </div>
+                )
+              ))}
+              {loading && (
+                <div className="flex items-center justify-center py-2">
+                  <div className="w-4 h-4 border-2 border-purple-500 border-t-transparent rounded-full animate-spin" />
                 </div>
               )}
-
-              {/* Project Commands - show loading, error, or commands */}
-              <div>
-                <h3 className="px-3 py-1 text-xs font-semibold text-gray-500 uppercase tracking-wider">
-                  Project Commands
-                </h3>
-                {loading && filteredRepoCommands.length === 0 ? (
-                  <div className="flex items-center justify-center py-4">
-                    <div className="w-5 h-5 border-2 border-purple-500 border-t-transparent rounded-full animate-spin" />
-                  </div>
-                ) : error && filteredRepoCommands.length === 0 ? (
-                  <div className="px-3 py-2 text-sm text-gray-500">
-                    {error}
-                  </div>
-                ) : filteredRepoCommands.length > 0 ? (
-                  <div className="space-y-1 mt-1">
-                    {filteredRepoCommands.map((command) => (
-                      <button
-                        key={`repo-${command.name}`}
-                        onClick={() => handleSelect(command)}
-                        className="w-full flex items-center gap-2 p-2 rounded-lg hover:bg-gray-700 transition-colors text-left"
-                      >
-                        <div className="flex-shrink-0 w-6 h-6 flex items-center justify-center bg-purple-600/20 rounded-lg">
-                          <span className="text-sm font-bold text-purple-400">/</span>
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <p className="text-white font-medium">/{command.name}</p>
-                          {command.description && (
-                            <p className="text-sm text-gray-400 truncate">
-                              {command.description}
-                            </p>
-                          )}
-                        </div>
-                      </button>
-                    ))}
-                  </div>
-                ) : (
-                  <div className="px-3 py-2 text-sm text-gray-500">
-                    No project commands found
-                  </div>
-                )}
-              </div>
             </div>
           )}
         </div>

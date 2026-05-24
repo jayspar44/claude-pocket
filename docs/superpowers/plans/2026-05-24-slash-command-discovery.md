@@ -47,7 +47,7 @@ relay/
 ### Relay (modified)
 
 - `relay/src/routes/commands.js` — slimmed down to call `discovery.js`
-- `relay/package.json` — add `"test": "node --test test/"` script
+- `relay/package.json` — add `"test": "node --test 'test/**/*.test.js'"` script
 
 ### App (new files)
 
@@ -81,8 +81,10 @@ app/src/
 Edit `relay/package.json`. Replace the `"test"` line in `scripts`:
 
 ```json
-"test": "node --test test/"
+"test": "node --test 'test/**/*.test.js'"
 ```
+
+(Node 22's `--test` with a directory argument tries to load that path as a module rather than walking it; the explicit glob is required.)
 
 - [ ] **Step 2: Create the test directory**
 

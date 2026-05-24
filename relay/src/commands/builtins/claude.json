@@ -1,0 +1,548 @@
+[
+  {
+    "name": "add-dir",
+    "argumentHint": "<path>",
+    "description": "Add a working directory for file access during the current session.",
+    "isSkill": false
+  },
+  {
+    "name": "agents",
+    "argumentHint": null,
+    "description": "Manage agent configurations",
+    "isSkill": false
+  },
+  {
+    "name": "autofix-pr",
+    "argumentHint": "[prompt]",
+    "description": "Spawn a Claude Code on the web session that watches the current branch's PR and pushes fixes when CI fails or reviewers leave comments.",
+    "isSkill": false
+  },
+  {
+    "name": "background",
+    "argumentHint": "[prompt]",
+    "description": "Detach the current session to run as a background agent and free this terminal.",
+    "isSkill": false
+  },
+  {
+    "name": "batch",
+    "argumentHint": "<instruction>",
+    "description": "Orchestrate large-scale changes across a codebase in parallel.",
+    "isSkill": true
+  },
+  {
+    "name": "branch",
+    "argumentHint": "[name]",
+    "description": "Create a branch of the current conversation at this point.",
+    "isSkill": false
+  },
+  {
+    "name": "btw",
+    "argumentHint": "<question>",
+    "description": "Ask a quick side question without adding to the conversation",
+    "isSkill": false
+  },
+  {
+    "name": "chrome",
+    "argumentHint": null,
+    "description": "Configure Claude in Chrome settings",
+    "isSkill": false
+  },
+  {
+    "name": "claude-api",
+    "argumentHint": "[migrate\\|managed-agents-onboard]",
+    "description": "Load Claude API reference material for your project's language (Python, TypeScript, Java, Go, Ruby, C#, PHP, or cURL) and Managed Agents reference.",
+    "isSkill": true
+  },
+  {
+    "name": "clear",
+    "argumentHint": "[name]",
+    "description": "Start a new conversation with empty context.",
+    "isSkill": false
+  },
+  {
+    "name": "code-review",
+    "argumentHint": "[low\\|medium\\|high\\|xhigh\\|max] [--comment] [target]",
+    "description": "Review the current diff for correctness bugs and report findings without editing files.",
+    "isSkill": true
+  },
+  {
+    "name": "color",
+    "argumentHint": "[color\\|default]",
+    "description": "Set the prompt bar color for the current session.",
+    "isSkill": false
+  },
+  {
+    "name": "compact",
+    "argumentHint": "[instructions]",
+    "description": "Free up context by summarizing the conversation so far.",
+    "isSkill": false
+  },
+  {
+    "name": "config",
+    "argumentHint": null,
+    "description": "Open the Settings interface to adjust theme, model, output style, and other preferences.",
+    "isSkill": false
+  },
+  {
+    "name": "context",
+    "argumentHint": "[all]",
+    "description": "Visualize current context usage as a colored grid.",
+    "isSkill": false
+  },
+  {
+    "name": "copy",
+    "argumentHint": "[N]",
+    "description": "Copy the last assistant response to clipboard.",
+    "isSkill": false
+  },
+  {
+    "name": "cost",
+    "argumentHint": null,
+    "description": "Alias for /usage",
+    "isSkill": false
+  },
+  {
+    "name": "debug",
+    "argumentHint": "[description]",
+    "description": "Enable debug logging for the current session and troubleshoot issues by reading the session debug log.",
+    "isSkill": true
+  },
+  {
+    "name": "desktop",
+    "argumentHint": null,
+    "description": "Continue the current session in the Claude Code Desktop app.",
+    "isSkill": false
+  },
+  {
+    "name": "diff",
+    "argumentHint": null,
+    "description": "Open an interactive diff viewer showing uncommitted changes and per-turn diffs.",
+    "isSkill": false
+  },
+  {
+    "name": "doctor",
+    "argumentHint": null,
+    "description": "Diagnose and verify your Claude Code installation and settings.",
+    "isSkill": false
+  },
+  {
+    "name": "effort",
+    "argumentHint": "[level\\|auto]",
+    "description": "Set the model effort level.",
+    "isSkill": false
+  },
+  {
+    "name": "exit",
+    "argumentHint": null,
+    "description": "Exit the CLI.",
+    "isSkill": false
+  },
+  {
+    "name": "export",
+    "argumentHint": "[filename]",
+    "description": "Export the current conversation as plain text.",
+    "isSkill": false
+  },
+  {
+    "name": "fast",
+    "argumentHint": "[on\\|off]",
+    "description": "Toggle fast mode on or off",
+    "isSkill": false
+  },
+  {
+    "name": "feedback",
+    "argumentHint": "[report]",
+    "description": "Submit feedback, report a bug, or share your conversation.",
+    "isSkill": false
+  },
+  {
+    "name": "fewer-permission-prompts",
+    "argumentHint": null,
+    "description": "Scan your transcripts for common read-only Bash and MCP tool calls, then add a prioritized allowlist to project .claude/settings.json to reduce permission prompts",
+    "isSkill": true
+  },
+  {
+    "name": "focus",
+    "argumentHint": null,
+    "description": "Toggle the focus view, which shows only your last prompt, a one-line tool-call summary with edit diffstats, and the final response.",
+    "isSkill": false
+  },
+  {
+    "name": "goal",
+    "argumentHint": "[condition\\|clear]",
+    "description": "Set a goal: Claude keeps working across turns until the condition is met.",
+    "isSkill": false
+  },
+  {
+    "name": "heapdump",
+    "argumentHint": null,
+    "description": "Write a JavaScript heap snapshot and a memory breakdown to ~/Desktop, or your home directory on Linux without a Desktop folder, for diagnosing high memory usage.",
+    "isSkill": false
+  },
+  {
+    "name": "help",
+    "argumentHint": null,
+    "description": "Show help and available commands",
+    "isSkill": false
+  },
+  {
+    "name": "hooks",
+    "argumentHint": null,
+    "description": "View hook configurations for tool events",
+    "isSkill": false
+  },
+  {
+    "name": "ide",
+    "argumentHint": null,
+    "description": "Manage IDE integrations and show status",
+    "isSkill": false
+  },
+  {
+    "name": "init",
+    "argumentHint": null,
+    "description": "Initialize project with a CLAUDE.md guide.",
+    "isSkill": false
+  },
+  {
+    "name": "insights",
+    "argumentHint": null,
+    "description": "Generate a report analyzing your Claude Code sessions, including project areas, interaction patterns, and friction points",
+    "isSkill": false
+  },
+  {
+    "name": "install-github-app",
+    "argumentHint": null,
+    "description": "Set up the Claude GitHub Actions app for a repository.",
+    "isSkill": false
+  },
+  {
+    "name": "install-slack-app",
+    "argumentHint": null,
+    "description": "Install the Claude Slack app.",
+    "isSkill": false
+  },
+  {
+    "name": "keybindings",
+    "argumentHint": null,
+    "description": "Open or create your keybindings configuration file",
+    "isSkill": false
+  },
+  {
+    "name": "login",
+    "argumentHint": null,
+    "description": "Sign in to your Anthropic account",
+    "isSkill": false
+  },
+  {
+    "name": "logout",
+    "argumentHint": null,
+    "description": "Sign out from your Anthropic account",
+    "isSkill": false
+  },
+  {
+    "name": "loop",
+    "argumentHint": "[interval] [prompt]",
+    "description": "Run a prompt repeatedly while the session stays open.",
+    "isSkill": true
+  },
+  {
+    "name": "mcp",
+    "argumentHint": null,
+    "description": "Manage MCP server connections and OAuth authentication",
+    "isSkill": false
+  },
+  {
+    "name": "memory",
+    "argumentHint": null,
+    "description": "Edit CLAUDE.md memory files, enable or disable auto-memory, and view auto-memory entries",
+    "isSkill": false
+  },
+  {
+    "name": "mobile",
+    "argumentHint": null,
+    "description": "Show QR code to download the Claude mobile app.",
+    "isSkill": false
+  },
+  {
+    "name": "model",
+    "argumentHint": "[model]",
+    "description": "Set the AI model for the current session.",
+    "isSkill": false
+  },
+  {
+    "name": "passes",
+    "argumentHint": null,
+    "description": "Share a free week of Claude Code with friends.",
+    "isSkill": false
+  },
+  {
+    "name": "permissions",
+    "argumentHint": null,
+    "description": "Manage allow, ask, and deny rules for tool permissions.",
+    "isSkill": false
+  },
+  {
+    "name": "plan",
+    "argumentHint": "[description]",
+    "description": "Enter plan mode directly from the prompt.",
+    "isSkill": false
+  },
+  {
+    "name": "plugin",
+    "argumentHint": null,
+    "description": "Manage Claude Code plugins",
+    "isSkill": false
+  },
+  {
+    "name": "powerup",
+    "argumentHint": null,
+    "description": "Discover Claude Code features through quick interactive lessons with animated demos",
+    "isSkill": false
+  },
+  {
+    "name": "pr-comments",
+    "argumentHint": "[PR]",
+    "description": "{/* max-version: 2.1.90 */}Removed in v2.1.91.",
+    "isSkill": false
+  },
+  {
+    "name": "privacy-settings",
+    "argumentHint": null,
+    "description": "View and update your privacy settings.",
+    "isSkill": false
+  },
+  {
+    "name": "radio",
+    "argumentHint": null,
+    "description": "Open Claude FM lo-fi radio in your browser.",
+    "isSkill": false
+  },
+  {
+    "name": "recap",
+    "argumentHint": null,
+    "description": "Generate a one-line summary of the current session on demand.",
+    "isSkill": false
+  },
+  {
+    "name": "release-notes",
+    "argumentHint": null,
+    "description": "View the changelog in an interactive version picker.",
+    "isSkill": false
+  },
+  {
+    "name": "reload-plugins",
+    "argumentHint": null,
+    "description": "Reload all active plugins to apply pending changes without restarting.",
+    "isSkill": false
+  },
+  {
+    "name": "remote-control",
+    "argumentHint": null,
+    "description": "Make this session available for remote control from claude.ai.",
+    "isSkill": false
+  },
+  {
+    "name": "remote-env",
+    "argumentHint": null,
+    "description": "Configure the default remote environment for web sessions started with --remote",
+    "isSkill": false
+  },
+  {
+    "name": "rename",
+    "argumentHint": "[name]",
+    "description": "Rename the current session and show the name on the prompt bar.",
+    "isSkill": false
+  },
+  {
+    "name": "resume",
+    "argumentHint": "[session]",
+    "description": "Resume a conversation by ID or name, or open the session picker.",
+    "isSkill": false
+  },
+  {
+    "name": "review",
+    "argumentHint": "[PR]",
+    "description": "Review a pull request locally in your current session.",
+    "isSkill": false
+  },
+  {
+    "name": "rewind",
+    "argumentHint": null,
+    "description": "Rewind the conversation and/or code to a previous point, or summarize from a selected message.",
+    "isSkill": false
+  },
+  {
+    "name": "run",
+    "argumentHint": null,
+    "description": "Launch and drive your project's app to see a change working in the running app, not just in tests.",
+    "isSkill": true
+  },
+  {
+    "name": "run-skill-generator",
+    "argumentHint": null,
+    "description": "Teach /run and /verify how to build, launch, and drive your project's app from a clean environment by writing a per-project skill. {/* min-version: 2.1.145 */}Requires Claude Code v2.1.145 or later",
+    "isSkill": true
+  },
+  {
+    "name": "sandbox",
+    "argumentHint": null,
+    "description": "Toggle sandbox mode.",
+    "isSkill": false
+  },
+  {
+    "name": "schedule",
+    "argumentHint": "[description]",
+    "description": "Create, update, list, or run routines, which execute on Anthropic-managed cloud infrastructure.",
+    "isSkill": false
+  },
+  {
+    "name": "scroll-speed",
+    "argumentHint": null,
+    "description": "Adjust mouse wheel scroll speed interactively, with a ruler you can scroll while the dialog is open to preview the change.",
+    "isSkill": false
+  },
+  {
+    "name": "security-review",
+    "argumentHint": null,
+    "description": "Analyze pending changes on the current branch for security vulnerabilities.",
+    "isSkill": false
+  },
+  {
+    "name": "setup-bedrock",
+    "argumentHint": null,
+    "description": "Configure Amazon Bedrock authentication, region, and model pins through an interactive wizard.",
+    "isSkill": false
+  },
+  {
+    "name": "setup-vertex",
+    "argumentHint": null,
+    "description": "Configure Google Vertex AI authentication, project, region, and model pins through an interactive wizard.",
+    "isSkill": false
+  },
+  {
+    "name": "skills",
+    "argumentHint": null,
+    "description": "List available skills.",
+    "isSkill": false
+  },
+  {
+    "name": "stats",
+    "argumentHint": null,
+    "description": "Alias for /usage.",
+    "isSkill": false
+  },
+  {
+    "name": "status",
+    "argumentHint": null,
+    "description": "Open the Settings interface (Status tab) showing version, model, account, and connectivity.",
+    "isSkill": false
+  },
+  {
+    "name": "statusline",
+    "argumentHint": null,
+    "description": "Configure Claude Code's status line.",
+    "isSkill": false
+  },
+  {
+    "name": "stickers",
+    "argumentHint": null,
+    "description": "Order Claude Code stickers",
+    "isSkill": false
+  },
+  {
+    "name": "stop",
+    "argumentHint": null,
+    "description": "Stop the current background session.",
+    "isSkill": false
+  },
+  {
+    "name": "tasks",
+    "argumentHint": null,
+    "description": "List and manage background tasks.",
+    "isSkill": false
+  },
+  {
+    "name": "team-onboarding",
+    "argumentHint": null,
+    "description": "Generate a team onboarding guide from your Claude Code usage history.",
+    "isSkill": false
+  },
+  {
+    "name": "teleport",
+    "argumentHint": null,
+    "description": "Pull a Claude Code on the web session into this terminal: opens a picker, then fetches the branch and conversation.",
+    "isSkill": false
+  },
+  {
+    "name": "terminal-setup",
+    "argumentHint": null,
+    "description": "Configure terminal keybindings for Shift+Enter and other shortcuts.",
+    "isSkill": false
+  },
+  {
+    "name": "theme",
+    "argumentHint": null,
+    "description": "Change the color theme.",
+    "isSkill": false
+  },
+  {
+    "name": "tui",
+    "argumentHint": "[default\\|fullscreen]",
+    "description": "Set the terminal UI renderer and relaunch into it with your conversation intact. fullscreen enables the flicker-free alt-screen renderer.",
+    "isSkill": false
+  },
+  {
+    "name": "ultraplan",
+    "argumentHint": "<prompt>",
+    "description": "Draft a plan in an ultraplan session, review it in your browser, then execute remotely or send it back to your terminal",
+    "isSkill": false
+  },
+  {
+    "name": "ultrareview",
+    "argumentHint": "[PR]",
+    "description": "Run a deep, multi-agent code review in a cloud sandbox with ultrareview.",
+    "isSkill": false
+  },
+  {
+    "name": "upgrade",
+    "argumentHint": null,
+    "description": "Open the upgrade page to switch to a higher plan tier",
+    "isSkill": false
+  },
+  {
+    "name": "usage",
+    "argumentHint": null,
+    "description": "Show session cost, plan usage limits, and activity stats.",
+    "isSkill": false
+  },
+  {
+    "name": "usage-credits",
+    "argumentHint": null,
+    "description": "Configure usage credits to keep working when you hit a limit.",
+    "isSkill": false
+  },
+  {
+    "name": "verify",
+    "argumentHint": null,
+    "description": "Confirm a code change does what it should by building your project's app, running it, and observing the result, rather than relying on tests or type checks.",
+    "isSkill": true
+  },
+  {
+    "name": "vim",
+    "argumentHint": null,
+    "description": "{/* max-version: 2.1.91 */}Removed in v2.1.92.",
+    "isSkill": false
+  },
+  {
+    "name": "voice",
+    "argumentHint": "[hold\\|tap\\|off]",
+    "description": "Toggle voice dictation, or enable it in a specific mode.",
+    "isSkill": false
+  },
+  {
+    "name": "web-setup",
+    "argumentHint": null,
+    "description": "Connect your GitHub account to Claude Code on the web using your local gh CLI credentials. /schedule prompts for this automatically if GitHub isn't connected",
+    "isSkill": false
+  }
+]

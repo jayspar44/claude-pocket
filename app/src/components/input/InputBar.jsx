@@ -2,7 +2,7 @@ import { useState, useRef, useCallback, useEffect, forwardRef, useImperativeHand
 import { Send } from 'lucide-react';
 import { useCommandHistory } from '../../hooks/useCommandHistory';
 
-const InputBar = forwardRef(function InputBar({ onSend, disabled = false, placeholder = 'Type a message...' }, ref) {
+const InputBar = forwardRef(function InputBar({ onSend, onStateChange, disabled = false, placeholder = 'Type a message...' }, ref) {
   const [value, setValue] = useState('');
   const textareaRef = useRef(null);
   const { addToHistory, navigateHistory } = useCommandHistory();
@@ -28,6 +28,17 @@ const InputBar = forwardRef(function InputBar({ onSend, disabled = false, placeh
     focus: () => textareaRef.current?.focus(),
     clear: () => setValue(''),
     getValue: () => value,
+    setValueAndCaret: ({ newValue, newCaret }) => {
+      setValue(newValue);
+      // Defer caret update until after React renders the new value
+      requestAnimationFrame(() => {
+        if (textareaRef.current) {
+          textareaRef.current.selectionStart = newCaret;
+          textareaRef.current.selectionEnd = newCaret;
+          textareaRef.current.focus();
+        }
+      });
+    },
   }), [value]);
 
   const handleSubmit = useCallback(() => {
@@ -79,13 +90,21 @@ const InputBar = forwardRef(function InputBar({ onSend, disabled = false, placeh
   }, [handleSubmit, navigateHistory, value]);
 
   const handleInput = useCallback((e) => {
-    setValue(e.target.value);
+    const newValue = e.target.value;
+    setValue(newValue);
+    onStateChange?.({ value: newValue, caret: e.target.selectionStart });
 
     // Auto-resize textarea
     const textarea = e.target;
     textarea.style.height = 'auto';
     textarea.style.height = Math.min(textarea.scrollHeight, 120) + 'px';
-  }, []);
+  }, [onStateChange]);
+
+  const reportCaret = useCallback(() => {
+    if (textareaRef.current) {
+      onStateChange?.({ value, caret: textareaRef.current.selectionStart });
+    }
+  }, [value, onStateChange]);
 
   return (
     <div className="flex items-end gap-2 px-3 pt-3 pb-3 bg-gray-800 border-t border-gray-700 safe-area-bottom">
@@ -94,6 +113,8 @@ const InputBar = forwardRef(function InputBar({ onSend, disabled = false, placeh
         value={value}
         onChange={handleInput}
         onKeyDown={handleKeyDown}
+        onSelect={reportCaret}
+        onClick={reportCaret}
         disabled={disabled}
         placeholder={placeholder}
         rows={1}
