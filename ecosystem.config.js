@@ -2,7 +2,7 @@ const path = require('path');
 
 // Ensure ~/.local/bin is in PATH for claude command
 const HOME = process.env.HOME || '/Users/jayspar';
-const PATH = `${HOME}/.local/bin:${HOME}/.npm-global/bin:/opt/homebrew/bin:/usr/local/bin:${process.env.PATH || ''}`;
+const PATH = `${HOME}/.local/bin:/opt/homebrew/bin:/usr/local/bin:${process.env.PATH || ''}`;
 
 // Auto-detect environment from folder name
 const PROJECT_DIR = path.basename(process.cwd());

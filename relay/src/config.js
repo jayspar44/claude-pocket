@@ -11,7 +11,8 @@ const config = {
     cwd: null, // Set at start time from app Settings
     env: (() => {
       const env = { ...process.env, TERM: 'xterm-256color', COLORTERM: 'truecolor' };
-      delete env.CLAUDECODE; // Prevent "nested session" error when relay runs inside Claude
+      // Strip CLAUDECODE to prevent "nested session" error when relay runs inside Claude
+      delete env.CLAUDECODE;
       return env;
     })(),
   },
