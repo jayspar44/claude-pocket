@@ -2,6 +2,29 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+## [1.0.0](https://github.com/jayspar44/claude-pocket/compare/v0.5.4...v1.0.0) (2026-05-24)
+
+
+### Features
+
+* add CLI type picker to instance manager ([831341a](https://github.com/jayspar44/claude-pocket/commit/831341a8d821910f0efa8b9245f325036f9986cc))
+* add cliType to instance model and default CLI setting ([a8af3a0](https://github.com/jayspar44/claude-pocket/commit/a8af3a05044236e439d75dbb681011dbc4e825d9))
+* add geminiCommand to relay config ([ae95e71](https://github.com/jayspar44/claude-pocket/commit/ae95e71e6c6d037aa333b375764e7d3ec84be7d9))
+* auto-update Antigravity CLI before PTY start (symmetric with Claude) ([62e07d0](https://github.com/jayspar44/claude-pocket/commit/62e07d099decb60a80ab5f3eee094cb006aaa834))
+* make PtyManager accept and use cliType parameter ([38d0391](https://github.com/jayspar44/claude-pocket/commit/38d0391c6a3863cfd98921418ebe400c8b4f814d))
+* multi-CLI support (Claude + Gemini) ([8751dd3](https://github.com/jayspar44/claude-pocket/commit/8751dd3bd707d65a74a25cc31cbfa3cee65dc17a))
+* pass cliType through PtyRegistry to PtyManager ([a64e0f4](https://github.com/jayspar44/claude-pocket/commit/a64e0f4681fbc2da32aff460f466acb177d7c1b1))
+* pass cliType through WebSocket and REST API ([f9a743e](https://github.com/jayspar44/claude-pocket/commit/f9a743e51717f0dd385b48b40d0ea4d1615f278c))
+* show CLI type dynamically in status bar ([2acd818](https://github.com/jayspar44/claude-pocket/commit/2acd8185f286d62b1376bb31fc41dbbae454f7d7))
+
+
+### Bug Fixes
+
+* centralize Gemini -> Antigravity cliType migration ([6a7fd6e](https://github.com/jayspar44/claude-pocket/commit/6a7fd6ef2941b1df340f28f6b6b62b89b8fb6c01))
+* strip CLAUDECODE env var from PTY spawn environment ([0b3a52a](https://github.com/jayspar44/claude-pocket/commit/0b3a52a8ccfae2bb0ca78a52b9ee455daff55450))
+* update cliType on existing stopped instances ([90e2b8e](https://github.com/jayspar44/claude-pocket/commit/90e2b8ea473435156b73ce1ce27876fb923ccf28))
+* use effectiveWorkingDir for pty.spawn cwd ([049bf61](https://github.com/jayspar44/claude-pocket/commit/049bf61d40d6cc6a6fd18804bf57f1a9163be6c6))
+
 ### [0.5.4](https://github.com/jayspar44/claude-pocket/compare/v0.5.3...v0.5.4) (2026-02-26)
 
 ### [0.5.3](https://github.com/jayspar44/claude-pocket/compare/v0.5.0...v0.5.3) (2026-02-26)
