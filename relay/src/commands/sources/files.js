@@ -48,7 +48,7 @@ async function walkSkillDir(rootDir) {
   return out;
 }
 
-function buildCommand({ absPath, namespaceSegments, baseName }, { source, sourceLabel, isSkill }, parsed) {
+function buildCommand({ namespaceSegments, baseName }, { source, sourceLabel, isSkill }, parsed) {
   const namespace = namespaceSegments.length ? namespaceSegments.join(':') : null;
   const name = namespace ? `${namespace}:${baseName}` : baseName;
   return {
