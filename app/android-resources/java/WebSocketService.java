@@ -12,6 +12,12 @@ import android.util.Log;
 
 import androidx.core.app.NotificationCompat;
 
+// Explicit R import: when this template is copied into a flavor's package
+// (e.g. com.claudecode.pocket.dev), R is still generated at the build.gradle
+// namespace (com.claudecode.pocket), so same-package resolution fails without
+// this import. Redundant-but-harmless for the prod variant.
+import com.claudecode.pocket.R;
+
 /**
  * Foreground service to keep the WebSocket connection alive when app is backgrounded.
  * Shows a persistent notification while connected to the relay server.

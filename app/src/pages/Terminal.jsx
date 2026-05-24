@@ -3,6 +3,7 @@ import { TerminalView } from '../components/terminal';
 import { useTerminalRelay, useRelay } from '../hooks/useRelay';
 import { useViewportHeight } from '../hooks/useViewportHeight';
 import InputBar from '../components/input/InputBar';
+import CommandAutocomplete from '../components/input/CommandAutocomplete';
 import QuickActions from '../components/input/QuickActions';
 import StatusBar from '../components/StatusBar';
 import { CommandPalette } from '../components/command';
@@ -57,6 +58,8 @@ function Terminal() {
   const [showInstanceManager, setShowInstanceManager] = useState(false);
   const [editInstanceId, setEditInstanceId] = useState(null);
   const [startInAddMode, setStartInAddMode] = useState(false);
+
+  const [inputState, setInputState] = useState({ value: '', caret: 0 });
 
   // Ctrl modifier state
   const [ctrlActive, setCtrlActive] = useState(false);
@@ -232,9 +235,21 @@ function Terminal() {
       />
 
       {/* Input Bar */}
+      <CommandAutocomplete
+        value={inputState.value}
+        caret={inputState.caret}
+        activeInstanceId={activeInstanceId}
+        cliType={activeInstance?.cliType || 'claude'}
+        onInsert={({ newValue, newCaret }) => {
+          inputBarRef.current?.setValueAndCaret({ newValue, newCaret });
+          setInputState({ value: newValue, caret: newCaret });
+        }}
+        disabled={connectionState !== 'connected'}
+      />
       <InputBar
         ref={inputBarRef}
         onSend={handleSend}
+        onStateChange={setInputState}
         disabled={connectionState !== 'connected'}
         placeholder={connectionState === 'connected' ? 'Type a message...' : 'Connecting...'}
       />
@@ -245,6 +260,7 @@ function Terminal() {
         onClose={() => setShowCommands(false)}
         onSelect={handleCommandSelect}
         activeInstanceId={activeInstanceId}
+        cliType={activeInstance?.cliType || 'claude'}
       />
 
       <MobileFilePicker

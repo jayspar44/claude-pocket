@@ -89,6 +89,43 @@ if (!VALID_FLAVORS.includes(flavor)) {
   process.exit(1);
 }
 
+// Defensive guard: refuse to build if the project folder doesn't match the flavor.
+// Vite picks .env.production from cwd, and the prod/dev folders ship different
+// env files. A mismatched build compiles fine but ends up pointing at the wrong
+// relay. The convention is:
+//   claude-pocket/      -> prod
+//   claude-pocket-dev/  -> dev
+// `local` is permissive (used for ad-hoc builds against a localhost relay).
+{
+  const projectFolder = join(frontendDir, '..').split('/').filter(Boolean).pop();
+  const isDevFolder = projectFolder.endsWith('-dev');
+  const expectedFolder = flavor === 'prod'
+    ? 'claude-pocket'
+    : flavor === 'dev'
+      ? 'claude-pocket-dev'
+      : null;
+  const mismatch =
+    (flavor === 'prod' && isDevFolder) ||
+    (flavor === 'dev' && !isDevFolder);
+  if (mismatch) {
+    console.error('');
+    console.error(`${colors.red}========================================${colors.reset}`);
+    console.error(`${colors.red}  Wrong folder for flavor: ${flavor}${colors.reset}`);
+    console.error(`${colors.red}========================================${colors.reset}`);
+    console.error(`  Current folder: ${projectFolder}`);
+    console.error(`  Expected:       ${expectedFolder}`);
+    console.error('');
+    console.error(`  Vite reads .env.production from this folder. Building ${flavor}`);
+    console.error(`  here would produce an AAB pointing at the wrong relay AND`);
+    console.error(`  bump the wrong android-version.json counter.`);
+    console.error('');
+    console.error(`  cd /Users/jayspar/Documents/projects/${expectedFolder}/app`);
+    console.error(`  then re-run: node scripts/build-aab.js ${flavor}`);
+    console.error('');
+    process.exit(1);
+  }
+}
+
 // Output path based on flavor
 const AAB_OUTPUT_PATH = process.env.AAB_OUTPUT_PATH || join(BUILDS_BASE, flavor === 'prod' ? 'prod' : 'dev');
 
@@ -140,6 +177,7 @@ function printBanner() {
 
 // Save original config for restoration
 let originalConfig;
+let originalBuildGradle;
 
 // Path to build.gradle and version tracking file
 const buildGradlePath = join(androidDir, 'app', 'build.gradle');
@@ -164,15 +202,26 @@ function updateVersionTracking() {
   return newVersionCode;
 }
 
-// Update build.gradle with versionCode and signing config
+// Update build.gradle with versionCode, applicationId, and signing config
 function updateBuildGradle(newVersionCode) {
   const version = getVersion();
-  let buildGradle = readFileSync(buildGradlePath, 'utf-8');
+  const config = flavorConfigs[flavor];
+  originalBuildGradle = readFileSync(buildGradlePath, 'utf-8');
+  let buildGradle = originalBuildGradle;
 
   // Update version
   buildGradle = buildGradle
     .replace(/versionCode\s+\d+/, `versionCode ${newVersionCode}`)
     .replace(/versionName\s+"[^"]+"/, `versionName "${version}"`);
+
+  // Update applicationId to match the flavor (e.g. com.claudecode.pocket.dev).
+  // The namespace stays put — that's where R is generated and where the
+  // manifest's relative class names (.MainActivity, .WebSocketService) resolve.
+  buildGradle = buildGradle.replace(
+    /applicationId\s+"[^"]+"/,
+    `applicationId "${config.appId}"`,
+  );
+  logStep('success', `Set applicationId to ${config.appId}`);
 
   // Add signing config if environment variables are set
   const keystorePath = process.env.KEYSTORE_PATH;
@@ -256,6 +305,16 @@ function restoreConfig() {
   }
 }
 
+// Restore original build.gradle (so the versionCode/applicationId mutation
+// from this build doesn't leak into the next one — android-version.json is
+// the source of truth for versionCode, and applicationId is flavor-specific)
+function restoreBuildGradle() {
+  if (originalBuildGradle) {
+    writeFileSync(buildGradlePath, originalBuildGradle);
+    logStep('success', 'build.gradle restored');
+  }
+}
+
 // Run a command and return a promise
 function runCommand(command, args, options = {}) {
   return new Promise((resolve, reject) => {
@@ -296,6 +355,7 @@ async function main() {
   // Setup cleanup handler
   const cleanup = () => {
     restoreConfig();
+    restoreBuildGradle();
     process.exit(1);
   };
   process.on('SIGINT', cleanup);
@@ -333,8 +393,9 @@ async function main() {
     await runCommand(gradleCmd, [gradleTask], { cwd: androidDir });
     logStep('success', 'Gradle build complete');
 
-    // Restore config before copying
+    // Restore config + build.gradle before copying
     restoreConfig();
+    restoreBuildGradle();
 
     // Step 5: Verify AAB exists
     if (!existsSync(aabSourcePath)) {
@@ -373,6 +434,7 @@ async function main() {
     console.log('');
     logStep('error', `Build failed: ${error.message}`);
     restoreConfig();
+    restoreBuildGradle();
     process.exit(1);
   }
 }
