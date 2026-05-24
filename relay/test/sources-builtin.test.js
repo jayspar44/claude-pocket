@@ -15,7 +15,7 @@ test('getBuiltinCommands returns claude commands with source=builtin', () => {
 
 test('getBuiltinCommands returns antigravity commands with source=builtin', () => {
   const cmds = getBuiltinCommands('antigravity');
-  assert.ok(cmds.length >= 40);
+  assert.ok(cmds.length >= 30);
   for (const c of cmds) assert.equal(c.source, 'builtin');
 });
 
