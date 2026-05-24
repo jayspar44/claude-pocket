@@ -32,7 +32,10 @@ function ArrowButton({ action, disabled, onAction }) {
     <button
       {...holdProps}
       disabled={disabled}
-      className={`flex items-center justify-center p-2 text-white rounded ${action.color} disabled:opacity-50 disabled:cursor-not-allowed transition-colors`}
+      // touch-manipulation + select-none + the WebKit callout style suppress
+      // mobile Chrome's long-press context menu / text selection, which would
+      // otherwise steal the touch and abort the hold-repeat.
+      className={`flex items-center justify-center p-2 text-white rounded ${action.color} disabled:opacity-50 disabled:cursor-not-allowed transition-colors touch-manipulation select-none [-webkit-touch-callout:none]`}
       aria-label={action.id.replace('arrow-', '') + ' arrow'}
     >
       <action.icon className="w-4.5 h-4.5" />

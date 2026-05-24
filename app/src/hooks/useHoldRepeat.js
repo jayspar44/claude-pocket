@@ -30,8 +30,18 @@ export function useHoldRepeat(fn, { delay = 500, interval = 100 } = {}) {
     }
   }, []);
 
-  const start = useCallback(() => {
+  const start = useCallback((event) => {
     stop(); // defensive: cancel any leftover timers from a stuck pointer
+    // Capture the pointer so mobile browsers can't steal it for context-menu
+    // / text-selection / scroll gestures during a hold.
+    if (event && event.currentTarget && event.pointerId !== undefined) {
+      try {
+        event.currentTarget.setPointerCapture(event.pointerId);
+      } catch {
+        // setPointerCapture can throw if the pointer is no longer active
+        // (e.g. fast taps). Safe to ignore — the click still fires once.
+      }
+    }
     fnRef.current(); // immediate first fire (matches keyboard press)
     delayTimer.current = setTimeout(() => {
       repeatTimer.current = setInterval(() => fnRef.current(), interval);
