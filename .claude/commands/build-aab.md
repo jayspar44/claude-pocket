@@ -19,8 +19,8 @@ Build an Android App Bundle (AAB) for Play Store uploads.
 
 | Flavor | Directory |
 |--------|-----------|
-| `prod` | `/Users/jayspar/Documents/projects/claude-pocket-outputs/prod/` |
-| `dev` | `/Users/jayspar/Documents/projects/claude-pocket-outputs/dev/` |
+| `prod` | `/Users/jayspar/Documents/projects/claude-pocket-aabs/prod/` |
+| `dev` | `/Users/jayspar/Documents/projects/claude-pocket-aabs/dev/` |
 
 ## Steps
 
@@ -35,10 +35,24 @@ Build an Android App Bundle (AAB) for Play Store uploads.
    - Build type: debug or release
    - Output directory
 
-3. **Run the build**:
+3. **Run the build from the matching folder**:
+
+   The Vite build picks up `.env.production` from whichever folder you run in — that file contains `VITE_APP_ENV` and `VITE_RELAY_URL`, which differ between prod and dev. The `flavor` argument only changes Capacitor's `appId`/`appName`; it does NOT swap the env file. So you MUST `cd` into the folder that matches the flavor:
+
+   | Flavor | Folder |
+   |--------|--------|
+   | `prod` | `/Users/jayspar/Documents/projects/claude-pocket/app` |
+   | `dev`  | `/Users/jayspar/Documents/projects/claude-pocket-dev/app` |
+
    ```bash
-   cd /Users/jayspar/Documents/projects/claude-pocket-dev/app && node scripts/build-aab.js <flavor> <type>
+   # For --flavor prod:
+   cd /Users/jayspar/Documents/projects/claude-pocket/app && node scripts/build-aab.js prod <type>
+
+   # For --flavor dev:
+   cd /Users/jayspar/Documents/projects/claude-pocket-dev/app && node scripts/build-aab.js dev <type>
    ```
+
+   Note: each folder maintains its own `android-version.json` counter. If you accidentally build prod from the dev folder (or vice versa) and then need to correct course, you may need to manually bump the prod folder's counter to stay above any uploaded build.
 
 4. **Report results**:
    - Show the output file path
