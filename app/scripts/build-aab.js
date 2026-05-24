@@ -89,6 +89,43 @@ if (!VALID_FLAVORS.includes(flavor)) {
   process.exit(1);
 }
 
+// Defensive guard: refuse to build if the project folder doesn't match the flavor.
+// Vite picks .env.production from cwd, and the prod/dev folders ship different
+// env files. A mismatched build compiles fine but ends up pointing at the wrong
+// relay. The convention is:
+//   claude-pocket/      -> prod
+//   claude-pocket-dev/  -> dev
+// `local` is permissive (used for ad-hoc builds against a localhost relay).
+{
+  const projectFolder = join(frontendDir, '..').split('/').filter(Boolean).pop();
+  const isDevFolder = projectFolder.endsWith('-dev');
+  const expectedFolder = flavor === 'prod'
+    ? 'claude-pocket'
+    : flavor === 'dev'
+      ? 'claude-pocket-dev'
+      : null;
+  const mismatch =
+    (flavor === 'prod' && isDevFolder) ||
+    (flavor === 'dev' && !isDevFolder);
+  if (mismatch) {
+    console.error('');
+    console.error(`${colors.red}========================================${colors.reset}`);
+    console.error(`${colors.red}  Wrong folder for flavor: ${flavor}${colors.reset}`);
+    console.error(`${colors.red}========================================${colors.reset}`);
+    console.error(`  Current folder: ${projectFolder}`);
+    console.error(`  Expected:       ${expectedFolder}`);
+    console.error('');
+    console.error(`  Vite reads .env.production from this folder. Building ${flavor}`);
+    console.error(`  here would produce an AAB pointing at the wrong relay AND`);
+    console.error(`  bump the wrong android-version.json counter.`);
+    console.error('');
+    console.error(`  cd /Users/jayspar/Documents/projects/${expectedFolder}/app`);
+    console.error(`  then re-run: node scripts/build-aab.js ${flavor}`);
+    console.error('');
+    process.exit(1);
+  }
+}
+
 // Output path based on flavor
 const AAB_OUTPUT_PATH = process.env.AAB_OUTPUT_PATH || join(BUILDS_BASE, flavor === 'prod' ? 'prod' : 'dev');
 
