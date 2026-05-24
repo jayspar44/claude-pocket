@@ -1,3 +1,4 @@
+const fs = require('node:fs').promises;
 const os = require('node:os');
 const path = require('node:path');
 const { discoverFileCommands } = require('./sources/files');
@@ -43,9 +44,8 @@ async function discoverAntigravity({ cwd, homeDir }) {
     { dir: path.join(homeDir, '.gemini/antigravity/skills'), skillDir: true, source: 'user' },
     { dir: path.join(homeDir, '.agents/skills'), skillDir: true, source: 'user' },
   ];
-  const fs = require('node:fs').promises;
   const extDir = path.join(homeDir, '.gemini/extensions');
-  let extRoots = [];
+  const extRoots = [];
   try {
     const entries = await fs.readdir(extDir, { withFileTypes: true });
     for (const entry of entries) {
