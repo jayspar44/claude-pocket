@@ -97,28 +97,26 @@ class PtyManager {
     this.currentWorkingDir = effectiveWorkingDir;
     this.intentionalStop = false;
 
-    // Run claude update before starting (best-effort, non-blocking on failure)
-    // Only applies to Claude — Antigravity has its own self-update via `agy update`
-    if (this.cliType !== 'antigravity') {
-      this.broadcast({ type: 'pty-status', ...this.getStatus(), updating: true });
-      try {
-        await new Promise((resolve) => {
-          execFile(config.claudeCommand, ['update'], {
-            timeout: 30000,
-            env: config.pty.env,
-          }, (error, stdout, stderr) => {
-            if (error) {
-              logger.warn({ error: error.message, stderr }, 'Claude update failed (continuing anyway)');
-            } else {
-              const output = (stdout || '').trim();
-              if (output) logger.info({ output }, 'Claude update completed');
-            }
-            resolve(); // Always resolve — update failure shouldn't block start
-          });
+    // Run CLI self-update before starting (best-effort, non-blocking on failure)
+    const updateCommand = this.cliType === 'antigravity' ? config.antigravityCommand : config.claudeCommand;
+    this.broadcast({ type: 'pty-status', ...this.getStatus(), updating: true });
+    try {
+      await new Promise((resolve) => {
+        execFile(updateCommand, ['update'], {
+          timeout: 30000,
+          env: config.pty.env,
+        }, (error, stdout, stderr) => {
+          if (error) {
+            logger.warn({ cliType: this.cliType, error: error.message, stderr }, `${this.cliLabel} update failed (continuing anyway)`);
+          } else {
+            const output = (stdout || '').trim();
+            if (output) logger.info({ cliType: this.cliType, output }, `${this.cliLabel} update completed`);
+          }
+          resolve(); // Always resolve — update failure shouldn't block start
         });
-      } catch (error) {
-        logger.warn({ error: error.message }, 'Claude update threw unexpectedly (continuing anyway)');
-      }
+      });
+    } catch (error) {
+      logger.warn({ cliType: this.cliType, error: error.message }, `${this.cliLabel} update threw unexpectedly (continuing anyway)`);
     }
 
     // Restore buffer from disk if available
