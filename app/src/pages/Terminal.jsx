@@ -245,6 +245,7 @@ function Terminal() {
         onClose={() => setShowCommands(false)}
         onSelect={handleCommandSelect}
         activeInstanceId={activeInstanceId}
+        cliType={activeInstance?.cliType || 'claude'}
       />
 
       <MobileFilePicker
