@@ -40,8 +40,7 @@ test('parseMarkdown returns empty description for empty content', () => {
 
 test('parseMarkdown handles malformed frontmatter without crashing', () => {
   const md = `---\nthis is not yaml\n`;
-  const out = parseMarkdown(md);
-  assert.equal(typeof out.description, 'string');
+  assert.deepEqual(parseMarkdown(md), { description: '', argumentHint: null });
 });
 
 test('parseToml extracts description and argument-hint', () => {
