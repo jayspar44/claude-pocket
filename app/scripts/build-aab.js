@@ -140,6 +140,7 @@ function printBanner() {
 
 // Save original config for restoration
 let originalConfig;
+let originalBuildGradle;
 
 // Path to build.gradle and version tracking file
 const buildGradlePath = join(androidDir, 'app', 'build.gradle');
@@ -164,15 +165,26 @@ function updateVersionTracking() {
   return newVersionCode;
 }
 
-// Update build.gradle with versionCode and signing config
+// Update build.gradle with versionCode, applicationId, and signing config
 function updateBuildGradle(newVersionCode) {
   const version = getVersion();
-  let buildGradle = readFileSync(buildGradlePath, 'utf-8');
+  const config = flavorConfigs[flavor];
+  originalBuildGradle = readFileSync(buildGradlePath, 'utf-8');
+  let buildGradle = originalBuildGradle;
 
   // Update version
   buildGradle = buildGradle
     .replace(/versionCode\s+\d+/, `versionCode ${newVersionCode}`)
     .replace(/versionName\s+"[^"]+"/, `versionName "${version}"`);
+
+  // Update applicationId to match the flavor (e.g. com.claudecode.pocket.dev).
+  // The namespace stays put — that's where R is generated and where the
+  // manifest's relative class names (.MainActivity, .WebSocketService) resolve.
+  buildGradle = buildGradle.replace(
+    /applicationId\s+"[^"]+"/,
+    `applicationId "${config.appId}"`,
+  );
+  logStep('success', `Set applicationId to ${config.appId}`);
 
   // Add signing config if environment variables are set
   const keystorePath = process.env.KEYSTORE_PATH;
@@ -256,6 +268,16 @@ function restoreConfig() {
   }
 }
 
+// Restore original build.gradle (so the versionCode/applicationId mutation
+// from this build doesn't leak into the next one — android-version.json is
+// the source of truth for versionCode, and applicationId is flavor-specific)
+function restoreBuildGradle() {
+  if (originalBuildGradle) {
+    writeFileSync(buildGradlePath, originalBuildGradle);
+    logStep('success', 'build.gradle restored');
+  }
+}
+
 // Run a command and return a promise
 function runCommand(command, args, options = {}) {
   return new Promise((resolve, reject) => {
@@ -296,6 +318,7 @@ async function main() {
   // Setup cleanup handler
   const cleanup = () => {
     restoreConfig();
+    restoreBuildGradle();
     process.exit(1);
   };
   process.on('SIGINT', cleanup);
@@ -333,8 +356,9 @@ async function main() {
     await runCommand(gradleCmd, [gradleTask], { cwd: androidDir });
     logStep('success', 'Gradle build complete');
 
-    // Restore config before copying
+    // Restore config + build.gradle before copying
     restoreConfig();
+    restoreBuildGradle();
 
     // Step 5: Verify AAB exists
     if (!existsSync(aabSourcePath)) {
@@ -373,6 +397,7 @@ async function main() {
     console.log('');
     logStep('error', `Build failed: ${error.message}`);
     restoreConfig();
+    restoreBuildGradle();
     process.exit(1);
   }
 }
