@@ -77,8 +77,19 @@ const InputBar = forwardRef(function InputBar({ onSend, onSendRaw, onStateChange
   }, [value, disabled, onSendRaw, addToHistory]);
 
   // Send-button hold detection: short tap = normal submit, hold ≥500ms = raw send.
-  const handleSendPointerDown = useCallback(() => {
+  const handleSendPointerDown = useCallback((event) => {
     if (disabled || !value.trim()) return;
+    // Capture the pointer so a stray pointerleave (touch jitter, sub-pixel
+    // drift) doesn't cancel the gesture before pointerup decides between
+    // tap-submit vs hold-raw-send.
+    if (event?.currentTarget && event.pointerId !== undefined) {
+      try {
+        event.currentTarget.setPointerCapture(event.pointerId);
+      } catch {
+        // setPointerCapture can throw if the pointer is no longer active;
+        // ignore — the gesture still works without capture.
+      }
+    }
     rawFiredRef.current = false;
     setPressVisual('holding');
     holdTimerRef.current = setTimeout(() => {

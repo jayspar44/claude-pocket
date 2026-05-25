@@ -268,6 +268,14 @@ class WebSocketHandler {
           // and the next submit gets appended to it instead of replacing it.
           // \x15 = Ctrl-U = "kill line" in readline / vi insert / most line
           // editors. No-op when the buffer is already empty.
+          //
+          // Tradeoff: if an Ink-based prompt is currently active (Claude
+          // model picker, agy y/n survey, etc.), the CLI is in raw/cbreak
+          // mode and \x15 is delivered as a literal 0x15 keystroke that
+          // the prompt may misinterpret. The client-side workaround for
+          // those prompts is the long-press-Send → raw-send path, which
+          // bypasses this handler entirely.
+          logger.debug({ clientId: ws.clientId, instanceId, len: message.data.length }, 'submit: kill-line + write + delayed Enter');
           ptyManager.write('\x15');
           ptyManager.write(message.data);
           // Two-phase: tiny delay so the CLI's input handling sees the text
