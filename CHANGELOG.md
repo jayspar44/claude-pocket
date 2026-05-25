@@ -2,6 +2,42 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+## [1.1.0](https://github.com/jayspar44/claude-pocket/compare/v1.0.0...v1.1.0) (2026-05-25)
+
+
+### Features
+
+* **app:** add inline / autocomplete component ([b13b521](https://github.com/jayspar44/claude-pocket/commit/b13b521c091f8fbc0006fcb1096aaae58917501a))
+* **app:** add useCommands hook for slash command data ([e2311cd](https://github.com/jayspar44/claude-pocket/commit/e2311cd40c3695511b218f74290b3905c0401151))
+* **app:** add useHoldRepeat hook for keyboard-style auto-repeat ([c020123](https://github.com/jayspar44/claude-pocket/commit/c0201232346b374f2ba7e6ec3c8439004de19d36))
+* **app:** arrow buttons auto-repeat on hold ([feda27d](https://github.com/jayspar44/claude-pocket/commit/feda27d5ee5fb5454ca8120eca67d6af8eb55828))
+* **app:** compose CommandAutocomplete with InputBar in Terminal page ([1d6143b](https://github.com/jayspar44/claude-pocket/commit/1d6143b79a036af824059308183e4720e382dd98))
+* **app:** expose value + caret + setValueAndCaret from InputBar ([e6a44d3](https://github.com/jayspar44/claude-pocket/commit/e6a44d30b75ddebe5e68da96b7b7fee771a81891))
+* **app:** long-press Send button → raw send (no Enter) ([c7bd9cf](https://github.com/jayspar44/claude-pocket/commit/c7bd9cf2fd51fe029a96cc32836943508dacf7a0))
+* **app:** pass cliType to CommandPalette so list matches active CLI ([5579c31](https://github.com/jayspar44/claude-pocket/commit/5579c312de85ec2e7177217f13a8790c88a7b7e3))
+* **build:** refuse to build flavor from wrong project folder ([8adbb15](https://github.com/jayspar44/claude-pocket/commit/8adbb150b581f8c4a1282652be82176b17079445))
+* **relay:** add filesystem-based command discovery ([c2669c4](https://github.com/jayspar44/claude-pocket/commit/c2669c476a245fe39ba8586da6bc0d35a2f040fd))
+* **relay:** add markdown frontmatter + toml parsers for command discovery ([e9c464d](https://github.com/jayspar44/claude-pocket/commit/e9c464d9108942d703e7c244284b76c971070b88))
+* **relay:** discover claude plugin commands via plugin list --json ([8ccb4ca](https://github.com/jayspar44/claude-pocket/commit/8ccb4ca765bef1eeb3a4740462ec7a598d136435))
+* **relay:** orchestrate command discovery across all sources ([52c222b](https://github.com/jayspar44/claude-pocket/commit/52c222b78ebc2a64a4bb89a4767ac9c3eb6a5e38))
+* **relay:** ship built-in command tables for claude + agy ([c41c1d8](https://github.com/jayspar44/claude-pocket/commit/c41c1d86ddb93a5df8ddcb867005219f63898db6))
+* **relay:** wire /api/commands to new discovery pipeline ([f5e6925](https://github.com/jayspar44/claude-pocket/commit/f5e692530b80bcb64098002b61175c178b53849b))
+
+
+### Bug Fixes
+
+* **app:** float / autocomplete above input bar so input stays visible ([4398e1a](https://github.com/jayspar44/claude-pocket/commit/4398e1af72b3f360093266bef885bc14d58c9074))
+* **app:** keep layout viewport pinned to visual viewport on resize ([4bcf9b3](https://github.com/jayspar44/claude-pocket/commit/4bcf9b3cd12f7c8f7869209e968fef04b48a523c))
+* **app:** pin Terminal container to layout viewport top ([b654524](https://github.com/jayspar44/claude-pocket/commit/b65452465020cca82f0f43ed3e521fc591705ee0))
+* **app:** suppress mobile-browser gesture interception on arrow hold ([564359d](https://github.com/jayspar44/claude-pocket/commit/564359d33cc7e0e3ccd0497a819ff8acfe23edd1))
+* **build-aab:** route flavor to matching folder for env file pickup ([1d8a2b4](https://github.com/jayspar44/claude-pocket/commit/1d8a2b4566fb7df1df9446607437fbae69cf4bd6))
+* **build:** add explicit R import so non-prod flavors compile ([d1dbf40](https://github.com/jayspar44/claude-pocket/commit/d1dbf402a10fdd8919bc269c9d62cf6d11aa0345))
+* **build:** patch applicationId per flavor + restore build.gradle after build ([5bc77c3](https://github.com/jayspar44/claude-pocket/commit/5bc77c36ba3df705e379c3d53c1eb5302d43eaf7))
+* **relay:** clear CLI readline buffer before each submit ([e52b1d0](https://github.com/jayspar44/claude-pocket/commit/e52b1d06fc408f317016a62a410ea1889673bf5b))
+* **relay:** drop unused absPath destructure in buildCommand ([b10affe](https://github.com/jayspar44/claude-pocket/commit/b10affe61a9da1038b5733f939f46acbc2444a56))
+* **relay:** replace agy builtins with canonical /help list (34 cmds) ([6cae0ee](https://github.com/jayspar44/claude-pocket/commit/6cae0ee2cdd009320976a96b36a7221dfba266cb))
+* use glob test pattern instead of dir arg (node 22 quirk) ([ae8cec5](https://github.com/jayspar44/claude-pocket/commit/ae8cec5f10b94d5af3ebf33ebe6565293a763be0))
+
 ## [1.0.0](https://github.com/jayspar44/claude-pocket/compare/v0.5.4...v1.0.0) (2026-05-24)
 
 

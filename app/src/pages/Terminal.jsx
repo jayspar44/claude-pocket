@@ -179,7 +179,7 @@ function Terminal() {
   return (
     <div
       ref={containerRef}
-      className="flex flex-col bg-gray-900"
+      className="flex flex-col bg-gray-900 fixed top-0 left-0 right-0"
       style={{ height: viewportHeight ? `${viewportHeight}px` : '100dvh' }}
     >
       {/* Status Bar */}
@@ -234,25 +234,29 @@ function Terminal() {
         disabled={connectionState !== 'connected'}
       />
 
-      {/* Input Bar */}
-      <CommandAutocomplete
-        value={inputState.value}
-        caret={inputState.caret}
-        activeInstanceId={activeInstanceId}
-        cliType={activeInstance?.cliType || 'claude'}
-        onInsert={({ newValue, newCaret }) => {
-          inputBarRef.current?.setValueAndCaret({ newValue, newCaret });
-          setInputState({ value: newValue, caret: newCaret });
-        }}
-        disabled={connectionState !== 'connected'}
-      />
-      <InputBar
-        ref={inputBarRef}
-        onSend={handleSend}
-        onStateChange={setInputState}
-        disabled={connectionState !== 'connected'}
-        placeholder={connectionState === 'connected' ? 'Type a message...' : 'Connecting...'}
-      />
+      {/* Input Bar + autocomplete overlay
+          relative so the autocomplete can position absolutely above the input */}
+      <div className="relative">
+        <CommandAutocomplete
+          value={inputState.value}
+          caret={inputState.caret}
+          activeInstanceId={activeInstanceId}
+          cliType={activeInstance?.cliType || 'claude'}
+          onInsert={({ newValue, newCaret }) => {
+            inputBarRef.current?.setValueAndCaret({ newValue, newCaret });
+            setInputState({ value: newValue, caret: newCaret });
+          }}
+          disabled={connectionState !== 'connected'}
+        />
+        <InputBar
+          ref={inputBarRef}
+          onSend={handleSend}
+          onSendRaw={sendInput}
+          onStateChange={setInputState}
+          disabled={connectionState !== 'connected'}
+          placeholder={connectionState === 'connected' ? 'Type a message...' : 'Connecting...'}
+        />
+      </div>
 
       {/* Bottom Sheets */}
       <CommandPalette

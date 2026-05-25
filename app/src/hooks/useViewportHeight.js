@@ -30,6 +30,13 @@ export function useViewportHeight() {
     const updateHeight = () => {
       const height = window.visualViewport?.height || window.innerHeight;
 
+      // Re-align layout viewport with visual viewport. On web mobile Chrome,
+      // the URL bar appearing/disappearing leaves the layout scrolled, which
+      // hides our top-pinned StatusBar under the URL-bar overlay. With html
+      // and body set to overflow:hidden, the only thing that can be scrolled
+      // is the layout viewport itself, and resetting it here is harmless.
+      window.scrollTo(0, 0);
+
       // Ghost keyboard detection (native only): viewport shrunk but no
       // keyboardWillShow received → stale IME insets from another app.
       // Instead of fighting it, make the ghost real by showing the keyboard.

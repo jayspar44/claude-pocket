@@ -84,7 +84,9 @@ export default function CommandAutocomplete({
   if (!isOpen || filtered.length === 0) return null;
 
   return (
-    <div className="px-3 pb-1">
+    // Float above the input bar (overlays QuickActions) so the input always
+    // stays visible above the keyboard. Parent must be position:relative.
+    <div className="absolute bottom-full left-0 right-0 px-3 pb-1 z-10">
       <div
         ref={listRef}
         className="bg-gray-800 border border-gray-700 rounded-lg shadow-lg max-h-60 overflow-y-auto divide-y divide-gray-700"

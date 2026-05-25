@@ -1,4 +1,5 @@
 import { StopCircle, CornerDownLeft, FolderOpen, Camera, RotateCcw, ChevronUp, ChevronDown, ChevronLeft, ChevronRight, ArrowUp } from 'lucide-react';
+import { useHoldRepeat } from '../../hooks/useHoldRepeat';
 
 // Row 1: Navigation keys
 const navActions = [
@@ -22,6 +23,26 @@ const actionButtons = [
   { id: 'camera', label: 'Image', icon: Camera, color: 'bg-cyan-600 hover:bg-cyan-700' },
 ];
 
+function ArrowButton({ action, disabled, onAction }) {
+  const holdProps = useHoldRepeat(
+    () => onAction(action.id),
+    { delay: 500, interval: 100 },
+  );
+  return (
+    <button
+      {...holdProps}
+      disabled={disabled}
+      // touch-manipulation + select-none + the WebKit callout style suppress
+      // mobile Chrome's long-press context menu / text selection, which would
+      // otherwise steal the touch and abort the hold-repeat.
+      className={`flex items-center justify-center p-2 text-white rounded ${action.color} disabled:opacity-50 disabled:cursor-not-allowed transition-colors touch-manipulation select-none [-webkit-touch-callout:none]`}
+      aria-label={action.id.replace('arrow-', '') + ' arrow'}
+    >
+      <action.icon className="w-4.5 h-4.5" />
+    </button>
+  );
+}
+
 function QuickActions({ onAction, onOpenCommands, onOpenFiles, onOpenCamera, ctrlActive = false, onCtrlToggle, disabled = false }) {
   return (
     <div className="flex flex-col bg-gray-800 border-t border-gray-700">
@@ -44,17 +65,14 @@ function QuickActions({ onAction, onOpenCommands, onOpenFiles, onOpenCamera, ctr
         {/* Separator */}
         <div className="w-px h-7 bg-gray-600 shrink-0" />
 
-        {/* Arrow keys */}
+        {/* Arrow keys (auto-repeat on hold) */}
         {arrowActions.map((action) => (
-          <button
+          <ArrowButton
             key={action.id}
-            onClick={() => onAction(action.id)}
+            action={action}
             disabled={disabled}
-            className={`flex items-center justify-center p-2 text-white rounded ${action.color} disabled:opacity-50 disabled:cursor-not-allowed transition-colors`}
-            aria-label={action.id.replace('arrow-', '') + ' arrow'}
-          >
-            <action.icon className="w-4.5 h-4.5" />
-          </button>
+            onAction={onAction}
+          />
         ))}
       </div>
 

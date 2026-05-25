@@ -2,9 +2,17 @@ import { useState, useRef, useCallback, useEffect, forwardRef, useImperativeHand
 import { Send } from 'lucide-react';
 import { useCommandHistory } from '../../hooks/useCommandHistory';
 
-const InputBar = forwardRef(function InputBar({ onSend, onStateChange, disabled = false, placeholder = 'Type a message...' }, ref) {
+const InputBar = forwardRef(function InputBar({ onSend, onSendRaw, onStateChange, disabled = false, placeholder = 'Type a message...' }, ref) {
   const [value, setValue] = useState('');
+  // 'idle' = normal, 'holding' = mid-press before raw-send threshold,
+  // 'fired' = brief flash right after raw send. Drives the Send button color.
+  const [pressVisual, setPressVisual] = useState('idle');
   const textareaRef = useRef(null);
+  const holdTimerRef = useRef(null);
+  const flashTimerRef = useRef(null);
+  // Suppresses the pointerUp handler from also firing normal submit when the
+  // long-press already fired raw send. Also set on cancel/leave.
+  const rawFiredRef = useRef(false);
   const { addToHistory, navigateHistory } = useCommandHistory();
 
   // When ghost keyboard is detected (stale IME insets from another app),
@@ -54,6 +62,76 @@ const InputBar = forwardRef(function InputBar({ onSend, onStateChange, disabled 
       textareaRef.current.style.height = 'auto';
     }
   }, [value, disabled, onSend, addToHistory]);
+
+  // Send raw — no Ctrl-U prefix, no Enter suffix. For Claude / agy Ink prompts
+  // that capture a single keystroke (e.g. y/n in surveys, model picker arrows).
+  const handleSendRawNow = useCallback(() => {
+    // Note: do NOT trim — single chars like " " or a newline may be valid here.
+    if (!value || disabled || !onSendRaw) return;
+    onSendRaw(value);
+    addToHistory(value);
+    setValue('');
+    if (textareaRef.current) textareaRef.current.style.height = 'auto';
+    // Best-effort haptic ack so the user knows the long-press fired.
+    try { window.navigator?.vibrate?.(40); } catch { /* noop */ }
+  }, [value, disabled, onSendRaw, addToHistory]);
+
+  // Send-button hold detection: short tap = normal submit, hold ≥500ms = raw send.
+  const handleSendPointerDown = useCallback((event) => {
+    if (disabled || !value.trim()) return;
+    // Capture the pointer so a stray pointerleave (touch jitter, sub-pixel
+    // drift) doesn't cancel the gesture before pointerup decides between
+    // tap-submit vs hold-raw-send.
+    if (event?.currentTarget && event.pointerId !== undefined) {
+      try {
+        event.currentTarget.setPointerCapture(event.pointerId);
+      } catch {
+        // setPointerCapture can throw if the pointer is no longer active;
+        // ignore — the gesture still works without capture.
+      }
+    }
+    rawFiredRef.current = false;
+    setPressVisual('holding');
+    holdTimerRef.current = setTimeout(() => {
+      if (onSendRaw) {
+        rawFiredRef.current = true;
+        handleSendRawNow();
+        setPressVisual('fired');
+        if (flashTimerRef.current) clearTimeout(flashTimerRef.current);
+        flashTimerRef.current = setTimeout(() => setPressVisual('idle'), 300);
+      } else {
+        // No raw-send wired up — revert visual so the tap-up handler still works.
+        setPressVisual('idle');
+      }
+    }, 500);
+  }, [disabled, value, onSendRaw, handleSendRawNow]);
+
+  const handleSendPointerUp = useCallback(() => {
+    if (holdTimerRef.current) {
+      clearTimeout(holdTimerRef.current);
+      holdTimerRef.current = null;
+    }
+    if (!rawFiredRef.current) {
+      handleSubmit();
+      setPressVisual('idle');
+    }
+  }, [handleSubmit]);
+
+  const handleSendPointerCancel = useCallback(() => {
+    if (holdTimerRef.current) {
+      clearTimeout(holdTimerRef.current);
+      holdTimerRef.current = null;
+    }
+    setPressVisual('idle');
+    // Suppress the subsequent pointerUp from firing a stray submit.
+    rawFiredRef.current = true;
+  }, []);
+
+  // Clear any pending timers on unmount
+  useEffect(() => () => {
+    if (holdTimerRef.current) clearTimeout(holdTimerRef.current);
+    if (flashTimerRef.current) clearTimeout(flashTimerRef.current);
+  }, []);
 
   const handleKeyDown = useCallback((e) => {
     // Submit on Enter (without Shift)
@@ -125,10 +203,20 @@ const InputBar = forwardRef(function InputBar({ onSend, onStateChange, disabled 
         spellCheck="true"
       />
       <button
-        onClick={handleSubmit}
+        onPointerDown={handleSendPointerDown}
+        onPointerUp={handleSendPointerUp}
+        onPointerLeave={handleSendPointerCancel}
+        onPointerCancel={handleSendPointerCancel}
         disabled={disabled || !value.trim()}
-        className="flex items-center justify-center w-10 h-10 text-white bg-blue-600 rounded-lg hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-        aria-label="Send message"
+        className={
+          'flex items-center justify-center w-10 h-10 text-white rounded-lg focus:outline-none focus:ring-2 disabled:opacity-50 disabled:cursor-not-allowed transition-colors touch-manipulation select-none [-webkit-touch-callout:none] ' +
+          (pressVisual === 'fired'
+            ? 'bg-green-500 ring-2 ring-green-300'
+            : pressVisual === 'holding'
+              ? 'bg-purple-600 ring-2 ring-purple-300'
+              : 'bg-blue-600 hover:bg-blue-700 focus:ring-blue-500')
+        }
+        aria-label={onSendRaw ? 'Send (hold for raw, no Enter)' : 'Send message'}
       >
         <Send className="w-5 h-5" />
       </button>
