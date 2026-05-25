@@ -261,9 +261,17 @@ class WebSocketHandler {
 
       case 'submit': {
         const ptyManager = ptyRegistry.get(instanceId);
-        // Two-phase submission: text first, then Enter after delay
         if (message.data) {
+          // Clear any residual text in the CLI's readline buffer before
+          // writing the new input. Without this, a rejected slash command
+          // (e.g. /commit-push in Antigravity) stays in the line buffer
+          // and the next submit gets appended to it instead of replacing it.
+          // \x15 = Ctrl-U = "kill line" in readline / vi insert / most line
+          // editors. No-op when the buffer is already empty.
+          ptyManager.write('\x15');
           ptyManager.write(message.data);
+          // Two-phase: tiny delay so the CLI's input handling sees the text
+          // settle before Enter triggers submission.
           setTimeout(() => {
             ptyManager.write('\r');
           }, 50);
