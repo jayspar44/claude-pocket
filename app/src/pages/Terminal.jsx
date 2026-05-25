@@ -251,6 +251,7 @@ function Terminal() {
         <InputBar
           ref={inputBarRef}
           onSend={handleSend}
+          onSendRaw={sendInput}
           onStateChange={setInputState}
           disabled={connectionState !== 'connected'}
           placeholder={connectionState === 'connected' ? 'Type a message...' : 'Connecting...'}
