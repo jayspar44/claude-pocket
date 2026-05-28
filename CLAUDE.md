@@ -282,30 +282,30 @@ Uses `standard-version` for semantic versioning based on conventional commits.
 
 **Release workflow:**
 ```bash
-/release              # Auto-bump based on commits (feat→MINOR, fix→PATCH)
-/release --minor      # Force minor bump
-/release --patch      # Force patch bump
-/release --major      # Force major bump
+npm run release              # Auto-bump from commits (feat→MINOR, fix→PATCH)
+npm run release:minor        # Force minor bump
+npm run release:patch        # Force patch bump
+npm run release:major        # Force major bump
+npm run release:first        # First release (no prior tags)
 ```
 
-**How it works:** Analyzes commits → determines bump → updates all version files → creates commit + tag → pushes.
+**How it works:** `standard-version` analyzes commits → determines bump → updates all version files → creates commit + tag. Then push: `git push --follow-tags`.
 
-**Important:** Never manually create version tags. Always use `/release` to keep version files and tags in sync.
+**Important:** Never manually create version tags. Always use `npm run release` to keep version files and tags in sync.
 
 ## Slash Commands
 
-### Development
+### Development (user-scope)
 
 | Command | Usage | When to Use |
 |---------|-------|-------------|
-| `/feature-start` | `<name> [base]` | Starting new work - creates branch from base |
 | `/commit-push` | `[-m "msg"] [--no-push]` | Ready to commit - runs lint+security before push |
-| `/lint-check` | `[--fix]` | Check code quality before committing |
 | `/security-scan` | `[--staged\|--all]` | Verify no secrets before committing |
 | `/code-review` | | Before PR - 4-agent parallel review |
 | `/pr-flow` | `[--no-fix] [--auto-merge]` | End-to-end PR with auto-fix loop |
-| `/pr-merge` | `<pr#> [--no-sync]` | Merge approved PR with branch cleanup |
-| `/release` | `[--patch\|--minor\|--major\|--first]` | After merging to main - bumps version from commits |
+| `/pr-merge` | `<pr#> [--no-sync]` | Merge approved PR — no squash to main |
+
+Standard workflows (feature branches, releases, lint) — just ask. `npm run release` / `npm run lint` / `git checkout -b feature/<name> develop`.
 
 ### Minibox Operations
 
@@ -324,5 +324,5 @@ Uses `standard-version` for semantic versioning based on conventional commits.
 | `/build-aab` | | Building Play Store release (AAB format) |
 
 **Workflows:**
-- **Dev:** `/feature-start` → code → `/commit-push` → `/code-review` → `/pr-flow` → `/release`
+- **Dev:** `git checkout -b feature/<name> develop` → code → `/commit-push` → `/code-review` → `/pr-flow` → `npm run release`
 - **Deploy:** `/deploy --env prod` → `/check-status --env prod --health` → `/logs --env prod`
