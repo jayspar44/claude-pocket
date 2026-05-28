@@ -275,14 +275,18 @@ class WebSocketHandler {
           // the prompt may misinterpret. The client-side workaround for
           // those prompts is the long-press-Send → raw-send path, which
           // bypasses this handler entirely.
+          //
+          // Two-phase write: text first, then \r after a 150ms gap so the
+          // CLI's paste-detection heuristic doesn't fold the trailing \r
+          // into the burst and treat it as a literal newline instead of
+          // submit. 150ms is a guess against an undocumented heuristic —
+          // works reliably in practice; if it ever regresses, bump higher.
           logger.debug({ clientId: ws.clientId, instanceId, len: message.data.length }, 'submit: kill-line + write + delayed Enter');
           ptyManager.write('\x15');
           ptyManager.write(message.data);
-          // Two-phase: tiny delay so the CLI's input handling sees the text
-          // settle before Enter triggers submission.
           setTimeout(() => {
             ptyManager.write('\r');
-          }, 50);
+          }, 150);
         }
         break;
       }
