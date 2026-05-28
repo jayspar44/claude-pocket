@@ -262,27 +262,25 @@ class WebSocketHandler {
       case 'submit': {
         const ptyManager = ptyRegistry.get(instanceId);
         if (message.data) {
-          // Clear any residual text in the CLI's readline buffer before
-          // writing the new input. Without this, a rejected slash command
-          // (e.g. /commit-push in Antigravity) stays in the line buffer
-          // and the next submit gets appended to it instead of replacing it.
-          // \x15 = Ctrl-U = "kill line" in readline / vi insert / most line
-          // editors. No-op when the buffer is already empty.
+          // Three pieces in one atomic write:
+          //   \x15           — kill any stale readline buffer (e.g. text left
+          //                    behind after a rejected slash command). No-op
+          //                    when buffer is empty.
+          //   \x1b[200~..201~ — DEC bracketed paste. Explicitly marks where
+          //                    the paste ends so the trailing \r is unambiguous,
+          //                    even when everything arrives as one burst.
+          //                    Without this, Claude/agy's paste heuristic can
+          //                    treat a tightly-following \r as a literal newline
+          //                    inside the paste instead of submit.
+          //   \r             — submit, outside the paste markers.
           //
-          // Tradeoff: if an Ink-based prompt is currently active (Claude
-          // model picker, agy y/n survey, etc.), the CLI is in raw/cbreak
-          // mode and \x15 is delivered as a literal 0x15 keystroke that
-          // the prompt may misinterpret. The client-side workaround for
-          // those prompts is the long-press-Send → raw-send path, which
-          // bypasses this handler entirely.
-          logger.debug({ clientId: ws.clientId, instanceId, len: message.data.length }, 'submit: kill-line + write + delayed Enter');
-          ptyManager.write('\x15');
-          ptyManager.write(message.data);
-          // Two-phase: tiny delay so the CLI's input handling sees the text
-          // settle before Enter triggers submission.
-          setTimeout(() => {
-            ptyManager.write('\r');
-          }, 50);
+          // Tradeoff: in Ink raw-mode prompts (model picker, y/n surveys) the
+          // CLI is in cbreak mode and these control bytes are delivered as
+          // literal keystrokes. The client-side workaround for those prompts
+          // is the long-press-Send → raw-send path, which bypasses this
+          // handler entirely.
+          logger.debug({ clientId: ws.clientId, instanceId, len: message.data.length }, 'submit: kill-line + bracketed-paste + Enter');
+          ptyManager.write('\x15\x1b[200~' + message.data + '\x1b[201~\r');
         }
         break;
       }
