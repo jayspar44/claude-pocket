@@ -115,6 +115,9 @@ gradle.properties
 # Claude Code local settings (allow commands to be committed)
 .claude/settings.local.json
 
+# Antigravity CLI local state (symlinks to user-local config)
+.antigravitycli/
+
 # Firebase cache
 .firebase/
 
