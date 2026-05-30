@@ -110,7 +110,7 @@ class PtyManager {
     this.intentionalStop = false;
 
     // Run CLI self-update before starting (best-effort, non-blocking on failure).
-    // Skipped for CLIs without an `update` subcommand (e.g. codex).
+    // Skipped for CLIs whose registry entry sets supportsUpdate: false.
     const cliEntry = getCliEntry(this.cliType);
     if (cliEntry.supportsUpdate) {
       const updateCommand = cliEntry.getCommand();
