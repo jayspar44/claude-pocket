@@ -1,9 +1,11 @@
 const claudeBuiltins = require('../builtins/claude.json');
 const antigravityBuiltins = require('../builtins/antigravity.json');
+const codexBuiltins = require('../builtins/codex.json');
 
 const TABLES = {
   claude: claudeBuiltins,
   antigravity: antigravityBuiltins,
+  codex: codexBuiltins,
 };
 
 function getBuiltinCommands(cliType) {

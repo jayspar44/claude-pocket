@@ -40,6 +40,12 @@ const ptyConfig = {
   stopped: { color: 'bg-gray-500', icon: TerminalSquare, label: 'Stopped' },
 };
 
+const cliLabels = {
+  claude: 'Claude',
+  antigravity: 'Antigravity',
+  codex: 'Codex',
+};
+
 function StatusBar({ connectionState, ptyStatus, workingDir, ptyError, onReconnect, onAddInstance, taskComplete, instanceCount, cliType }) {
   const { getRelayUrl } = useRelay();
   const connStatus = connectionConfig[connectionState] || connectionConfig.disconnected;
@@ -92,7 +98,7 @@ function StatusBar({ connectionState, ptyStatus, workingDir, ptyError, onReconne
               <div className="flex items-center gap-1.5 h-4">
                 <div className={`w-2 h-2 rounded-full shrink-0 ${ptyError ? 'bg-red-500' : ptyState.color}`} />
                 <PtyIcon className="w-4 h-4 text-gray-400 shrink-0" />
-                <span className="text-xs text-gray-400 leading-4">{isPtyRunning ? (cliType === 'antigravity' ? 'Antigravity' : 'Claude') : 'Stopped'}</span>
+                <span className="text-xs text-gray-400 leading-4">{isPtyRunning ? (cliLabels[cliType] || 'Claude') : 'Stopped'}</span>
               </div>
             </>
           )}

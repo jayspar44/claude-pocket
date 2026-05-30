@@ -7,6 +7,15 @@ import { storage } from '../../utils/storage';
 // Default working directory prefix (empty - user should specify full path)
 const DEFAULT_WORKING_DIR_PREFIX = '';
 
+// Supported CLI types for the picker
+const CLI_OPTIONS = [
+  { value: 'claude',      label: 'Claude' },
+  { value: 'antigravity', label: 'Antigravity' },
+  { value: 'codex',       label: 'Codex' },
+];
+const cliLabelFor = (cliType) =>
+  CLI_OPTIONS.find((o) => o.value === cliType)?.label || 'Claude';
+
 // Build default relay URL matching current app environment
 const getDefaultRelayUrl = () => {
   const host = import.meta.env.VITE_RELAY_HOST || 'minibox.rattlesnake-mimosa.ts.net';
@@ -285,7 +294,7 @@ function InstanceManager({ isOpen, onClose, editInstanceId, startInAddMode }) {
                       <p className="text-white font-medium truncate">
                         {instance.name}
                         <span className="text-xs text-gray-400 font-normal ml-1.5">
-                          {(instance.cliType || 'claude') === 'antigravity' ? 'Antigravity' : 'Claude'}
+                          {cliLabelFor(instance.cliType || 'claude')}
                         </span>
                       </p>
                       {instance.workingDir && (
@@ -445,18 +454,18 @@ function InstanceManager({ isOpen, onClose, editInstanceId, startInAddMode }) {
               <div className="space-y-2">
                 <label className="text-sm text-gray-400">CLI</label>
                 <div className="flex gap-2">
-                  {['claude', 'antigravity'].map((cli) => (
+                  {CLI_OPTIONS.map(({ value, label }) => (
                     <button
-                      key={cli}
+                      key={value}
                       type="button"
-                      onClick={() => setFormData(prev => ({ ...prev, cliType: cli }))}
+                      onClick={() => setFormData(prev => ({ ...prev, cliType: value }))}
                       className={`flex-1 px-4 py-2.5 rounded-lg text-sm font-medium transition-colors ${
-                        formData.cliType === cli
+                        formData.cliType === value
                           ? 'bg-blue-600 text-white'
                           : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
                       }`}
                     >
-                      {cli === 'claude' ? 'Claude' : 'Antigravity'}
+                      {label}
                     </button>
                   ))}
                 </div>

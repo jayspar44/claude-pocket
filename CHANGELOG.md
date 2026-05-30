@@ -2,6 +2,21 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+## [1.2.0](https://github.com/jayspar44/claude-pocket/compare/v1.1.0...v1.2.0) (2026-05-30)
+
+
+### Features
+
+* add OpenAI Codex as a third CLI option ([9f6af64](https://github.com/jayspar44/claude-pocket/commit/9f6af64ccb2fad9a7a71b08e8fb7c8fa4e8e5e84))
+
+
+### Bug Fixes
+
+* address PR [#5](https://github.com/jayspar44/claude-pocket/issues/5) review feedback ([98f2a4e](https://github.com/jayspar44/claude-pocket/commit/98f2a4e83b17b797a6619ea4d91022780291552d))
+* **relay:** bump submit Enter delay to 150ms + dev versionCode bump ([#6](https://github.com/jayspar44/claude-pocket/issues/6)) ([14a4d9a](https://github.com/jayspar44/claude-pocket/commit/14a4d9a219a99ef7b4a393a7d58ac8002e7110dd)), closes [#5](https://github.com/jayspar44/claude-pocket/issues/5)
+* **relay:** revert bracketed paste, bump submit Enter delay to 150ms ([edf02e0](https://github.com/jayspar44/claude-pocket/commit/edf02e0ecc09206a48222fb37dc97ed6375977f8))
+* **relay:** use bracketed paste for submit to avoid Enter race ([703e986](https://github.com/jayspar44/claude-pocket/commit/703e98688fc4481a1cf81e013167f2e3938bf8b5))
+
 ## [1.1.0](https://github.com/jayspar44/claude-pocket/compare/v1.0.0...v1.1.0) (2026-05-25)
 
 

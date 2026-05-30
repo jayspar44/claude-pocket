@@ -52,6 +52,7 @@ const config = {
   // CLI commands
   claudeCommand: process.env.CLAUDE_COMMAND || 'claude',
   antigravityCommand: process.env.ANTIGRAVITY_COMMAND || 'agy',
+  codexCommand: process.env.CODEX_COMMAND || 'codex',
 };
 
 module.exports = config;
