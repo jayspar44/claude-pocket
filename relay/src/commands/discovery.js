@@ -66,12 +66,33 @@ async function discoverAntigravity({ cwd, homeDir }) {
   return [...projectCmds, ...userCmds, ...extCmds, ...getBuiltinCommands('antigravity')];
 }
 
+async function discoverCodex({ cwd, homeDir }) {
+  // Codex uses ~/.codex/ for user config and <cwd>/.codex/ for project config.
+  // Custom slash command files aren't an established convention yet, so we
+  // probe likely paths and return whatever exists alongside builtins.
+  const projectRoots = [
+    { dir: path.join(cwd, '.codex/commands'), ext: '.md', source: 'project' },
+    { dir: path.join(cwd, '.codex/skills'), skillDir: true, source: 'project' },
+  ];
+  const userRoots = [
+    { dir: path.join(homeDir, '.codex/commands'), ext: '.md', source: 'user' },
+    { dir: path.join(homeDir, '.codex/skills'), skillDir: true, source: 'user' },
+  ];
+  const [projectCmds, userCmds] = await Promise.all([
+    discoverFileCommands({ roots: projectRoots }),
+    discoverFileCommands({ roots: userRoots }),
+  ]);
+  return [...projectCmds, ...userCmds, ...getBuiltinCommands('codex')];
+}
+
 async function discoverCommands({ cwd, cliType, homeDir = os.homedir(), execAsync }) {
   let all = [];
   if (cliType === 'claude') {
     all = await discoverClaude({ cwd, homeDir, execAsync });
   } else if (cliType === 'antigravity') {
     all = await discoverAntigravity({ cwd, homeDir });
+  } else if (cliType === 'codex') {
+    all = await discoverCodex({ cwd, homeDir });
   } else {
     return [];
   }

@@ -38,7 +38,7 @@ Mobile App (Capacitor/React) ◄──WebSocket──► Relay Server (Mac)
 
 ## CLI Prerequisites
 
-The relay spawns either `claude` or `agy` (Antigravity CLI) per instance. Both must be installed and authenticated on the host before instances of that CLI type will work.
+The relay spawns one of `claude` (Claude Code), `agy` (Antigravity CLI), or `codex` (OpenAI Codex) per instance. Each must be installed and authenticated on the host before instances of that CLI type will work.
 
 **Claude Code:** Install via official installer; ensure `claude` is on `PATH`.
 
@@ -57,7 +57,32 @@ agy              # prints authorization URL
 # PROD and DEV folders share this auth (same user)
 ```
 
-If `agy` is missing or unauthenticated, the PTY surfaces the error in the terminal view — same behavior as Claude CLI errors.
+**OpenAI Codex CLI:**
+
+```bash
+# Install on minibox (one-time) — pick one:
+npm install -g @openai/codex
+# or
+curl -fsSL https://chatgpt.com/codex/install.sh | sh
+# or
+brew install --cask codex
+codex --version    # verify
+
+# First-time auth (one-time, interactive)
+ssh minibox
+codex login        # opens a browser flow; choose "Sign in with ChatGPT"
+# Sign in with ChatGPT Plus/Pro/Business/Edu/Enterprise account
+# (API-key auth is also supported via OPENAI_API_KEY for non-ChatGPT users)
+# Credentials saved under ~/.codex/ for the jayspar user
+# PROD and DEV folders share this auth (same user)
+
+# Manual update (the relay also runs this automatically before spawn)
+codex update
+```
+
+If any CLI is missing or unauthenticated, the PTY surfaces the error in the terminal view.
+
+**Override binary paths** (optional, in `relay/.env`): `CLAUDE_COMMAND`, `ANTIGRAVITY_COMMAND`, `CODEX_COMMAND`.
 
 ## Project Structure
 

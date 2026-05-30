@@ -20,6 +20,18 @@ function getGitBranch(cwd) {
   }
 }
 
+// CLI registry: maps cliType → { getCommand, label, supportsUpdate }
+// Add a new entry here to support an additional CLI.
+const CLI_REGISTRY = {
+  claude:      { getCommand: () => config.claudeCommand,      label: 'Claude Code',     supportsUpdate: true  },
+  antigravity: { getCommand: () => config.antigravityCommand, label: 'Antigravity CLI', supportsUpdate: true  },
+  codex:       { getCommand: () => config.codexCommand,       label: 'OpenAI Codex',    supportsUpdate: true  },
+};
+
+function getCliEntry(cliType) {
+  return CLI_REGISTRY[cliType] || CLI_REGISTRY.claude;
+}
+
 // Batch delay for output messages (reduces WebSocket overhead, improves performance)
 const BATCH_DELAY_MS = 50;
 
@@ -64,7 +76,7 @@ class PtyManager {
   }
 
   get cliLabel() {
-    return this.cliType === 'antigravity' ? 'Antigravity CLI' : 'Claude Code';
+    return getCliEntry(this.cliType).label;
   }
 
   setDeferredStart(workingDir) {
@@ -97,26 +109,30 @@ class PtyManager {
     this.currentWorkingDir = effectiveWorkingDir;
     this.intentionalStop = false;
 
-    // Run CLI self-update before starting (best-effort, non-blocking on failure)
-    const updateCommand = this.cliType === 'antigravity' ? config.antigravityCommand : config.claudeCommand;
-    this.broadcast({ type: 'pty-status', ...this.getStatus(), updating: true });
-    try {
-      await new Promise((resolve) => {
-        execFile(updateCommand, ['update'], {
-          timeout: 30000,
-          env: config.pty.env,
-        }, (error, stdout, stderr) => {
-          if (error) {
-            logger.warn({ cliType: this.cliType, error: error.message, stderr }, `${this.cliLabel} update failed (continuing anyway)`);
-          } else {
-            const output = (stdout || '').trim();
-            if (output) logger.info({ cliType: this.cliType, output }, `${this.cliLabel} update completed`);
-          }
-          resolve(); // Always resolve — update failure shouldn't block start
+    // Run CLI self-update before starting (best-effort, non-blocking on failure).
+    // Skipped for CLIs without an `update` subcommand (e.g. codex).
+    const cliEntry = getCliEntry(this.cliType);
+    if (cliEntry.supportsUpdate) {
+      const updateCommand = cliEntry.getCommand();
+      this.broadcast({ type: 'pty-status', ...this.getStatus(), updating: true });
+      try {
+        await new Promise((resolve) => {
+          execFile(updateCommand, ['update'], {
+            timeout: 30000,
+            env: config.pty.env,
+          }, (error, stdout, stderr) => {
+            if (error) {
+              logger.warn({ cliType: this.cliType, error: error.message, stderr }, `${this.cliLabel} update failed (continuing anyway)`);
+            } else {
+              const output = (stdout || '').trim();
+              if (output) logger.info({ cliType: this.cliType, output }, `${this.cliLabel} update completed`);
+            }
+            resolve(); // Always resolve — update failure shouldn't block start
+          });
         });
-      });
-    } catch (error) {
-      logger.warn({ cliType: this.cliType, error: error.message }, `${this.cliLabel} update threw unexpectedly (continuing anyway)`);
+      } catch (error) {
+        logger.warn({ cliType: this.cliType, error: error.message }, `${this.cliLabel} update threw unexpectedly (continuing anyway)`);
+      }
     }
 
     // Restore buffer from disk if available
@@ -125,7 +141,7 @@ class PtyManager {
     logger.info({ instanceId: this.instanceId, cliType: this.cliType, workingDir: effectiveWorkingDir, cols: spawnCols, rows: spawnRows }, `Starting ${this.cliLabel} process`);
 
     try {
-      const command = this.cliType === 'antigravity' ? config.antigravityCommand : config.claudeCommand;
+      const command = cliEntry.getCommand();
       const proc = pty.spawn(command, [], {
         name: 'xterm-256color',
         cols: spawnCols,

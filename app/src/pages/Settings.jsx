@@ -404,17 +404,21 @@ export default function Settings() {
           <div className="space-y-2">
             <label className="text-sm text-gray-400">Default CLI for New Instances</label>
             <div className="flex gap-2">
-              {['claude', 'antigravity'].map((cli) => (
+              {[
+                { value: 'claude',      label: 'Claude' },
+                { value: 'antigravity', label: 'Antigravity' },
+                { value: 'codex',       label: 'Codex' },
+              ].map(({ value, label }) => (
                 <button
-                  key={cli}
-                  onClick={() => handleDefaultCliChange(cli)}
+                  key={value}
+                  onClick={() => handleDefaultCliChange(value)}
                   className={`flex-1 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
-                    defaultCli === cli
+                    defaultCli === value
                       ? 'bg-purple-600 text-white'
                       : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
                   }`}
                 >
-                  {cli === 'claude' ? 'Claude' : 'Antigravity'}
+                  {label}
                 </button>
               ))}
             </div>
