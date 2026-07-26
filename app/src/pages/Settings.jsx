@@ -26,7 +26,14 @@ const envConfig = {
 export default function Settings() {
   const navigate = useNavigate();
   const { getRelayUrl, setRelayUrl, connectionState } = useRelay();
-  const { instances: appInstances, addInstance, connectInstance, switchInstance } = useInstance();
+  const {
+    instances: appInstances,
+    addInstance,
+    connectInstance,
+    switchInstance,
+    disconnectInstance,
+    disconnectAllInstances,
+  } = useInstance();
 
   const [relayUrlInput, setRelayUrlInput] = useState(getRelayUrl());
   const [fontSizeInput, setFontSizeInput] = useState(() => {
@@ -209,6 +216,10 @@ export default function Settings() {
     }
     setStoppingAll(true);
     try {
+      // Disconnect first, with reason 'user', so nothing auto-reconnects and
+      // re-sends set-instance. That would arm a deferred start on the relay and
+      // bring back every CLI the user just stopped.
+      disconnectAllInstances('user');
       const response = await instancesApi.deleteAll();
       alert(`Stopped ${response.data.count} instance(s)`);
     } catch (error) {
@@ -216,11 +227,12 @@ export default function Settings() {
       alert(error.response?.data?.error || 'Failed to stop instances');
     }
     setStoppingAll(false);
-  }, []);
+  }, [disconnectAllInstances]);
 
   const handleStopInstance = useCallback(async (instanceId) => {
     setStoppingInstance(instanceId);
     try {
+      disconnectInstance(instanceId);
       await instancesApi.delete(instanceId);
       // Re-fetch will happen via the interval
     } catch (error) {
@@ -228,7 +240,7 @@ export default function Settings() {
       alert(error.response?.data?.error || 'Failed to stop instance');
     }
     setStoppingInstance(null);
-  }, []);
+  }, [disconnectInstance]);
 
   const handleRestoreInstance = useCallback((serverInst) => {
     const existing = appInstances.find(a => a.id === serverInst.instanceId);

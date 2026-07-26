@@ -366,6 +366,10 @@ export function InstanceProvider({ children }) {
     managerRef.current?.disconnect(instanceId, 'user');
   }, []);
 
+  const disconnectAllInstances = useCallback((reason = 'user') => {
+    managerRef.current.disconnectAll(reason);
+  }, []);
+
   const sendToInstance = useCallback((instanceId, message) => (
     managerRef.current?.send(instanceId, message) ?? false
   ), []);
@@ -624,6 +628,7 @@ export function InstanceProvider({ children }) {
     // Multi-instance actions
     connectInstance,
     disconnectInstance,
+    disconnectAllInstances,
     sendToInstance,
     addInstanceMessageListener: addMessageListener,
     handleAppExit,
@@ -653,6 +658,7 @@ export function InstanceProvider({ children }) {
     addActiveMessageListener,
     connectInstance,
     disconnectInstance,
+    disconnectAllInstances,
     sendToInstance,
     addMessageListener,
     handleAppExit,
