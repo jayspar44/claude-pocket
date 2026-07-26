@@ -52,7 +52,11 @@ class PtyManager {
     this.outputBuffer = [];
     this.outputBufferSize = 0;
     this.listeners = new Set();
-    this.isRunning = false;
+    // Lifecycle: 'stopped' -> 'starting' -> 'running' -> 'stopped'.
+    // 'starting' exists because ptyProcess is not assigned until after the CLI
+    // self-update, which can block for 30s. Without a distinct state, both
+    // start() and stop() are blind during that window.
+    this.status = 'stopped';
     this.currentWorkingDir = null;
     this.pendingWorkingDir = null; // For updating workingDir without restart
     this.deferredStartDir = null; // For deferring PTY start until first resize with real dimensions
@@ -79,17 +83,45 @@ class PtyManager {
     return getCliEntry(this.cliType).label;
   }
 
+  // Retained so existing callers and the /api/health payload keep working.
+  get isRunning() {
+    return this.status === 'running';
+  }
+
+  get isBusy() {
+    return this.status !== 'stopped';
+  }
+
   setDeferredStart(workingDir) {
     this.deferredStartDir = workingDir;
     logger.info({ instanceId: this.instanceId, workingDir }, 'Deferred PTY start until first resize with real dimensions');
   }
 
   async start(workingDir, cols, rows) {
-    if (this.ptyProcess) {
+    if (this.status === 'running') {
       logger.warn({ instanceId: this.instanceId }, 'PTY process already running');
       return;
     }
+    if (this.status === 'starting') {
+      throw new Error('PTY start already in progress');
+    }
 
+    this.status = 'starting';
+    this.intentionalStop = false;
+    try {
+      await this._start(workingDir, cols, rows);
+    } catch (error) {
+      this.status = 'stopped';
+      throw error;
+    }
+    // A stop() during the await leaves status already 'stopped'; do not clobber it.
+    if (this.status === 'starting') {
+      this.status = 'stopped';
+      logger.warn({ instanceId: this.instanceId }, 'PTY start finished without spawning');
+    }
+  }
+
+  async _start(workingDir, cols, rows) {
     // Clear deferred start since we're starting now
     this.deferredStartDir = null;
 
@@ -135,6 +167,13 @@ class PtyManager {
       }
     }
 
+    // stop() may have been called during the update await. It cannot kill a
+    // process that does not exist yet, so it records intent and we honour it here.
+    if (this.intentionalStop) {
+      logger.info({ instanceId: this.instanceId }, 'PTY start aborted by stop()');
+      return;
+    }
+
     // Restore buffer from disk if available
     this.loadBuffer();
 
@@ -151,7 +190,7 @@ class PtyManager {
       });
 
       this.ptyProcess = proc;
-      this.isRunning = true;
+      this.status = 'running';
       this.processStartTime = Date.now();
       this.lastOutputLines = [];
 
@@ -213,7 +252,7 @@ class PtyManager {
 
         // Only clear if this is still the current process (prevents race condition on restart)
         if (this.ptyProcess === proc) {
-          this.isRunning = false;
+          this.status = 'stopped';
           this.ptyProcess = null;
         }
         this.broadcast({ type: 'pty-status', running: this.isRunning, exitCode, signal });
@@ -274,29 +313,40 @@ class PtyManager {
   }
 
   stop() {
-    if (this.ptyProcess) {
-      logger.info(`Stopping ${this.cliLabel} process`);
-      this.intentionalStop = true; // Prevent auto-restart
-      // Flush any pending batched output
-      if (this.batchTimer) {
-        clearTimeout(this.batchTimer);
-        this.flushBatch();
-      }
-      // Flush any pending buffer save
-      if (this.saveTimer) {
-        clearTimeout(this.saveTimer);
-        this.saveTimer = null;
-        this.saveBuffer();
-      }
-      // Clear idle timer
-      if (this.idleTimer) {
-        clearTimeout(this.idleTimer);
-        this.idleTimer = null;
-      }
-      this.ptyProcess.kill();
-      this.ptyProcess = null;
-      this.isRunning = false;
+    // Record intent first, unconditionally: during 'starting' there is no
+    // process to kill, and _start checks this flag before spawning.
+    this.intentionalStop = true;
+
+    if (this.status === 'starting') {
+      logger.info({ instanceId: this.instanceId }, 'Cancelling in-flight PTY start');
+      this.status = 'stopped';
+      return;
     }
+    if (!this.ptyProcess) {
+      this.status = 'stopped';
+      return;
+    }
+
+    logger.info(`Stopping ${this.cliLabel} process`);
+    // Flush any pending batched output
+    if (this.batchTimer) {
+      clearTimeout(this.batchTimer);
+      this.flushBatch();
+    }
+    // Flush any pending buffer save
+    if (this.saveTimer) {
+      clearTimeout(this.saveTimer);
+      this.saveTimer = null;
+      this.saveBuffer();
+    }
+    // Clear idle timer
+    if (this.idleTimer) {
+      clearTimeout(this.idleTimer);
+      this.idleTimer = null;
+    }
+    this.ptyProcess.kill();
+    this.ptyProcess = null;
+    this.status = 'stopped';
   }
 
   write(data) {
