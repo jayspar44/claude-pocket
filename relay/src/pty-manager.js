@@ -190,6 +190,16 @@ class PtyManager {
 
     // Computed after the update await so a resize arriving during the window
     // is honoured rather than discarded.
+    //
+    // lastCols/lastRows deliberately win over the caller's cols/rows, and
+    // survive stop(): they are the real xterm.js dimensions the client last
+    // reported (via resize, or via set-instance during 'starting'), whereas
+    // the arguments are a caller-side fallback that is frequently absent -
+    // POST /api/pty/start and POST /api/pty/restart pass none at all. If the
+    // arguments won, a restart or a Start-after-Stop would drop the session
+    // back to config.pty.cols (50) and make MCP tool output render vertically
+    // until the next resize. The client's own dimensions are never stale in
+    // practice: resize() updates them on every terminal geometry change.
     const spawnCols = this.lastCols || cols || config.pty.cols;
     const spawnRows = this.lastRows || rows || config.pty.rows;
     this.lastCols = spawnCols;
