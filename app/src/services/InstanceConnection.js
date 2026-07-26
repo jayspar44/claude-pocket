@@ -69,9 +69,9 @@ export class InstanceConnection {
     ws.onopen = () => {
       if (this.ws !== ws) return;
       ws.send(JSON.stringify({
+        ...this.getHandshakePayload(),
         type: 'set-instance',
         instanceId: this.instanceId,
-        ...this.getHandshakePayload(),
       }));
     };
 

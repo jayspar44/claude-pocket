@@ -56,6 +56,23 @@ describe('InstanceConnection: connect and handshake', () => {
     });
   });
 
+  it('does not let a handshake payload override type or instanceId', () => {
+    const { conn } = make({
+      getHandshakePayload: () => ({
+        type: 'bogus-type',
+        instanceId: 'bogus-instance',
+        workingDir: '/tmp',
+      }),
+    });
+    conn.connect();
+    FakeSocket.last.fireOpen();
+    expect(FakeSocket.last.lastSent).toEqual({
+      type: 'set-instance',
+      instanceId: 'inst-1',
+      workingDir: '/tmp',
+    });
+  });
+
   it('stays connecting after open until pty-status arrives', () => {
     const { conn } = make();
     conn.connect();
