@@ -133,11 +133,6 @@ class PtyManager {
       throw new Error('workingDir is required to start PTY');
     }
 
-    const spawnCols = cols || config.pty.cols;
-    const spawnRows = rows || config.pty.rows;
-    this.lastCols = spawnCols;
-    this.lastRows = spawnRows;
-
     this.currentWorkingDir = effectiveWorkingDir;
     this.intentionalStop = false;
 
@@ -173,6 +168,13 @@ class PtyManager {
       logger.info({ instanceId: this.instanceId }, 'PTY start aborted by stop()');
       return;
     }
+
+    // Computed after the update await so a resize arriving during the window
+    // is honoured rather than discarded.
+    const spawnCols = this.lastCols || cols || config.pty.cols;
+    const spawnRows = this.lastRows || rows || config.pty.rows;
+    this.lastCols = spawnCols;
+    this.lastRows = spawnRows;
 
     // Restore buffer from disk if available
     this.loadBuffer();

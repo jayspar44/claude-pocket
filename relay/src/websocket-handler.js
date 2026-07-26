@@ -191,7 +191,7 @@ class WebSocketHandler {
         // Auto-start PTY if not running but we have a working directory
         // Defer start until first resize arrives with real xterm.js dimensions
         // to prevent MCP tool calls rendering vertically with stale/fallback dimensions
-        if (!ptyManager.isRunning && (workingDir || ptyManager.currentWorkingDir)) {
+        if (!ptyManager.isBusy && (workingDir || ptyManager.currentWorkingDir)) {
           const dir = workingDir || ptyManager.currentWorkingDir;
           logger.info({ clientId: ws.clientId, instanceId: newInstanceId, workingDir: dir, clientCols, clientRows }, 'PTY not running, deferring start until resize with real dimensions');
           ptyManager.setDeferredStart(dir);
@@ -202,13 +202,13 @@ class WebSocketHandler {
           ws._deferredStartTimer = setTimeout(async () => {
             ws._deferredStartTimer = null;
             const pm = ptyRegistry.get(newInstanceId);
-            if (!pm.isRunning && pm.deferredStartDir) {
+            if (!pm.isBusy && pm.deferredStartDir) {
               logger.info({ instanceId: newInstanceId, clientCols, clientRows }, 'Deferred start fallback: no resize received, starting with set-instance dimensions');
               await pm.start(pm.deferredStartDir, clientCols, clientRows);
               ctx.sendReplay(pm, newInstanceId);
             }
           }, 3000);
-        } else if (!ptyManager.isRunning && !workingDir && !ptyManager.currentWorkingDir) {
+        } else if (!ptyManager.isBusy && !workingDir && !ptyManager.currentWorkingDir) {
           // No working directory - can't start Claude, send error to client
           logger.warn({ clientId: ws.clientId, instanceId: newInstanceId }, 'Cannot start CLI: no working directory configured');
           this.send(ws, {
@@ -245,7 +245,7 @@ class WebSocketHandler {
         const ptyManager = ptyRegistry.get(instanceId);
         if (message.cols && message.rows) {
           // If PTY is deferred, start it now with real xterm.js dimensions
-          if (!ptyManager.isRunning && ptyManager.deferredStartDir) {
+          if (!ptyManager.isBusy && ptyManager.deferredStartDir) {
             if (ws._deferredStartTimer) {
               clearTimeout(ws._deferredStartTimer);
               ws._deferredStartTimer = null;
@@ -253,6 +253,12 @@ class WebSocketHandler {
             logger.info({ instanceId, cols: message.cols, rows: message.rows }, 'Starting deferred PTY with real resize dimensions');
             await ptyManager.start(ptyManager.deferredStartDir, message.cols, message.rows);
             ctx.sendReplay(ptyManager, instanceId);
+          } else if (ptyManager.status === 'starting') {
+            // No process to resize yet. Record the dimensions so the spawn uses
+            // them instead of the set-instance fallback, which is what makes MCP
+            // tool output render vertically.
+            ptyManager.lastCols = message.cols;
+            ptyManager.lastRows = message.rows;
           } else {
             ptyManager.resize(message.cols, message.rows);
           }

@@ -81,3 +81,30 @@ test('start() is a no-op when already running', async () => {
   await pm.start('/tmp', 80, 24);
   assert.equal(pm.spawns, 1, 'second start must not spawn again');
 });
+
+test('a resize during the start window sets the spawn dimensions', async () => {
+  const pm = new PtyManager('t6', 'claude');
+  let release;
+  const gate = new Promise((r) => { release = r; });
+  pm.spawns = 0;
+  pm._start = async function (workingDir, cols, rows) {
+    this.deferredStartDir = null;
+    await gate;
+    if (this.intentionalStop) return;
+    const spawnCols = this.lastCols || cols;
+    const spawnRows = this.lastRows || rows;
+    this.spawnedAt = { cols: spawnCols, rows: spawnRows };
+    this.spawns++;
+    this.ptyProcess = { pid: 1, kill() {}, write() {}, resize() {} };
+    this.status = 'running';
+  };
+
+  const started = pm.start('/tmp', 50, 24);   // fallback dims
+  assert.equal(pm.status, 'starting');
+  pm.lastCols = 92;                            // what the resize handler records
+  pm.lastRows = 40;
+
+  release();
+  await started;
+  assert.deepEqual(pm.spawnedAt, { cols: 92, rows: 40 });
+});
