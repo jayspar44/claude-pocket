@@ -329,6 +329,12 @@ export function InstanceProvider({ children }) {
     return () => {
       mgr.destroyAll();
       managerRef.current = null;
+      // destroy() sets DESTROYED without going through _setState, so no
+      // onStateChange fires and the release below is the only one that runs. A
+      // WebView reload resets webSocketServiceRunning to false while the native
+      // notification survives, so skipping this leaves an orphaned service that
+      // the next start() would double up on.
+      stopForegroundService();
     };
   }, []);
 
