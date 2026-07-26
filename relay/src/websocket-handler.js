@@ -225,6 +225,13 @@ class WebSocketHandler {
         // Resize PTY to client dimensions before sending replay
         if (ptyManager.isRunning) {
           ptyManager.resize(clientCols, clientRows);
+        } else if (ptyManager.status === 'starting') {
+          // No process to resize yet. Record the dimensions so the spawn uses
+          // them instead of whatever dimensions the in-flight start() call was
+          // given - otherwise a reconnecting client's real dimensions are lost
+          // and the CLI spawns at the fallback size.
+          ptyManager.lastCols = clientCols;
+          ptyManager.lastRows = clientRows;
         }
 
         // Send replay for this instance
