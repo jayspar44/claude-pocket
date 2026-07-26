@@ -5,6 +5,22 @@ const config = require('./config');
 const logger = require('./logger');
 
 class WebSocketHandler {
+  // JSON.parse succeeds on null, numbers, strings and arrays. handleMessage
+  // destructures its argument, so anything that is not a plain object must be
+  // rejected here rather than throwing downstream.
+  static parseClientFrame(raw) {
+    let message;
+    try {
+      message = JSON.parse(raw);
+    } catch {
+      return { ok: false, reason: 'invalid-json' };
+    }
+    if (typeof message !== 'object' || message === null || Array.isArray(message)) {
+      return { ok: false, reason: 'not-an-object' };
+    }
+    return { ok: true, message };
+  }
+
   constructor(server) {
     this.wss = new WebSocketServer({
       server,
@@ -73,12 +89,31 @@ class WebSocketHandler {
 
       // Handle incoming messages
       ws.on('message', (data) => {
-        try {
-          const message = JSON.parse(data.toString());
-          this.handleMessage(ws, message, { setupPtyListener, sendReplay, skipUntilReplay: () => skipUntilReplay, setSkipReplay: (v) => { skipUntilReplay = v; } });
-        } catch (error) {
-          logger.error({ error: error.message, clientId }, 'Failed to parse WebSocket message');
+        const parsed = WebSocketHandler.parseClientFrame(data.toString());
+        if (!parsed.ok) {
+          logger.warn({ clientId, reason: parsed.reason }, 'Ignoring unusable WebSocket frame');
+          return;
         }
+        const message = parsed.message;
+        // handleMessage is async. An unhandled rejection here terminates the
+        // process under Node's default --unhandled-rejections=throw, taking
+        // every PTY session with it.
+        this.handleMessage(ws, message, {
+          setupPtyListener,
+          sendReplay,
+          skipUntilReplay: () => skipUntilReplay,
+          setSkipReplay: (v) => { skipUntilReplay = v; },
+        }).catch((error) => {
+          logger.error(
+            { error: error.message, clientId, type: message.type },
+            'Failed to handle WebSocket message'
+          );
+          this.send(ws, {
+            type: 'pty-error',
+            message: error.message,
+            instanceId: ws.instanceId,
+          });
+        });
       });
 
       // Handle client disconnect
