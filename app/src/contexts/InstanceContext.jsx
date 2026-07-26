@@ -22,6 +22,12 @@ const HEARTBEAT_INTERVAL = 25000;
 const HEARTBEAT_TIMEOUT = 5000;
 const MAX_CONCURRENT_CONNECTIONS = 3;
 
+// Relay close code for a socket the relay considers orphaned or superseded.
+// The relay sends a close frame, so the handshake completes cleanly - but unlike
+// an ordinary clean close this is not the client's own decision to disconnect,
+// so it must still drive a reconnect.
+const CLOSE_CODE_EVICTED = 4002;
+
 // Storage keys (will be prefixed with port by storage utility)
 const INSTANCES_KEY = 'instances';
 const ACTIVE_INSTANCE_KEY = 'active-instance';
@@ -57,6 +63,16 @@ const DEFAULT_INSTANCE_ID = 'default';
 
 // Generate unique ID
 const generateId = () => `inst-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+
+// Identity for this running app instance, sent with every set-instance. It lets
+// the relay recognise a reconnect as *the same app* and drop the socket it
+// replaces immediately, instead of inferring orphanhood from ~75s of silence.
+//
+// Deliberately per page load, not persisted: supersede semantics only hold within
+// one running context. A second tab is a genuine second viewer and must get its
+// own id, or the two would evict each other in a reconnect loop. Sockets left by
+// a previous page load fall to the relay's silence sweep instead.
+const APP_CLIENT_ID = `app-${Date.now()}-${Math.random().toString(36).slice(2, 11)}`;
 
 // Backward-compat migration: rename Gemini -> Antigravity (added 2026-05-23)
 export const normalizeCliType = (cliType) => cliType === 'gemini' ? 'antigravity' : cliType;
@@ -264,16 +280,12 @@ export function InstanceProvider({ children }) {
       return;
     }
 
-    // Never leave a superseded socket behind. Anything still in the slot here is
-    // CLOSING/CLOSED, but closing explicitly (rather than just overwriting the
-    // ref) guarantees we can't orphan a socket that would keep its own PTY
-    // listener on the relay and deliver a duplicate copy of every byte.
+    // Anything still in the slot is CLOSING/CLOSED (OPEN/CONNECTING returned
+    // above), so there is nothing left to close here - close() is a no-op on
+    // those states. Just release the slot. A socket that is CLOSING on this side
+    // but still OPEN on the relay is handled there: the appClientId sent with
+    // set-instance lets the relay drop the socket this one replaces.
     if (existingWs) {
-      try {
-        existingWs.close(1000, 'Superseded by new connection');
-      } catch {
-        // Already closed - nothing to do
-      }
       delete wsRefs.current[instanceId];
     }
 
@@ -316,6 +328,7 @@ export function InstanceProvider({ children }) {
         ws.send(JSON.stringify({
           type: 'set-instance',
           instanceId: instance.id,
+          appClientId: APP_CLIENT_ID,
           workingDir: instance.workingDir || null,
           cliType: instance.cliType || 'claude',
           cols: dims.cols,
@@ -338,7 +351,12 @@ export function InstanceProvider({ children }) {
         delete wsRefs.current[instanceId];
         cleanupTimers(instanceId);
 
-        if (!event.wasClean) {
+        // An eviction closes cleanly, but the client did not ask to disconnect -
+        // treating it as a normal close would leave this instance dark until the
+        // user manually reselects it, since resume only reconnects the active one.
+        const evicted = event.code === CLOSE_CODE_EVICTED;
+
+        if (!event.wasClean || evicted) {
           const attempt = reconnectAttemptsRef.current[instanceId] || 0;
           if (attempt >= MAX_RECONNECT_ATTEMPTS) {
             updateInstanceState(instanceId, {
@@ -361,10 +379,26 @@ export function InstanceProvider({ children }) {
       };
 
       ws.onerror = () => {
+        // Same identity check as onclose: a superseded socket dying abnormally
+        // fires error before close, and `error` is only ever cleared by a fresh
+        // connect - so without this the live socket carries a permanent bogus
+        // error while reporting connectionState 'connected'.
+        if (wsRefs.current[instanceId] !== ws) {
+          return;
+        }
         updateInstanceState(instanceId, { error: 'WebSocket connection error' });
       };
 
       ws.onmessage = (event) => {
+        // A superseded socket can still deliver frames queued before its close
+        // handshake completed. Listeners are keyed by instanceId, not by socket,
+        // so those frames would be written into the live terminal on top of the
+        // replay the new socket just rendered - duplicated output, the exact
+        // symptom this is all here to prevent.
+        if (wsRefs.current[instanceId] !== ws) {
+          return;
+        }
+
         try {
           const message = JSON.parse(event.data);
 

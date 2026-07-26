@@ -4,16 +4,22 @@ const { DEFAULT_INSTANCE_ID } = require('./pty-registry');
 const config = require('./config');
 const logger = require('./logger');
 
-// Orphan eviction tuning.
+// Orphan eviction.
 //
-// A client that is still genuinely attached sends {type:'ping'} on the app-level
-// heartbeat (25s in the mobile client). A *leaked* socket — one the client
-// superseded but never closed — goes permanently silent, because the client keys
-// its heartbeat timer by instanceId, so each new socket overwrites the previous
-// one's timer. Silence is therefore the signal that separates an orphan from a
-// second real viewer, and it needs no client-side cooperation.
+// Primary mechanism: clients send a stable `appClientId` with set-instance, so
+// when a replacement socket registers for the same (appClientId, instanceId) the
+// relay can drop the previous one immediately — deterministic, no timing window,
+// no false positives.
+//
+// Fallback for clients that send no appClientId (older app builds): a silence
+// heuristic. A genuinely attached client sends {type:'ping'} on the app-level
+// heartbeat (25s in the mobile client); a leaked socket goes permanently silent,
+// because the client keys its heartbeat timer by instanceId, so each new socket
+// overwrites the previous one's timer.
 const ORPHAN_IDLE_MS = 75000;  // 3 missed client heartbeats
 const ORPHAN_SWEEP_MS = 30000;
+const EVICT_CLOSE_CODE = 4002;
+const EVICT_GRACE_MS = 3000;   // Wait for the close handshake, then terminate
 
 class WebSocketHandler {
   constructor(server) {
@@ -31,6 +37,7 @@ class WebSocketHandler {
       const clientId = this.generateClientId();
       ws.clientId = clientId;
       ws.instanceId = DEFAULT_INSTANCE_ID; // Default instance until set-instance received
+      ws.instanceAssigned = false; // True once set-instance names the real instance
       ws.lastClientMessage = Date.now(); // Liveness for orphan eviction
       this.clients.add(ws);
 
@@ -86,12 +93,21 @@ class WebSocketHandler {
       // Handle incoming messages
       ws.on('message', (data) => {
         ws.lastClientMessage = Date.now();
+        let message;
         try {
-          const message = JSON.parse(data.toString());
-          this.handleMessage(ws, message, { setupPtyListener, sendReplay, skipUntilReplay: () => skipUntilReplay, setSkipReplay: (v) => { skipUntilReplay = v; } });
+          message = JSON.parse(data.toString());
         } catch (error) {
           logger.error({ error: error.message, clientId }, 'Failed to parse WebSocket message');
+          return;
         }
+        // handleMessage is async: a rejection here (e.g. pty.spawn failing) would
+        // otherwise be an unhandled rejection, which under Node's default
+        // --unhandled-rejections=throw takes down the relay and every PTY with it.
+        this.handleMessage(ws, message, { setupPtyListener, sendReplay, skipUntilReplay: () => skipUntilReplay, setSkipReplay: (v) => { skipUntilReplay = v; } })
+          .catch((error) => {
+            logger.error({ error: error.message, clientId, type: message.type }, 'Failed to handle WebSocket message');
+            this.send(ws, { type: 'pty-error', message: error.message, instanceId: ws.instanceId });
+          });
       });
 
       // Handle client disconnect
@@ -131,18 +147,22 @@ class WebSocketHandler {
       });
     }, config.ws.pingInterval);
 
-    // Evict orphaned sockets. A buggy or superseded client can leave several
-    // sockets open on the same instance; each one carries its own PTY listener,
-    // so every output batch is delivered once per socket and the terminal renders
-    // duplicated output. Only sockets that have gone silent are evicted, and only
-    // when a live sibling exists on the same instance — so a genuine second
-    // viewer (which keeps heartbeating) is never disturbed.
+    // Fallback sweep, covering what the appClientId path cannot: clients too old to
+    // send one, and sockets stranded by a previous page load (whose appClientId is
+    // gone with it). Sockets that have gone silent are evicted, but only when a
+    // live sibling exists on the same instance — so a genuine second viewer, which
+    // keeps heartbeating, is never disturbed.
     this.orphanSweepInterval = setInterval(() => {
       const now = Date.now();
       const byInstance = new Map();
 
       this.clients.forEach((ws) => {
         if (ws.readyState !== ws.OPEN) return;
+        // A socket that has not yet sent set-instance is still parked on the
+        // default bucket. Counting it there would let a brand-new socket bound
+        // for another instance masquerade as a live sibling and authorise
+        // evicting the only real viewer of `default`.
+        if (!ws.instanceAssigned) return;
         const id = ws.instanceId || DEFAULT_INSTANCE_ID;
         if (!byInstance.has(id)) byInstance.set(id, []);
         byInstance.get(id).push(ws);
@@ -166,7 +186,7 @@ class WebSocketHandler {
             evicting: stale.length,
             surviving,
           }, 'Evicting orphaned WebSocket (silent while a live client is attached)');
-          ws.close(4002, 'Orphaned connection');
+          this.evict(ws, 'Orphaned connection');
         }
       }
     }, ORPHAN_SWEEP_MS);
@@ -175,6 +195,24 @@ class WebSocketHandler {
       clearInterval(this.pingInterval);
       clearInterval(this.orphanSweepInterval);
     });
+  }
+
+  // Drop a socket we have decided is orphaned.
+  //
+  // close() alone is not enough: an abandoned socket never acknowledges the close
+  // frame, so it lingers in CLOSING — holding its PTY listener, its deferred-start
+  // timer and its slot in this.clients — until the ws library's 30s close timeout.
+  // Send the frame so a live peer learns why it was dropped, then terminate to
+  // guarantee the 'close' handler runs and releases everything.
+  evict(ws, reason) {
+    try {
+      ws.close(EVICT_CLOSE_CODE, reason);
+    } catch {
+      // Already closing - terminate below still applies.
+    }
+    setTimeout(() => {
+      if (ws.readyState !== ws.CLOSED) ws.terminate();
+    }, EVICT_GRACE_MS).unref?.();
   }
 
   async handleMessage(ws, message, ctx) {
@@ -202,8 +240,28 @@ class WebSocketHandler {
         logger.info({ clientId: ws.clientId, oldInstanceId: ws.instanceId, newInstanceId, workingDir, cliType, clientCols, clientRows }, 'Client switching instance');
 
         ws.instanceId = newInstanceId;
+        ws.instanceAssigned = true;
         ws.cliType = cliType;
+        ws.appClientId = message.appClientId || null;
         ctx.setSkipReplay(true);
+
+        // A replacement socket for the same (app, instance) means the previous one
+        // was superseded — the app cannot have two live views of one instance. Drop
+        // it now rather than waiting out the silence heuristic, which costs a
+        // ~105s window of every byte being rendered twice.
+        if (ws.appClientId) {
+          this.clients.forEach((other) => {
+            if (other === ws) return;
+            if (other.appClientId !== ws.appClientId) return;
+            if (other.instanceId !== newInstanceId) return;
+            logger.warn({
+              clientId: other.clientId,
+              supersededBy: ws.clientId,
+              instanceId: newInstanceId,
+            }, 'Evicting superseded WebSocket (same app reconnected to this instance)');
+            this.evict(other, 'Superseded by new connection');
+          });
+        }
 
         const ptyManager = ctx.setupPtyListener(newInstanceId, cliType);
 
@@ -223,8 +281,15 @@ class WebSocketHandler {
             const pm = ptyRegistry.get(newInstanceId);
             if (!pm.isRunning && pm.deferredStartDir) {
               logger.info({ instanceId: newInstanceId, clientCols, clientRows }, 'Deferred start fallback: no resize received, starting with set-instance dimensions');
-              await pm.start(pm.deferredStartDir, clientCols, clientRows);
-              ctx.sendReplay(pm, newInstanceId);
+              // No caller to catch this: a rejection in a timer callback is
+              // unhandled and would terminate the relay process.
+              try {
+                await pm.start(pm.deferredStartDir, clientCols, clientRows);
+                ctx.sendReplay(pm, newInstanceId);
+              } catch (error) {
+                logger.error({ error: error.message, instanceId: newInstanceId }, 'Deferred PTY start failed');
+                this.send(ws, { type: 'pty-error', message: error.message, instanceId: newInstanceId });
+              }
             }
           }, 3000);
         } else if (!ptyManager.isRunning && !workingDir && !ptyManager.currentWorkingDir) {
