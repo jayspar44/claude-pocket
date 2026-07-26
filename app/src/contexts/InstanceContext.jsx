@@ -2,7 +2,7 @@ import { createContext, useContext, useState, useCallback, useRef, useEffect, us
 import { Capacitor, registerPlugin } from '@capacitor/core';
 import { App } from '@capacitor/app';
 import { notificationService } from '../services/NotificationService';
-import { InstanceConnection, CONNECTION_STATES } from '../services/InstanceConnection';
+import { InstanceConnection, CONNECTION_STATES, isLiveConnectionState } from '../services/InstanceConnection';
 import { ConnectionManager, IDLE_DISCONNECT_MS } from '../services/ConnectionManager';
 import { storage } from '../utils/storage';
 
@@ -37,11 +37,7 @@ const stopForegroundService = () => {
 const InstanceContext = createContext(null);
 
 // A connection that is already up, coming up, or backing off must be left alone.
-const isConnectionBusy = (conn) => Boolean(conn) && (
-  conn.state === CONNECTION_STATES.CONNECTING ||
-  conn.state === CONNECTION_STATES.CONNECTED ||
-  conn.state === CONNECTION_STATES.RECONNECTING
-);
+const isConnectionBusy = (conn) => Boolean(conn) && isLiveConnectionState(conn.state);
 
 // Storage keys (will be prefixed with port by storage utility)
 const INSTANCES_KEY = 'instances';
@@ -305,13 +301,15 @@ export function InstanceProvider({ children }) {
           else if (state === CONNECTION_STATES.CONNECTED) updates.error = null;
           updateInstanceStateRef.current(id, updates);
 
-          // Keep the connection alive while backgrounded (Android only). Only a
-          // settled disconnect releases the service - stopping it mid-reconnect
-          // is what would let Android kill the process before it comes back.
+          // Keep the connection alive while backgrounded (Android only). The
+          // release gate spans every instance, not just this one, and counts
+          // CONNECTING/RECONNECTING as live: an idle sweep of the last CONNECTED
+          // instance while another sits in backoff would otherwise release the
+          // service and let Android kill the process before that retry fires.
           if (state === CONNECTION_STATES.CONNECTED) {
             startForegroundService();
           } else if (state === CONNECTION_STATES.DISCONNECTED
-            && mgr.connectedCount() === 0) {
+            && !mgr.hasLiveConnections()) {
             stopForegroundService();
           }
         },

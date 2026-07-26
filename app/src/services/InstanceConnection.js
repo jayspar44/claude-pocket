@@ -9,6 +9,14 @@ export const CONNECTION_STATES = Object.freeze({
 
 const S = CONNECTION_STATES;
 
+// A connection that still owns a socket or is actively trying to get one back.
+// Callers use it for two decisions: "leave this one alone" and "something is
+// still live". CONNECTING and RECONNECTING count - a connection in backoff has
+// every intention of coming back.
+export const isLiveConnectionState = (state) => (
+  state === S.CONNECTING || state === S.CONNECTED || state === S.RECONNECTING
+);
+
 export const RECONNECT_DELAYS = [1000, 2000, 4000, 8000, 16000];
 export const MAX_RECONNECT_ATTEMPTS = 5;
 export const CONNECTION_TIMEOUT = 10000;

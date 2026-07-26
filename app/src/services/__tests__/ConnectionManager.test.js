@@ -46,6 +46,42 @@ describe('ConnectionManager', () => {
     expect(mgr.connectedCount()).toBe(1);
   });
 
+  it('hasLiveConnections counts CONNECTING and RECONNECTING, not just CONNECTED', () => {
+    const { mgr } = make();
+    const c = mgr.ensure('i1', 'ws://r/ws');
+    c.state = 'reconnecting';
+    expect(mgr.connectedCount()).toBe(0);
+    expect(mgr.hasLiveConnections()).toBe(true);
+    c.state = 'connecting';
+    expect(mgr.hasLiveConnections()).toBe(true);
+    c.state = 'disconnected';
+    expect(mgr.hasLiveConnections()).toBe(false);
+    c.state = 'destroyed';
+    expect(mgr.hasLiveConnections()).toBe(false);
+  });
+
+  it('stays live when the last CONNECTED instance is swept while another backs off', () => {
+    // The scenario the foreground-service release gate has to survive: A has been
+    // idle an hour, B is mid-backoff behind a dead network, both backgrounded. The
+    // sweep disconnects A, and connectedCount() is then 0 - releasing on that
+    // would let Android kill the process before B's retry ever fires.
+    const { mgr } = make({ isViewIdle: () => true });
+    const a = mgr.ensure('i1', 'ws://r/ws');
+    const b = mgr.ensure('i2', 'ws://r/ws');
+    b.state = 'reconnecting';
+    a.isIdleSince.mockReturnValue(true);
+
+    mgr.tick();
+
+    expect(a.disconnect).toHaveBeenCalledWith('idle');
+    expect(mgr.connectedCount()).toBe(0);
+    expect(mgr.hasLiveConnections()).toBe(true);
+
+    // Once B gives up too, nothing is live and the service may be released.
+    b.state = 'disconnected';
+    expect(mgr.hasLiveConnections()).toBe(false);
+  });
+
   it('one tick pings every connected connection', () => {
     const { mgr } = make();
     mgr.ensure('i1', 'ws://r/ws');
