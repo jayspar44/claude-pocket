@@ -197,16 +197,13 @@ class WebSocketHandler {
           ptyManager.setDeferredStart(dir);
           // Send status so client knows PTY is not yet running
           this.send(ws, { type: 'pty-status', ...ptyManager.getStatus() });
-          // Fallback: start with set-instance dims if no resize arrives within 3s
+          // Fallback: start with set-instance dims if no resize arrives within 3s.
+          // Extracted to a method (rather than an inline async arrow) so the
+          // try/catch around pm.start() can be exercised directly in tests
+          // without waiting on a real 3s timer.
           if (ws._deferredStartTimer) clearTimeout(ws._deferredStartTimer);
-          ws._deferredStartTimer = setTimeout(async () => {
-            ws._deferredStartTimer = null;
-            const pm = ptyRegistry.get(newInstanceId);
-            if (!pm.isBusy && pm.deferredStartDir) {
-              logger.info({ instanceId: newInstanceId, clientCols, clientRows }, 'Deferred start fallback: no resize received, starting with set-instance dimensions');
-              await pm.start(pm.deferredStartDir, clientCols, clientRows);
-              ctx.sendReplay(pm, newInstanceId);
-            }
+          ws._deferredStartTimer = setTimeout(() => {
+            this.runDeferredStartFallback(ws, newInstanceId, clientCols, clientRows, ctx);
           }, 3000);
         } else if (!ptyManager.isBusy && ptyManager.stoppedByUser) {
           logger.info(
@@ -351,6 +348,30 @@ class WebSocketHandler {
 
       default:
         logger.warn({ type, clientId: ws.clientId }, 'Unknown WebSocket message type');
+    }
+  }
+
+  // Fires ~3s after set-instance arms a deferred start, if no resize arrived
+  // with real dimensions in the meantime. Runs from a bare setTimeout with no
+  // caller to await it, so a rejection here (e.g. pty.spawn failing because
+  // the configured CLI binary is missing or misconfigured) MUST be caught
+  // locally - otherwise it is an unhandled rejection and, under Node's
+  // default --unhandled-rejections=throw, takes down the whole relay process,
+  // killing every other instance's session along with it.
+  async runDeferredStartFallback(ws, newInstanceId, clientCols, clientRows, ctx) {
+    ws._deferredStartTimer = null;
+    const pm = ptyRegistry.get(newInstanceId);
+    if (!pm.isBusy && pm.deferredStartDir) {
+      logger.info({ instanceId: newInstanceId, clientCols, clientRows }, 'Deferred start fallback: no resize received, starting with set-instance dimensions');
+      try {
+        await pm.start(pm.deferredStartDir, clientCols, clientRows);
+        ctx.sendReplay(pm, newInstanceId);
+      } catch (error) {
+        // pm.start() already logs the failure and broadcasts a pty-error to
+        // any connected listeners; this catch exists only to stop the
+        // rejection from propagating unhandled.
+        logger.error({ instanceId: newInstanceId, error: error.message }, 'Deferred start fallback failed');
+      }
     }
   }
 

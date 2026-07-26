@@ -116,6 +116,10 @@ class PtyManager {
       await this._start(workingDir, cols, rows);
     } catch (error) {
       this.status = 'stopped';
+      // Tell every connected client why nothing started (e.g. the CLI binary
+      // is missing or misconfigured) - regardless of which caller invoked
+      // start() (HTTP route, WS deferred-start fallback, crash auto-restart).
+      this.broadcast({ type: 'pty-error', message: error.message });
       throw error;
     }
     // A stop() during the await leaves status already 'stopped'; do not clobber it.
@@ -305,12 +309,29 @@ class PtyManager {
     // Notify clients of pending restart
     this.broadcast({ type: 'pty-restarting', attempt: this.restartAttempts });
 
-    setTimeout(async () => {
-      if (!this.ptyProcess && !this.intentionalStop) {
-        logger.info(`Auto-restarting ${this.cliLabel} process`);
+    setTimeout(() => this.attemptAutoRestart(), AUTO_RESTART_DELAY_MS);
+  }
+
+  // Extracted from scheduleRestart's setTimeout so the try/catch around
+  // start() can be exercised directly in tests without a real timer, and so
+  // the rejection path is obviously guarded. Runs from a bare setTimeout with
+  // no caller to await it, so a rejection here (e.g. pty.spawn failing
+  // because the configured CLI binary is missing or misconfigured) MUST be
+  // caught locally - otherwise it is an unhandled rejection and, under
+  // Node's default --unhandled-rejections=throw, takes down the whole relay
+  // process, killing every other instance's session along with it.
+  async attemptAutoRestart() {
+    if (!this.ptyProcess && !this.intentionalStop) {
+      logger.info(`Auto-restarting ${this.cliLabel} process`);
+      try {
         await this.start(this.currentWorkingDir, this.lastCols, this.lastRows);
+      } catch (error) {
+        // start() already logs the failure and broadcasts a pty-error to any
+        // connected listeners; this catch exists only to stop the rejection
+        // from propagating unhandled.
+        logger.error({ instanceId: this.instanceId, error: error.message }, 'Auto-restart failed');
       }
-    }, AUTO_RESTART_DELAY_MS);
+    }
   }
 
   resetRestartCounter() {
