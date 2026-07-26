@@ -9,7 +9,10 @@ const config = {
     cols: 50,
     rows: 24,
     cwd: null, // Set at start time from app Settings
-    maxInstances: parseInt(process.env.MAX_INSTANCES || '10', 10),
+    // `|| 10` (not a '10' default inside parseInt): a non-numeric
+    // MAX_INSTANCES parses to NaN, and `size >= NaN` is always false, which
+    // silently removes the instance cap altogether. Same pattern as `port`.
+    maxInstances: parseInt(process.env.MAX_INSTANCES, 10) || 10,
     env: (() => {
       const env = { ...process.env, TERM: 'xterm-256color', COLORTERM: 'truecolor' };
       // Strip CLAUDECODE to prevent "nested session" error when relay runs inside Claude
