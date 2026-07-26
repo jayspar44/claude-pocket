@@ -1,8 +1,9 @@
 const PtyManager = require('./pty-manager');
 const logger = require('./logger');
+const config = require('./config');
 
 // Maximum number of concurrent PTY instances
-const MAX_INSTANCES = 10;
+const MAX_INSTANCES = config.pty.maxInstances;
 
 // Idle timeout for cleanup (30 minutes)
 const IDLE_TIMEOUT_MS = 30 * 60 * 1000;
@@ -45,9 +46,9 @@ class PtyRegistry {
           'Working directory changed, will apply on restart');
         instance.pendingWorkingDir = workingDir;
       }
-      // Update cliType if provided and different (only when not running)
+      // Update cliType if provided and different (only when not running/starting)
       if (cliType && instance.cliType !== cliType) {
-        if (!instance.isRunning) {
+        if (!instance.isBusy) {
           logger.info({ instanceId: id, oldCliType: instance.cliType, newCliType: cliType },
             'CLI type changed');
           instance.cliType = cliType;
@@ -141,8 +142,8 @@ class PtyRegistry {
       const idleTime = now - lastAccess;
       const instance = this.instances.get(id);
 
-      // Don't remove running instances or instances with connected clients
-      if (instance && !instance.isRunning && instance.listeners.size === 0 && idleTime > IDLE_TIMEOUT_MS) {
+      // Don't remove busy (running or starting) instances or instances with connected clients
+      if (instance && !instance.isBusy && instance.listeners.size === 0 && idleTime > IDLE_TIMEOUT_MS) {
         toRemove.push(id);
       }
     }
@@ -167,8 +168,8 @@ class PtyRegistry {
 
     for (const [id, lastAccess] of this.lastAccessTime) {
       const instance = this.instances.get(id);
-      // Only consider stopped instances with no listeners
-      if (instance && !instance.isRunning && instance.listeners.size === 0 && lastAccess < oldestTime) {
+      // Only consider stopped (not busy) instances with no listeners
+      if (instance && !instance.isBusy && instance.listeners.size === 0 && lastAccess < oldestTime) {
         oldestId = id;
         oldestTime = lastAccess;
       }

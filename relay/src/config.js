@@ -9,6 +9,7 @@ const config = {
     cols: 50,
     rows: 24,
     cwd: null, // Set at start time from app Settings
+    maxInstances: parseInt(process.env.MAX_INSTANCES || '10', 10),
     env: (() => {
       const env = { ...process.env, TERM: 'xterm-256color', COLORTERM: 'truecolor' };
       // Strip CLAUDECODE to prevent "nested session" error when relay runs inside Claude

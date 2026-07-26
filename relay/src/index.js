@@ -72,6 +72,7 @@ app.get('/api/health', (req, res) => {
     instanceCount: instances.length,
     clients: wsHandler.getConnectedClients(),
     workingDir: defaultInstance?.currentWorkingDir,
+    maxInstances: config.pty.maxInstances,
   });
 });
 
