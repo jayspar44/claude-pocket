@@ -2,6 +2,8 @@ import { createContext, useContext, useState, useCallback, useRef, useEffect, us
 import { Capacitor, registerPlugin } from '@capacitor/core';
 import { App } from '@capacitor/app';
 import { notificationService } from '../services/NotificationService';
+import { InstanceConnection, CONNECTION_STATES } from '../services/InstanceConnection';
+import { ConnectionManager, IDLE_DISCONNECT_MS } from '../services/ConnectionManager';
 import { storage } from '../utils/storage';
 
 // Register the foreground service plugin (Android only)
@@ -12,15 +14,34 @@ const WebSocketService = Capacitor.isNativePlatform()
 // Track WebSocketService state to prevent multiple start attempts
 let webSocketServiceRunning = false;
 
+const startForegroundService = () => {
+  if (!WebSocketService || webSocketServiceRunning) return;
+  webSocketServiceRunning = true;
+  WebSocketService.start().catch(err => {
+    webSocketServiceRunning = false;
+    console.warn('[InstanceContext] Failed to start foreground service:', err);
+  });
+};
+
+const stopForegroundService = () => {
+  if (!WebSocketService || !webSocketServiceRunning) return;
+  WebSocketService.stop()
+    .then(() => {
+      webSocketServiceRunning = false;
+    })
+    .catch(err => {
+      console.warn('[InstanceContext] Failed to stop foreground service:', err);
+    });
+};
+
 const InstanceContext = createContext(null);
 
-// Connection constants
-const RECONNECT_DELAYS = [1000, 2000, 4000, 8000, 16000];
-const MAX_RECONNECT_ATTEMPTS = 5;
-const CONNECTION_TIMEOUT = 10000;
-const HEARTBEAT_INTERVAL = 25000;
-const HEARTBEAT_TIMEOUT = 5000;
-const MAX_CONCURRENT_CONNECTIONS = 3;
+// A connection that is already up, coming up, or backing off must be left alone.
+const isConnectionBusy = (conn) => Boolean(conn) && (
+  conn.state === CONNECTION_STATES.CONNECTING ||
+  conn.state === CONNECTION_STATES.CONNECTED ||
+  conn.state === CONNECTION_STATES.RECONNECTING
+);
 
 // Storage keys (will be prefixed with port by storage utility)
 const INSTANCES_KEY = 'instances';
@@ -70,7 +91,7 @@ const createInstance = (name, relayUrl, workingDir, color, useDefaultId = false,
   color: color || INSTANCE_COLORS[0],
   cliType: cliType || storage.get('default-cli') || 'claude',
   createdAt: Date.now(),
-  lastUsedAt: Date.now(),
+  lastViewedAt: Date.now(),
 });
 
 // Initial state for instance connection
@@ -143,21 +164,17 @@ export function InstanceProvider({ children }) {
     return states;
   });
 
-  // WebSocket refs (Map<instanceId, WebSocket>)
-  const wsRefs = useRef({});
-  const reconnectAttemptsRef = useRef({});
-  const reconnectTimeoutsRef = useRef({});
-  const connectionTimeoutsRef = useRef({});
-  const heartbeatIntervalsRef = useRef({});
-
   // Track app visibility for notifications (Capacitor's visibilityState is unreliable)
   const isAppVisibleRef = useRef(true);
-  const pongTimeoutsRef = useRef({});
   const listenersRef = useRef({}); // Map<instanceId, Set<callback>>
-  const connectInstanceRef = useRef(null); // Ref for self-referencing in reconnect
 
-  // Ref to track activeInstanceId for WebSocket handlers (avoids stale closure)
-  const activeInstanceIdRef = useRef(null);
+  // Ref to track activeInstanceId for connection handlers (avoids stale closure)
+  const activeInstanceIdRef = useRef(activeInstanceId);
+
+  // Refs the manager reads through, so the manager never becomes a React
+  // dependency - see the callback-stability rule.
+  const instancesRef = useRef(instances);
+  useEffect(() => { instancesRef.current = instances; }, [instances]);
 
   // Persist instances to storage
   useEffect(() => {
@@ -209,259 +226,129 @@ export function InstanceProvider({ children }) {
     });
   }, []);
 
-  // Clean up timers for instance
-  const cleanupTimers = useCallback((instanceId) => {
-    if (connectionTimeoutsRef.current[instanceId]) {
-      clearTimeout(connectionTimeoutsRef.current[instanceId]);
-      delete connectionTimeoutsRef.current[instanceId];
-    }
-    if (heartbeatIntervalsRef.current[instanceId]) {
-      clearInterval(heartbeatIntervalsRef.current[instanceId]);
-      delete heartbeatIntervalsRef.current[instanceId];
-    }
-    if (pongTimeoutsRef.current[instanceId]) {
-      clearTimeout(pongTimeoutsRef.current[instanceId]);
-      delete pongTimeoutsRef.current[instanceId];
-    }
-  }, []);
+  // Refs the connection layer reads through, so a connection is never a React
+  // dependency - see the callback-stability rule. Seeded with the first render's
+  // value and refreshed in an effect, so they are never null and never stale.
+  const updateInstanceStateRef = useRef(updateInstanceState);
+  useEffect(() => { updateInstanceStateRef.current = updateInstanceState; }, [updateInstanceState]);
 
-  // Start heartbeat for instance
-  const startHeartbeat = useCallback((instanceId, ws) => {
-    if (heartbeatIntervalsRef.current[instanceId]) {
-      clearInterval(heartbeatIntervalsRef.current[instanceId]);
-    }
-    if (pongTimeoutsRef.current[instanceId]) {
-      clearTimeout(pongTimeoutsRef.current[instanceId]);
-    }
-
-    heartbeatIntervalsRef.current[instanceId] = setInterval(() => {
-      if (ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({ type: 'ping' }));
-        pongTimeoutsRef.current[instanceId] = setTimeout(() => {
-          console.warn(`[Instance ${instanceId}] Heartbeat timeout`);
-          ws.close(4000, 'Heartbeat timeout');
-        }, HEARTBEAT_TIMEOUT);
-      }
-    }, HEARTBEAT_INTERVAL);
-  }, []);
-
-  // Connect to instance
-  const connectInstance = useCallback((instanceId) => {
-    const instance = instances.find(i => i.id === instanceId);
-    if (!instance) return;
-
-    // Prevent duplicate connections - check both OPEN and CONNECTING states
-    const existingWs = wsRefs.current[instanceId];
-    if (existingWs?.readyState === WebSocket.OPEN ||
-        existingWs?.readyState === WebSocket.CONNECTING) {
-      return;
-    }
-
-    updateInstanceState(instanceId, { connectionState: 'connecting', error: null });
-
-    try {
-      const ws = new WebSocket(instance.relayUrl);
-      wsRefs.current[instanceId] = ws;
-
-      // Connection timeout
-      connectionTimeoutsRef.current[instanceId] = setTimeout(() => {
-        if (ws.readyState === WebSocket.CONNECTING) {
-          ws.close(4001, 'Connection timeout');
-        }
-      }, CONNECTION_TIMEOUT);
-
-      ws.onopen = () => {
-        if (connectionTimeoutsRef.current[instanceId]) {
-          clearTimeout(connectionTimeoutsRef.current[instanceId]);
-          delete connectionTimeoutsRef.current[instanceId];
-        }
-
-        updateInstanceState(instanceId, { connectionState: 'connected', error: null });
-        reconnectAttemptsRef.current[instanceId] = 0;
-        startHeartbeat(instanceId, ws);
-
-        // Start foreground service to keep connection alive when backgrounded (Android only)
-        if (WebSocketService && !webSocketServiceRunning) {
-          webSocketServiceRunning = true;
-          WebSocketService.start().catch(err => {
-            webSocketServiceRunning = false;
-            console.warn('[InstanceContext] Failed to start foreground service:', err);
-          });
-        }
-
-        // Send set-instance message to relay to register this client's instance
-        // This tells the relay which PTY instance to route messages to/from
-        // Include stored terminal dimensions so PTY starts at the correct size
-        const dims = storage.getJSON('terminal-dims', { cols: 50, rows: 24 });
-        ws.send(JSON.stringify({
-          type: 'set-instance',
-          instanceId: instance.id,
-          workingDir: instance.workingDir || null,
-          cliType: instance.cliType || 'claude',
-          cols: dims.cols,
-          rows: dims.rows,
-        }));
-      };
-
-      ws.onclose = (event) => {
-        delete wsRefs.current[instanceId];
-        cleanupTimers(instanceId);
-
-        if (!event.wasClean) {
-          const attempt = reconnectAttemptsRef.current[instanceId] || 0;
-          if (attempt >= MAX_RECONNECT_ATTEMPTS) {
-            updateInstanceState(instanceId, {
-              connectionState: 'disconnected',
-              error: 'Connection failed after multiple attempts',
-            });
-            return;
-          }
-
-          const delay = RECONNECT_DELAYS[Math.min(attempt, RECONNECT_DELAYS.length - 1)];
-          updateInstanceState(instanceId, { connectionState: 'reconnecting' });
-          reconnectAttemptsRef.current[instanceId] = attempt + 1;
-
-          reconnectTimeoutsRef.current[instanceId] = setTimeout(() => {
-            connectInstanceRef.current?.(instanceId);
-          }, delay);
-        } else {
-          updateInstanceState(instanceId, { connectionState: 'disconnected' });
-        }
-      };
-
-      ws.onerror = () => {
-        updateInstanceState(instanceId, { error: 'WebSocket connection error' });
-      };
-
-      ws.onmessage = (event) => {
-        try {
-          const message = JSON.parse(event.data);
-
-          // Handle pong
-          if (message.type === 'pong') {
-            if (pongTimeoutsRef.current[instanceId]) {
-              clearTimeout(pongTimeoutsRef.current[instanceId]);
-              delete pongTimeoutsRef.current[instanceId];
-            }
-            return;
-          }
-
-          // Handle status messages
-          if (message.type === 'ready') {
-            // Relay is ready, set-instance was already sent in onopen
-            console.log('[InstanceContext] Relay ready for instance:', instanceId);
-          } else if (message.type === 'status') {
-            if (message.connected !== undefined) {
-              updateInstanceState(instanceId, {
-                connectionState: message.connected ? 'connected' : 'disconnected',
-              });
-            }
-          } else if (message.type === 'pty-status') {
-            updateInstanceState(instanceId, {
-              ptyStatus: message,
-              processingStartTime: message.processingStartTime || null,
-              ptyError: null, // Clear error on successful status
-            });
-          } else if (message.type === 'pty-error') {
-            // PTY failed to start or crashed repeatedly
-            updateInstanceState(instanceId, {
-              ptyError: message.message || 'CLI failed to start',
-            });
-          } else if (message.type === 'pty-crash') {
-            // PTY crashed - show exit code and hint
-            const errorMsg = message.exitCode
-              ? `CLI crashed (exit ${message.exitCode})`
-              : 'CLI crashed unexpectedly';
-            updateInstanceState(instanceId, {
-              ptyError: errorMsg,
-            });
-          } else if (message.type === 'task-complete') {
-            updateInstanceState(instanceId, { taskComplete: true });
-
-            // Log and notify on long task completion (only when app is backgrounded)
-            const isVisible = isAppVisibleRef.current;
-            const willNotify = !isVisible;
-            notificationService.log('task-complete', {
-              duration: message.duration,
-              isVisible,
-              willNotify,
-            });
-            if (willNotify) {
-              notificationService.log('Triggering notifyTaskComplete');
-              notificationService.notifyTaskComplete({
-                instanceId,
-                duration: message.duration,
-              });
-            }
-          } else if (message.type === 'output' || message.type === 'replay') {
-            // Mark as unread if not active instance (use ref to avoid stale closure)
-            if (instanceId !== activeInstanceIdRef.current) {
-              updateInstanceState(instanceId, { hasUnread: true });
-            }
-          }
-
-          // Notify all listeners
-          notifyListeners(instanceId, message);
-        } catch (err) {
-          console.error('[InstanceContext] Error parsing message:', err);
-        }
-      };
-    } catch (err) {
+  // Every inbound message side-effect lives here, behind a ref, so the
+  // connection objects never capture React state.
+  const handleInstanceMessage = useCallback((instanceId, message) => {
+    if (message.type === 'pty-status') {
       updateInstanceState(instanceId, {
-        error: err.message,
-        connectionState: 'disconnected',
+        ptyStatus: message,
+        processingStartTime: message.processingStartTime || null,
+        ptyError: null, // Clear error on successful status
       });
-    }
-  }, [instances, instanceStates, updateInstanceState, notifyListeners, cleanupTimers, startHeartbeat]);
+    } else if (message.type === 'pty-error') {
+      updateInstanceState(instanceId, { ptyError: message.message || 'CLI failed to start' });
+    } else if (message.type === 'pty-crash') {
+      updateInstanceState(instanceId, {
+        ptyError: message.exitCode ? `CLI crashed (exit ${message.exitCode})` : 'CLI crashed unexpectedly',
+      });
+    } else if (message.type === 'task-complete') {
+      updateInstanceState(instanceId, { taskComplete: true });
 
-  // Keep ref updated for self-referencing in reconnect timeout
-  useEffect(() => {
-    connectInstanceRef.current = connectInstance;
-  }, [connectInstance]);
-
-  // Disconnect from instance
-  const disconnectInstance = useCallback((instanceId) => {
-    if (reconnectTimeoutsRef.current[instanceId]) {
-      clearTimeout(reconnectTimeoutsRef.current[instanceId]);
-      delete reconnectTimeoutsRef.current[instanceId];
-    }
-
-    cleanupTimers(instanceId);
-
-    if (wsRefs.current[instanceId]) {
-      wsRefs.current[instanceId].close(1000, 'Manual disconnect');
-      delete wsRefs.current[instanceId];
-    }
-
-    // Stop foreground service if no other connections are active (Android only)
-    if (WebSocketService && webSocketServiceRunning) {
-      const hasOtherConnections = Object.keys(wsRefs.current).some(
-        id => id !== instanceId && wsRefs.current[id]?.readyState === WebSocket.OPEN
-      );
-      if (!hasOtherConnections) {
-        WebSocketService.stop()
-          .then(() => {
-            webSocketServiceRunning = false;
-          })
-          .catch(err => {
-            console.warn('[InstanceContext] Failed to stop foreground service:', err);
-          });
+      // Log and notify on long task completion (only when app is backgrounded)
+      const isVisible = isAppVisibleRef.current;
+      notificationService.log('task-complete', {
+        duration: message.duration,
+        isVisible,
+        willNotify: !isVisible,
+      });
+      if (!isVisible) {
+        notificationService.notifyTaskComplete({ instanceId, duration: message.duration });
+      }
+    } else if (message.type === 'output' || message.type === 'replay') {
+      // Mark as unread if not active instance (use ref to avoid stale closure)
+      if (instanceId !== activeInstanceIdRef.current) {
+        updateInstanceState(instanceId, { hasUnread: true });
       }
     }
 
-    updateInstanceState(instanceId, { connectionState: 'disconnected' });
-    reconnectAttemptsRef.current[instanceId] = 0;
-  }, [cleanupTimers, updateInstanceState]);
+    // Notify all listeners
+    notifyListeners(instanceId, message);
+  }, [updateInstanceState, notifyListeners]);
 
-  // Send message to instance
-  const sendToInstance = useCallback((instanceId, message) => {
-    const ws = wsRefs.current[instanceId];
-    if (ws?.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify(message));
-      return true;
-    }
-    return false;
+  const handleInstanceMessageRef = useRef(handleInstanceMessage);
+  useEffect(() => { handleInstanceMessageRef.current = handleInstanceMessage; }, [handleInstanceMessage]);
+
+  // One owner for every socket and every timer belonging to one, plus one shared
+  // heartbeat. Built on mount and read only through managerRef, so it is never a
+  // React dependency; every callback below reaches it through that ref.
+  const managerRef = useRef(null);
+  useEffect(() => {
+    const mgr = new ConnectionManager({
+      connectionFactory: ({ instanceId, url }) => new InstanceConnection({
+        instanceId,
+        url,
+        getHandshakePayload: () => {
+          const inst = instancesRef.current.find((i) => i.id === instanceId);
+          const dims = storage.getJSON('terminal-dims', { cols: 50, rows: 24 });
+          return {
+            workingDir: inst?.workingDir || null,
+            cliType: inst?.cliType || 'claude',
+            cols: dims.cols,
+            rows: dims.rows,
+          };
+        },
+        onStateChange: (id, { state, error }) => {
+          const updates = {
+            connectionState: state === CONNECTION_STATES.DESTROYED
+              ? CONNECTION_STATES.DISCONNECTED
+              : state,
+          };
+          // Keep the last error visible while reconnecting, but never past a
+          // successful connect.
+          if (error !== null) updates.error = error;
+          else if (state === CONNECTION_STATES.CONNECTED) updates.error = null;
+          updateInstanceStateRef.current(id, updates);
+
+          // Keep the connection alive while backgrounded (Android only). Only a
+          // settled disconnect releases the service - stopping it mid-reconnect
+          // is what would let Android kill the process before it comes back.
+          if (state === CONNECTION_STATES.CONNECTED) {
+            startForegroundService();
+          } else if (state === CONNECTION_STATES.DISCONNECTED
+            && mgr.connectedCount() === 0) {
+            stopForegroundService();
+          }
+        },
+        onMessage: (id, message) => handleInstanceMessageRef.current(id, message),
+      }),
+      isViewIdle: (instanceId) => {
+        if (instanceId === activeInstanceIdRef.current) return false;
+        const inst = instancesRef.current.find((i) => i.id === instanceId);
+        const lastViewed = inst?.lastViewedAt || inst?.lastUsedAt || 0;
+        return Date.now() - lastViewed >= IDLE_DISCONNECT_MS;
+      },
+    });
+    managerRef.current = mgr;
+    mgr.startHeartbeat();
+    return () => {
+      mgr.destroyAll();
+      managerRef.current = null;
+    };
   }, []);
+
+  // No connection state in the dependency array. This is the callback-stability
+  // rule: a dependency on instanceStates re-creates this callback on every state
+  // write, which re-fires the auto-connect effect and reconnects instances the
+  // user just disconnected.
+  const connectInstance = useCallback((instanceId) => {
+    const instance = instancesRef.current.find((i) => i.id === instanceId);
+    if (!instance) return;
+    managerRef.current?.connect(instanceId, instance.relayUrl);
+  }, []);
+
+  const disconnectInstance = useCallback((instanceId) => {
+    managerRef.current?.disconnect(instanceId, 'user');
+  }, []);
+
+  const sendToInstance = useCallback((instanceId, message) => (
+    managerRef.current?.send(instanceId, message) ?? false
+  ), []);
 
   // Instance management functions
   const addInstance = useCallback((name, relayUrl, workingDir, color, customId = null, cliType = null) => {
@@ -493,12 +380,14 @@ export function InstanceProvider({ children }) {
 
   const updateInstance = useCallback((instanceId, updates) => {
     setInstances(prev => prev.map(inst =>
-      inst.id === instanceId ? { ...inst, ...updates, lastUsedAt: Date.now() } : inst
+      inst.id === instanceId ? { ...inst, ...updates } : inst
     ));
 
-    // Reconnect if relay URL changed
+    // Reconnect if relay URL changed. The connection is bound to the URL it was
+    // built with, so it has to be discarded rather than reconnected.
     if (updates.relayUrl) {
       disconnectInstance(instanceId);
+      managerRef.current?.remove(instanceId);
       if (instanceId === activeInstanceId) {
         setTimeout(() => connectInstance(instanceId), 100);
       }
@@ -509,6 +398,7 @@ export function InstanceProvider({ children }) {
     if (instances.length <= 1) return; // Keep at least one instance
 
     disconnectInstance(instanceId);
+    managerRef.current?.remove(instanceId);
     setInstances(prev => prev.filter(inst => inst.id !== instanceId));
     setInstanceStates(prev => {
       const next = { ...prev };
@@ -533,7 +423,7 @@ export function InstanceProvider({ children }) {
     // will connect once the instance appears in state after the re-render.
     setActiveInstanceId(instanceId);
 
-    const instance = instances.find(i => i.id === instanceId);
+    const instance = instancesRef.current.find(i => i.id === instanceId);
     if (!instance) return;
 
     // Clear notification indicators when switching to a tab
@@ -542,48 +432,23 @@ export function InstanceProvider({ children }) {
       taskComplete: false,
     });
 
-    // Update lastUsedAt
+    // Record the view for the idle sweep
     setInstances(prev => prev.map(inst =>
-      inst.id === instanceId ? { ...inst, lastUsedAt: Date.now() } : inst
+      inst.id === instanceId ? { ...inst, lastViewedAt: Date.now() } : inst
     ));
 
-    // Connect if not connected
-    if (!wsRefs.current[instanceId] || wsRefs.current[instanceId].readyState !== WebSocket.OPEN) {
+    // Selecting a tab is consent to connect it, including one the user
+    // previously disconnected.
+    if (!isConnectionBusy(managerRef.current?.get(instanceId))) {
       connectInstance(instanceId);
     }
-
-    // Manage concurrent connections (keep max 3)
-    const connectedIds = Object.keys(wsRefs.current).filter(
-      id => wsRefs.current[id]?.readyState === WebSocket.OPEN
-    );
-    if (connectedIds.length > MAX_CONCURRENT_CONNECTIONS) {
-      // Disconnect oldest inactive connection
-      const sorted = connectedIds
-        .filter(id => id !== instanceId)
-        .sort((a, b) => {
-          const instA = instances.find(i => i.id === a);
-          const instB = instances.find(i => i.id === b);
-          return (instA?.lastUsedAt || 0) - (instB?.lastUsedAt || 0);
-        });
-      if (sorted.length > 0) {
-        disconnectInstance(sorted[0]);
-      }
-    }
-  }, [instances, updateInstanceState, connectInstance, disconnectInstance]);
-
-  // Connect active instance on mount
-  useEffect(() => {
-    if (activeInstanceId) {
-      const timer = setTimeout(() => connectInstance(activeInstanceId), 150);
-      return () => clearTimeout(timer);
-    }
-  }, []); // Only on mount
+  }, [updateInstanceState, connectInstance]);
 
   // Listen for Service Worker notification click events to switch instances
   useEffect(() => {
     const handleSwSwitchInstance = (event) => {
       const { instanceId: targetInstanceId } = event.detail || {};
-      if (targetInstanceId && instances.find(i => i.id === targetInstanceId)) {
+      if (targetInstanceId && instancesRef.current.find(i => i.id === targetInstanceId)) {
         console.log('[InstanceContext] SW notification click, switching to instance:', targetInstanceId);
         switchInstance(targetInstanceId);
       }
@@ -591,10 +456,17 @@ export function InstanceProvider({ children }) {
 
     window.addEventListener('sw-switch-instance', handleSwSwitchInstance);
     return () => window.removeEventListener('sw-switch-instance', handleSwSwitchInstance);
-  }, [instances, switchInstance]);
+  }, [switchInstance]);
 
   // Reconnect when app returns from background + track visibility for notifications
   useEffect(() => {
+    const reconnectActiveIfNeeded = () => {
+      const instanceId = activeInstanceIdRef.current;
+      if (!instanceId) return;
+      if (isConnectionBusy(managerRef.current?.get(instanceId))) return;
+      connectInstance(instanceId);
+    };
+
     const handleVisibilityChange = () => {
       // Update visibility ref for web platform
       if (!Capacitor.isNativePlatform()) {
@@ -603,15 +475,7 @@ export function InstanceProvider({ children }) {
 
       if (document.hidden) return;
 
-      const ws = wsRefs.current[activeInstanceId];
-      const needsReconnect = !ws ||
-        ws.readyState === WebSocket.CLOSED ||
-        ws.readyState === WebSocket.CLOSING;
-
-      if (needsReconnect && activeInstanceId) {
-        reconnectAttemptsRef.current[activeInstanceId] = 0;
-        connectInstance(activeInstanceId);
-      }
+      reconnectActiveIfNeeded();
     };
 
     document.addEventListener('visibilitychange', handleVisibilityChange);
@@ -629,21 +493,12 @@ export function InstanceProvider({ children }) {
       document.removeEventListener('visibilitychange', handleVisibilityChange);
       appStateListener?.remove();
     };
-  }, [activeInstanceId, connectInstance]);
-
-  // Cleanup on unmount
-  useEffect(() => {
-    return () => {
-      Object.keys(wsRefs.current).forEach(id => {
-        disconnectInstance(id);
-      });
-    };
-  }, [disconnectInstance]);
+  }, [connectInstance]);
 
   // Handle full app exit (disconnect all and close app)
   const handleAppExit = useCallback(async () => {
     // Disconnect all instances
-    Object.keys(wsRefs.current).forEach(id => disconnectInstance(id));
+    managerRef.current?.disconnectAll('user');
 
     // Exit the app (Android only)
     if (WebSocketService) {
@@ -653,7 +508,7 @@ export function InstanceProvider({ children }) {
         console.warn('[InstanceContext] Failed to exit app:', err);
       }
     }
-  }, [disconnectInstance]);
+  }, []);
 
   // Create convenience methods for active instance
   const connect = useCallback(() => connectInstance(activeInstanceId), [activeInstanceId, connectInstance]);
@@ -666,7 +521,7 @@ export function InstanceProvider({ children }) {
   const requestReplay = useCallback(() => send({ type: 'replay' }), [send]);
   const submitInput = useCallback((data) => send({ type: 'submit', data }), [send]);
 
-  // Keep activeInstanceIdRef in sync for WebSocket handlers and stable callbacks
+  // Keep activeInstanceIdRef in sync for connection handlers and stable callbacks
   useEffect(() => {
     activeInstanceIdRef.current = activeInstanceId;
   }, [activeInstanceId]);
@@ -692,16 +547,19 @@ export function InstanceProvider({ children }) {
     return instanceStates[id] || createInstanceState();
   }, [instanceStates]);
 
-  // Auto-connect when activeInstanceId changes (handles race with addInstance)
+  // Selecting a tab is consent to connect it, including one the user previously
+  // disconnected. But a connection that is already up, coming up, or backing off
+  // must be left alone. `instances` is deliberately not a dependency - it is read
+  // through instancesRef, because listing it re-fires this effect on every
+  // lastViewedAt write.
   useEffect(() => {
     if (!activeInstanceId) return;
-    const instance = instances.find(i => i.id === activeInstanceId);
+    const instance = instancesRef.current.find((i) => i.id === activeInstanceId);
     if (!instance) return;
-    const ws = wsRefs.current[activeInstanceId];
-    if (!ws || ws.readyState === WebSocket.CLOSED || ws.readyState === WebSocket.CLOSING) {
+    if (!isConnectionBusy(managerRef.current?.get(activeInstanceId))) {
       connectInstance(activeInstanceId);
     }
-  }, [activeInstanceId, instances, connectInstance]);
+  }, [activeInstanceId, connectInstance]);
 
   const value = useMemo(() => ({
     // Instance management
