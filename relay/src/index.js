@@ -99,7 +99,11 @@ app.post('/api/instances', async (req, res) => {
 
     const ptyManager = ptyRegistry.get(instanceId, workingDir, cliType);
 
-    if (autoStart && !ptyManager.isRunning && workingDir) {
+    // isBusy, not isRunning: during 'starting' (the CLI self-update window,
+    // up to 30s) isRunning is still false, and calling start() again there
+    // throws 'PTY start already in progress' - a 500 for what is really
+    // "already on its way".
+    if (autoStart && !ptyManager.isBusy && workingDir) {
       // Deliberate start requested by the caller: forget any earlier
       // user-initiated stop so it doesn't re-seed stoppedByUser on a future
       // remove()+get() cycle.
@@ -224,7 +228,17 @@ app.post('/api/pty/start', async (req, res) => {
     const { workingDir, instanceId = DEFAULT_INSTANCE_ID, cliType = 'claude' } = req.body;
     const ptyManager = ptyRegistry.get(instanceId, workingDir, cliType);
 
-    if (ptyManager.getStatus().running) {
+    // 'starting' is busy but not yet running: a second Start tapped during
+    // the CLI self-update window would otherwise reach start() and hit
+    // 'PTY start already in progress' as an HTTP 500. Report the in-flight
+    // start as success so a double tap is a no-op for the user, and still
+    // clear the remembered stop - this is a deliberate start either way.
+    if (ptyManager.status === 'starting') {
+      ptyRegistry.clearUserStop(instanceId);
+      return res.json({ success: true, status: ptyManager.getStatus(), workingDir: ptyManager.currentWorkingDir });
+    }
+
+    if (ptyManager.isRunning) {
       return res.status(400).json({ error: 'PTY already running. Stop it first or use restart.' });
     }
 
