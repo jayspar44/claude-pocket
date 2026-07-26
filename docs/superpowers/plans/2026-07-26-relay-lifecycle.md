@@ -805,12 +805,35 @@ test('an explicit start clears stoppedByUser', async () => {
   assert.equal(pm.stoppedByUser, false);
 });
 
-test('a PTY that exited on its own is not marked stoppedByUser', () => {
+test('a PTY that exits on its own is not marked stoppedByUser', () => {
+  // The exit path is an inline proc.onExit callback, not a named method, so
+  // drive it the way node-pty would: capture the callback at spawn and invoke it.
   const pm = new PtyManager('s4', 'claude');
-  pm.status = 'running';
-  pm.ptyProcess = { pid: 1, kill() {}, write() {}, resize() {} };
-  pm.handleExit?.({ exitCode: 1 }) ?? (pm.status = 'stopped');
-  assert.equal(pm.stoppedByUser, false, 'a crash must still auto-restart');
+  let exitCb = null;
+  pm._start = async function () {
+    const proc = {
+      pid: 1,
+      kill() {},
+      write() {},
+      resize() {},
+      onData() {},
+      onExit(cb) { exitCb = cb; },
+    };
+    this.ptyProcess = proc;
+    this.status = 'running';
+    proc.onExit(({ exitCode, signal }) => {
+      this.status = 'stopped';
+      this.ptyProcess = null;
+      void exitCode; void signal;
+    });
+  };
+
+  return pm.start('/tmp', 80, 24).then(() => {
+    assert.equal(pm.status, 'running');
+    exitCb({ exitCode: 1, signal: null });      // the CLI died on its own
+    assert.equal(pm.status, 'stopped');
+    assert.equal(pm.stoppedByUser, false, 'a crash must still allow auto-restart');
+  });
 });
 ```
 
