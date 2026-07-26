@@ -12,6 +12,7 @@ const S = CONNECTION_STATES;
 export const RECONNECT_DELAYS = [1000, 2000, 4000, 8000, 16000];
 export const MAX_RECONNECT_ATTEMPTS = 5;
 export const CONNECTION_TIMEOUT = 10000;
+export const HEARTBEAT_TIMEOUT = 5000;
 
 /**
  * Owns exactly one WebSocket for one instance, plus every timer belonging to it.
@@ -53,6 +54,7 @@ export class InstanceConnection {
     this.attempts = 0;
     this._connectTimer = null;
     this._reconnectTimer = null;
+    this._pongTimer = null;
   }
 
   _setState(state, { disconnectReason = null, error = null } = {}) {
@@ -62,10 +64,20 @@ export class InstanceConnection {
     this.onStateChange(this.instanceId, { state, disconnectReason, error });
   }
 
+  // The client's own decision to stop. 'user' = explicit action; 'idle' = the
+  // idle sweep. Neither reconnects on its own; selecting the tab does.
+  disconnect(reason = 'user') {
+    if (this.state === S.DESTROYED) return;
+    this._clearAllTimers();
+    this._teardownSocket();
+    this._setState(S.DISCONNECTED, { disconnectReason: reason });
+  }
+
   connect() {
     if (this.state === S.DESTROYED) return;
     if (this.state === S.CONNECTING || this.state === S.CONNECTED) return;
     this._clearReconnectTimer();
+    this.disconnectReason = null;
 
     this._setState(S.CONNECTING);
 
@@ -118,6 +130,10 @@ export class InstanceConnection {
   }
 
   _handleMessage(message) {
+    if (message.type === 'pong') {
+      this._clearPongTimer();
+      return;
+    }
     // The handshake completes on pty-status, not on socket open. A socket that
     // opens but never completes set-instance is not connected.
     if (message.type === 'pty-status' && this.state === S.CONNECTING) {
@@ -144,6 +160,32 @@ export class InstanceConnection {
     }
   }
 
+  ping() {
+    if (this.state !== S.CONNECTED) return;
+    if (!this.send({ type: 'ping' })) return;
+    this._clearPongTimer();
+    this._pongTimer = this.setTimer(() => {
+      this._pongTimer = null;
+      this._drop('Heartbeat timeout');
+    }, HEARTBEAT_TIMEOUT);
+  }
+
+  // Pure over what this connection itself observes. The two view-related idle
+  // conditions are React state and belong to the caller, which ANDs them in.
+  isIdleSince(thresholdMs) {
+    if (this.state !== S.CONNECTED) return false;
+    if (this.ptyProcessing) return false;
+    return this.clock() - this.lastActivityAt >= thresholdMs;
+  }
+
+  destroy() {
+    if (this.state === S.DESTROYED) return;
+    this._clearAllTimers();
+    this._teardownSocket();
+    this.state = S.DESTROYED;
+    this.disconnectReason = null;
+  }
+
   _clearConnectTimer() {
     if (this._connectTimer !== null) {
       this.clearTimer(this._connectTimer);
@@ -158,10 +200,23 @@ export class InstanceConnection {
     }
   }
 
+  _clearPongTimer() {
+    if (this._pongTimer !== null) {
+      this.clearTimer(this._pongTimer);
+      this._pongTimer = null;
+    }
+  }
+
+  _clearAllTimers() {
+    this._clearConnectTimer();
+    this._clearReconnectTimer();
+    this._clearPongTimer();
+  }
+
   // Involuntary loss of the socket: network, relay restart, heartbeat timeout,
   // connect timeout, or a clean close the relay initiated. All reconnect.
   _drop(error = null) {
-    this._clearConnectTimer();
+    this._clearAllTimers();
     this._teardownSocket();
 
     if (this.attempts >= MAX_RECONNECT_ATTEMPTS) {
