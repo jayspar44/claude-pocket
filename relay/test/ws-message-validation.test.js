@@ -50,16 +50,14 @@ function fakeCtx(ptyManager) {
 
 test('set-instance during the start window records client dimensions instead of dropping them', async () => {
   const pm = new PtyManager('t7', 'claude');
+  // Only the CLI self-update and the actual pty.spawn call are stubbed, so
+  // the real _start body - including its dimension computation - runs.
   let release;
   const gate = new Promise((r) => { release = r; });
-  pm._start = async function (workingDir, cols, rows) {
-    this.deferredStartDir = null;
-    this.currentWorkingDir = workingDir;
-    await gate;                                  // stands in for `codex update`
-    if (this.intentionalStop) return;
-    this.spawnedAt = { cols: this.lastCols || cols, rows: this.lastRows || rows };
-    this.ptyProcess = { pid: 1, kill() {}, write() {}, resize() {} };
-    this.status = 'running';
+  pm._runSelfUpdate = () => gate;                // stands in for `codex update`
+  pm._spawnPty = function (command, args, options) {
+    this.spawnedAt = { cols: options.cols, rows: options.rows };
+    return { pid: 1, kill() {}, write() {}, resize() {}, onData() {}, onExit() {} };
   };
 
   // A start is already in flight, given the 50x24 fallback dimensions - the

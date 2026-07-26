@@ -151,20 +151,7 @@ class PtyManager {
       const updateCommand = cliEntry.getCommand();
       this.broadcast({ type: 'pty-status', ...this.getStatus(), updating: true });
       try {
-        await new Promise((resolve) => {
-          execFile(updateCommand, ['update'], {
-            timeout: 30000,
-            env: config.pty.env,
-          }, (error, stdout, stderr) => {
-            if (error) {
-              logger.warn({ cliType: this.cliType, error: error.message, stderr }, `${this.cliLabel} update failed (continuing anyway)`);
-            } else {
-              const output = (stdout || '').trim();
-              if (output) logger.info({ cliType: this.cliType, output }, `${this.cliLabel} update completed`);
-            }
-            resolve(); // Always resolve — update failure shouldn't block start
-          });
-        });
+        await this._runSelfUpdate(updateCommand);
       } catch (error) {
         logger.warn({ cliType: this.cliType, error: error.message }, `${this.cliLabel} update threw unexpectedly (continuing anyway)`);
       }
@@ -191,7 +178,7 @@ class PtyManager {
 
     try {
       const command = cliEntry.getCommand();
-      const proc = pty.spawn(command, [], {
+      const proc = this._spawnPty(command, [], {
         name: 'xterm-256color',
         cols: spawnCols,
         rows: spawnRows,
@@ -278,6 +265,34 @@ class PtyManager {
       logger.error({ error: error.message }, `Failed to start ${this.cliLabel} process`);
       throw error;
     }
+  }
+
+  // Injection seams for _start, overridable per-instance so tests can run the
+  // real _start body without a real CLI binary on PATH. Both default to the
+  // real implementation, so production behaviour is unchanged.
+
+  // The CLI self-update (`<cli> update`). Always resolves - update failure
+  // is logged and swallowed, never blocks start().
+  _runSelfUpdate(updateCommand) {
+    return new Promise((resolve) => {
+      execFile(updateCommand, ['update'], {
+        timeout: 30000,
+        env: config.pty.env,
+      }, (error, stdout, stderr) => {
+        if (error) {
+          logger.warn({ cliType: this.cliType, error: error.message, stderr }, `${this.cliLabel} update failed (continuing anyway)`);
+        } else {
+          const output = (stdout || '').trim();
+          if (output) logger.info({ cliType: this.cliType, output }, `${this.cliLabel} update completed`);
+        }
+        resolve(); // Always resolve — update failure shouldn't block start
+      });
+    });
+  }
+
+  // The actual node-pty spawn call.
+  _spawnPty(command, args, options) {
+    return pty.spawn(command, args, options);
   }
 
   scheduleRestart() {

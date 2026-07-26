@@ -2,18 +2,40 @@ const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const PtyManager = require('../src/pty-manager');
 
-// Replaces the spawn half of _start with a controllable fake, so no real CLI
-// runs. Resolves `gate` to let the "self-update" finish.
-function stubSpawn(pm, gate) {
+// These tests run the REAL _start() body. Only the two injection seams
+// _runSelfUpdate (stands in for `<cli> update`) and _spawnPty (stands in for
+// node-pty's pty.spawn) are overridden, so no real CLI binary is ever
+// invoked and no real PTY is ever spawned - but every other line of _start
+// (the starting-status window, the intentionalStop check, the dimension
+// computation, the buffer load, the spawn call itself) executes for real.
+
+// Gates the self-update await exactly like the real execFile callback would,
+// without ever touching child_process.
+function stubSelfUpdate(pm, gate) {
+  pm._runSelfUpdate = () => gate;
+}
+
+// Fake node-pty process: just enough surface for the onData/onExit wiring
+// that runs immediately after a successful spawn.
+function fakePtyProcess(pid = 1) {
+  return {
+    pid,
+    kill() {},
+    write() {},
+    resize() {},
+    onData() {},
+    onExit() {},
+  };
+}
+
+// Counts real spawn attempts and hands back a fake process, so assertions
+// can tell "the real _start reached pty.spawn" from "it aborted before that".
+function stubSpawn(pm) {
   pm.spawns = 0;
-  pm._start = async function (workingDir) {
-    this.deferredStartDir = null;
-    this.currentWorkingDir = workingDir;
-    await gate;                                  // stands in for `codex update`
-    if (this.intentionalStop) return;            // must honour a stop during the await
+  pm._spawnPty = function (command, args, options) {
     this.spawns++;
-    this.ptyProcess = { pid: 123, kill() {}, write() {}, resize() {} };
-    this.status = 'running';
+    this.spawnedAt = { cols: options.cols, rows: options.rows };
+    return fakePtyProcess();
   };
 }
 
@@ -27,7 +49,8 @@ test('status starts as stopped and isBusy is false', () => {
 test('status is starting during the self-update window', async () => {
   const pm = new PtyManager('t2', 'claude');
   let release;
-  stubSpawn(pm, new Promise((r) => { release = r; }));
+  stubSelfUpdate(pm, new Promise((r) => { release = r; }));
+  stubSpawn(pm);
 
   const started = pm.start('/tmp', 80, 24);
   assert.equal(pm.status, 'starting');
@@ -43,7 +66,8 @@ test('status is starting during the self-update window', async () => {
 test('a second start during the window throws instead of spawning twice', async () => {
   const pm = new PtyManager('t3', 'claude');
   let release;
-  stubSpawn(pm, new Promise((r) => { release = r; }));
+  stubSelfUpdate(pm, new Promise((r) => { release = r; }));
+  stubSpawn(pm);
 
   const first = pm.start('/tmp', 80, 24);
   await assert.rejects(
@@ -59,7 +83,8 @@ test('a second start during the window throws instead of spawning twice', async 
 test('stop() during the window prevents the spawn', async () => {
   const pm = new PtyManager('t4', 'claude');
   let release;
-  stubSpawn(pm, new Promise((r) => { release = r; }));
+  stubSelfUpdate(pm, new Promise((r) => { release = r; }));
+  stubSpawn(pm);
 
   const started = pm.start('/tmp', 80, 24);
   assert.equal(pm.status, 'starting');
@@ -75,7 +100,8 @@ test('stop() during the window prevents the spawn', async () => {
 
 test('start() is a no-op when already running', async () => {
   const pm = new PtyManager('t5', 'claude');
-  stubSpawn(pm, Promise.resolve());
+  stubSelfUpdate(pm, Promise.resolve());
+  stubSpawn(pm);
   await pm.start('/tmp', 80, 24);
   assert.equal(pm.spawns, 1);
   await pm.start('/tmp', 80, 24);
@@ -85,19 +111,8 @@ test('start() is a no-op when already running', async () => {
 test('a resize during the start window sets the spawn dimensions', async () => {
   const pm = new PtyManager('t6', 'claude');
   let release;
-  const gate = new Promise((r) => { release = r; });
-  pm.spawns = 0;
-  pm._start = async function (workingDir, cols, rows) {
-    this.deferredStartDir = null;
-    await gate;
-    if (this.intentionalStop) return;
-    const spawnCols = this.lastCols || cols;
-    const spawnRows = this.lastRows || rows;
-    this.spawnedAt = { cols: spawnCols, rows: spawnRows };
-    this.spawns++;
-    this.ptyProcess = { pid: 1, kill() {}, write() {}, resize() {} };
-    this.status = 'running';
-  };
+  stubSelfUpdate(pm, new Promise((r) => { release = r; }));
+  stubSpawn(pm);
 
   const started = pm.start('/tmp', 50, 24);   // fallback dims
   assert.equal(pm.status, 'starting');
@@ -107,4 +122,20 @@ test('a resize during the start window sets the spawn dimensions', async () => {
   release();
   await started;
   assert.deepEqual(pm.spawnedAt, { cols: 92, rows: 40 });
+});
+
+test('a throwing spawn leaves status stopped and broadcasts pty-error', async () => {
+  const pm = new PtyManager('t8', 'claude');
+  stubSelfUpdate(pm, Promise.resolve());
+  pm._spawnPty = () => { throw new Error('posix_spawnp failed.'); };
+
+  const messages = [];
+  pm.addListener((m) => messages.push(m));
+
+  await assert.rejects(() => pm.start('/tmp', 80, 24), /posix_spawnp failed/);
+  assert.equal(pm.status, 'stopped', 'status must not be stuck at starting');
+
+  const errorMsg = messages.find((m) => m.type === 'pty-error');
+  assert.ok(errorMsg, 'a pty-error frame must be broadcast');
+  assert.equal(errorMsg.message, 'posix_spawnp failed.');
 });
