@@ -150,6 +150,10 @@ function InstanceManager({ isOpen, onClose, editInstanceId, startInAddMode }) {
         null,
         formData.cliType
       );
+      if (newInstance?.error === 'instance-limit') {
+        alert(`Limit reached: the relay accepts at most ${newInstance.limit} instances. Stop one first.`);
+        return;
+      }
       switchInstance(newInstance.id);
       // Close modal after adding (switch to new instance)
       // PTY starts automatically via WebSocket set-instance → deferred start → resize

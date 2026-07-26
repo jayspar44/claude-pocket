@@ -4,6 +4,8 @@ import { App } from '@capacitor/app';
 import { notificationService } from '../services/NotificationService';
 import { InstanceConnection, CONNECTION_STATES, isLiveConnectionState } from '../services/InstanceConnection';
 import { ConnectionManager, IDLE_DISCONNECT_MS } from '../services/ConnectionManager';
+import { canAddInstance } from '../services/instanceLimit';
+import { healthApi } from '../api/relay-api';
 import { storage } from '../utils/storage';
 
 // Register the foreground service plugin (Android only)
@@ -159,6 +161,20 @@ export function InstanceProvider({ children }) {
     });
     return states;
   });
+
+  // The relay's instance cap, read from /api/health. null until fetched (or if
+  // the field is absent), in which case canAddInstance falls back to
+  // DEFAULT_MAX_INSTANCES.
+  const [relayMaxInstances, setRelayMaxInstances] = useState(null);
+
+  useEffect(() => {
+    healthApi.check()
+      .then((res) => {
+        const max = res?.data?.maxInstances;
+        if (Number.isFinite(max)) setRelayMaxInstances(max);
+      })
+      .catch(() => { /* fall back to the default */ });
+  }, []);
 
   // Track app visibility for notifications (Capacitor's visibilityState is unreliable)
   const isAppVisibleRef = useRef(true);
@@ -364,6 +380,11 @@ export function InstanceProvider({ children }) {
       }
     }
 
+    const allowed = canAddInstance(instances.length, relayMaxInstances);
+    if (!allowed.ok) {
+      return { error: allowed.reason, limit: allowed.limit };
+    }
+
     const colorIndex = instances.length % INSTANCE_COLORS.length;
     const newInstance = createInstance(
       name,
@@ -380,7 +401,7 @@ export function InstanceProvider({ children }) {
       [newInstance.id]: createInstanceState(),
     }));
     return newInstance;
-  }, [instances]);
+  }, [instances, relayMaxInstances]);
 
   const updateInstance = useCallback((instanceId, updates) => {
     setInstances(prev => prev.map(inst =>

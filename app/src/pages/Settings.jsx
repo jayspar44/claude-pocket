@@ -242,7 +242,11 @@ export default function Settings() {
       const name = serverInst.instanceId === 'default'
         ? 'Default (Restored)'
         : `Restored ${serverInst.instanceId.slice(0, 8)}`;
-      addInstance(name, getRelayUrl(), serverInst.workingDir, null, serverInst.instanceId);
+      const created = addInstance(name, getRelayUrl(), serverInst.workingDir, null, serverInst.instanceId);
+      if (created?.error === 'instance-limit') {
+        alert(`Limit reached: the relay accepts at most ${created.limit} instances. Stop one first.`);
+        return;
+      }
       connectInstance(serverInst.instanceId);
       switchInstance(serverInst.instanceId);
     }
