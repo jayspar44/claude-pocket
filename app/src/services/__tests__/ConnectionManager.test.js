@@ -1,0 +1,132 @@
+import { describe, it, expect, vi } from 'vitest';
+import { ConnectionManager, IDLE_DISCONNECT_MS } from '../ConnectionManager';
+
+function fakeConn(instanceId) {
+  return {
+    instanceId,
+    state: 'connected',
+    disconnectReason: null,
+    connect: vi.fn(),
+    disconnect: vi.fn(function (r) { this.state = 'disconnected'; this.disconnectReason = r; }),
+    send: vi.fn(() => true),
+    ping: vi.fn(),
+    isIdleSince: vi.fn(() => false),
+    destroy: vi.fn(function () { this.state = 'destroyed'; }),
+  };
+}
+
+function make({ isViewIdle = () => true } = {}) {
+  const created = [];
+  const mgr = new ConnectionManager({
+    connectionFactory: ({ instanceId }) => {
+      const c = fakeConn(instanceId);
+      created.push(c);
+      return c;
+    },
+    isViewIdle,
+  });
+  return { mgr, created };
+}
+
+describe('ConnectionManager', () => {
+  it('ensure() creates one connection per instance and reuses it', () => {
+    const { mgr, created } = make();
+    const a = mgr.ensure('i1', 'ws://r/ws');
+    const again = mgr.ensure('i1', 'ws://r/ws');
+    expect(a).toBe(again);
+    expect(created).toHaveLength(1);
+  });
+
+  it('connectedCount counts only connected connections', () => {
+    const { mgr } = make();
+    mgr.ensure('i1', 'ws://r/ws');
+    mgr.ensure('i2', 'ws://r/ws');
+    expect(mgr.connectedCount()).toBe(2);
+    mgr.get('i2').state = 'reconnecting';
+    expect(mgr.connectedCount()).toBe(1);
+  });
+
+  it('one tick pings every connected connection', () => {
+    const { mgr } = make();
+    mgr.ensure('i1', 'ws://r/ws');
+    mgr.ensure('i2', 'ws://r/ws');
+    mgr.tick();
+    expect(mgr.get('i1').ping).toHaveBeenCalledTimes(1);
+    expect(mgr.get('i2').ping).toHaveBeenCalledTimes(1);
+  });
+
+  it('disconnects a connection idle in BOTH senses', () => {
+    const { mgr } = make({ isViewIdle: () => true });
+    const c = mgr.ensure('i1', 'ws://r/ws');
+    c.isIdleSince.mockReturnValue(true);
+    mgr.tick();
+    expect(c.disconnect).toHaveBeenCalledWith('idle');
+  });
+
+  it('does NOT disconnect when the connection is busy', () => {
+    const { mgr } = make({ isViewIdle: () => true });
+    const c = mgr.ensure('i1', 'ws://r/ws');
+    c.isIdleSince.mockReturnValue(false);
+    mgr.tick();
+    expect(c.disconnect).not.toHaveBeenCalled();
+  });
+
+  it('does NOT disconnect when the tab is being viewed', () => {
+    const { mgr } = make({ isViewIdle: () => false });
+    const c = mgr.ensure('i1', 'ws://r/ws');
+    c.isIdleSince.mockReturnValue(true);
+    mgr.tick();
+    expect(c.disconnect).not.toHaveBeenCalled();
+  });
+
+  it('uses the 1 hour threshold', () => {
+    const { mgr } = make();
+    const c = mgr.ensure('i1', 'ws://r/ws');
+    mgr.tick();
+    expect(c.isIdleSince).toHaveBeenCalledWith(IDLE_DISCONNECT_MS);
+    expect(IDLE_DISCONNECT_MS).toBe(3600000);
+  });
+
+  it('disconnectAll disconnects every connection with the given reason', () => {
+    const { mgr } = make();
+    mgr.ensure('i1', 'ws://r/ws');
+    mgr.ensure('i2', 'ws://r/ws');
+    mgr.disconnectAll('user');
+    expect(mgr.get('i1').disconnect).toHaveBeenCalledWith('user');
+    expect(mgr.get('i2').disconnect).toHaveBeenCalledWith('user');
+  });
+
+  it('remove destroys and forgets the connection', () => {
+    const { mgr } = make();
+    const c = mgr.ensure('i1', 'ws://r/ws');
+    mgr.remove('i1');
+    expect(c.destroy).toHaveBeenCalled();
+    expect(mgr.get('i1')).toBeUndefined();
+  });
+
+  it('destroyAll destroys everything and empties the map', () => {
+    const { mgr, created } = make();
+    mgr.ensure('i1', 'ws://r/ws');
+    mgr.ensure('i2', 'ws://r/ws');
+    mgr.destroyAll();
+    created.forEach((c) => expect(c.destroy).toHaveBeenCalled());
+    expect(mgr.connectedCount()).toBe(0);
+  });
+
+  it('startHeartbeat arms exactly one interval regardless of connection count', () => {
+    const intervals = [];
+    const mgr = new ConnectionManager({
+      connectionFactory: ({ instanceId }) => fakeConn(instanceId),
+      isViewIdle: () => false,
+      setInterval_: (fn, ms) => { intervals.push({ fn, ms }); return intervals.length - 1; },
+      clearInterval_: () => {},
+    });
+    mgr.ensure('i1', 'ws://r/ws');
+    mgr.ensure('i2', 'ws://r/ws');
+    mgr.ensure('i3', 'ws://r/ws');
+    mgr.startHeartbeat();
+    mgr.startHeartbeat();
+    expect(intervals).toHaveLength(1);
+    expect(intervals[0].ms).toBe(25000);
+  });
+});
