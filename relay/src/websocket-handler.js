@@ -158,6 +158,19 @@ class WebSocketHandler {
     });
   }
 
+  // wss.on('close') never fires for a server-attached WebSocketServer, so the
+  // shutdown path calls this directly. Safe to call more than once.
+  close() {
+    if (this.closed) return;
+    this.closed = true;
+    clearInterval(this.pingInterval);
+    // wss.close() only stops new connections; live sockets keep the http
+    // server's close callback from ever running.
+    this.wss.clients.forEach((ws) => ws.terminate());
+    this.clients.clear();
+    this.wss.close();
+  }
+
   async handleMessage(ws, message, ctx) {
     const { type, instanceId: msgInstanceId } = message;
 
