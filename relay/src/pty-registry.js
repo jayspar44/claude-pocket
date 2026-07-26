@@ -16,6 +16,18 @@ class PtyRegistry {
     this.instances = new Map(); // instanceId -> PtyManager
     this.lastAccessTime = new Map(); // instanceId -> timestamp
 
+    // instanceId -> timestamp of a user-initiated remove(). PtyManager.stop()
+    // sets stoppedByUser on the manager object itself, but remove() deletes
+    // that object entirely - without this, a later get() would construct a
+    // brand-new manager with stoppedByUser defaulting back to false, and
+    // set-instance would silently restart a session the user just stopped.
+    // Only remove() calls that pass { userInitiated: true } record here -
+    // housekeeping eviction (cleanupIdleInstances, removeOldestIdle) must
+    // NOT, or an idle-evicted instance would stop being able to auto-start.
+    // Pruned in cleanupIdleInstances() so an id nobody revisits doesn't
+    // linger forever; cleared by clearUserStop() on any deliberate start.
+    this.stoppedByUserAt = new Map();
+
     // Start idle cleanup interval. This is a background maintenance timer,
     // not user-facing work, so it must not hold the event loop open on its
     // own (e.g. keeping `node --test` or a script running forever).
@@ -72,6 +84,11 @@ class PtyRegistry {
     // Create new instance
     logger.info({ instanceId: id, workingDir }, 'Creating new PTY instance');
     const instance = new PtyManager(id, cliType);
+    if (this.stoppedByUserAt.has(id)) {
+      // A user explicitly stopped this id before its manager was removed;
+      // seed the new manager so set-instance still declines to auto-start it.
+      instance.stoppedByUser = true;
+    }
     this.instances.set(id, instance);
 
     return instance;
@@ -89,21 +106,48 @@ class PtyRegistry {
   /**
    * Remove and stop a PTY instance
    * @param {string} instanceId - The instance identifier
+   * @param {Object} [options]
+   * @param {boolean} [options.userInitiated=false] - True when the removal
+   *   is a direct result of explicit user action (DELETE /api/instances or
+   *   DELETE /api/instances/:instanceId). Records the id so a later get()
+   *   does not resurrect it. MUST be left false (the default) for
+   *   housekeeping removals - cleanupIdleInstances() and removeOldestIdle()
+   *   evict instances that merely went idle, not ones the user stopped, and
+   *   must remain restartable on the next set-instance.
    * @returns {boolean} Whether an instance was removed
    */
-  remove(instanceId) {
+  remove(instanceId, { userInitiated = false } = {}) {
     const id = instanceId || DEFAULT_INSTANCE_ID;
     const instance = this.instances.get(id);
 
     if (instance) {
-      logger.info({ instanceId: id }, 'Removing PTY instance');
+      logger.info({ instanceId: id, userInitiated }, 'Removing PTY instance');
       instance.stop();
       this.instances.delete(id);
       this.lastAccessTime.delete(id);
+      if (userInitiated) {
+        this.stoppedByUserAt.set(id, Date.now());
+      }
       return true;
     }
 
     return false;
+  }
+
+  /**
+   * Clear the remembered "stopped by user" intent for an instance id. Call
+   * this from any code path where the user deliberately starts a session -
+   * every route/handler that calls PtyManager.start() in direct response to
+   * explicit user action (POST /api/pty/start, POST /api/pty/restart,
+   * POST /api/instances with autoStart, and the WS 'restart' message).
+   * PtyManager.start() already clears the manager-local stoppedByUser flag,
+   * but that has no effect on this registry-level record, which is what
+   * seeds a *future* manager after another remove()+get() cycle. Safe to
+   * call even when the id was never recorded (no-op).
+   */
+  clearUserStop(instanceId) {
+    const id = instanceId || DEFAULT_INSTANCE_ID;
+    this.stoppedByUserAt.delete(id);
   }
 
   /**
@@ -150,11 +194,22 @@ class PtyRegistry {
 
     for (const id of toRemove) {
       logger.info({ instanceId: id, idleMs: now - this.lastAccessTime.get(id) }, 'Cleaning up idle instance');
+      // Not userInitiated: this is housekeeping eviction of an idle instance,
+      // not the user stopping it, so it must remain free to auto-start.
       this.remove(id);
     }
 
     if (toRemove.length > 0) {
       logger.info({ removed: toRemove.length, remaining: this.instances.size }, 'Idle instance cleanup complete');
+    }
+
+    // Bound stoppedByUserAt's growth: an id nobody has revisited within the
+    // same idle window is forgotten, so a user who stops a session and never
+    // comes back doesn't leave an entry sitting there forever.
+    for (const [id, stoppedAt] of this.stoppedByUserAt) {
+      if (now - stoppedAt > IDLE_TIMEOUT_MS) {
+        this.stoppedByUserAt.delete(id);
+      }
     }
   }
 
@@ -176,6 +231,8 @@ class PtyRegistry {
     }
 
     if (oldestId) {
+      // Not userInitiated: eviction to make room for a new instance under
+      // MAX_INSTANCES is housekeeping, not the user stopping this session.
       return this.remove(oldestId);
     }
 

@@ -100,6 +100,10 @@ app.post('/api/instances', async (req, res) => {
     const ptyManager = ptyRegistry.get(instanceId, workingDir, cliType);
 
     if (autoStart && !ptyManager.isRunning && workingDir) {
+      // Deliberate start requested by the caller: forget any earlier
+      // user-initiated stop so it doesn't re-seed stoppedByUser on a future
+      // remove()+get() cycle.
+      ptyRegistry.clearUserStop(instanceId);
       await ptyManager.start(workingDir);
     }
 
@@ -116,7 +120,10 @@ app.post('/api/instances', async (req, res) => {
 app.delete('/api/instances/:instanceId', (req, res) => {
   try {
     const { instanceId } = req.params;
-    const removed = ptyRegistry.remove(instanceId);
+    // userInitiated: this route only exists as a direct user action, so the
+    // registry must remember it - otherwise the next set-instance for this
+    // id silently restarts the session the user just stopped.
+    const removed = ptyRegistry.remove(instanceId, { userInitiated: true });
 
     if (!removed) {
       return res.status(404).json({ error: 'Instance not found' });
@@ -135,7 +142,8 @@ app.delete('/api/instances', (req, res) => {
     const removed = [];
 
     for (const instance of instances) {
-      if (ptyRegistry.remove(instance.instanceId)) {
+      // userInitiated: same reasoning as DELETE /api/instances/:instanceId.
+      if (ptyRegistry.remove(instance.instanceId, { userInitiated: true })) {
         removed.push(instance.instanceId);
       }
     }
@@ -201,6 +209,8 @@ app.post('/api/pty/restart', async (req, res) => {
 
     ptyManager.stop();
     ptyManager.clearBuffer();
+    // Deliberate restart: forget any earlier user-initiated stop.
+    ptyRegistry.clearUserStop(instanceId);
     await ptyManager.start(restartDir);
     res.json({ success: true, status: ptyManager.getStatus() });
   } catch (error) {
@@ -222,6 +232,8 @@ app.post('/api/pty/start', async (req, res) => {
       return res.status(400).json({ error: 'workingDir required for new instance' });
     }
 
+    // Deliberate start: forget any earlier user-initiated stop.
+    ptyRegistry.clearUserStop(instanceId);
     await ptyManager.start(workingDir || ptyManager.currentWorkingDir);
     res.json({ success: true, status: ptyManager.getStatus(), workingDir: ptyManager.currentWorkingDir });
   } catch (error) {

@@ -293,6 +293,10 @@ class WebSocketHandler {
         ptyManager.stop();
         ptyManager.clearBuffer();
         ptyManager.resetRestartCounter();
+        // Deliberate restart: forget any earlier user-initiated stop so a
+        // later remove()+get() cycle for this id doesn't re-seed
+        // stoppedByUser from a decision the user has since reversed.
+        ptyRegistry.clearUserStop(instanceId);
         await ptyManager.start(workingDir, restartCols, restartRows);
         this.send(ws, { type: 'pty-status', ...ptyManager.getStatus() });
         break;
