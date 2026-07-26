@@ -111,16 +111,31 @@ describe('ConnectionManager', () => {
     mgr.destroyAll();
     created.forEach((c) => expect(c.destroy).toHaveBeenCalled());
     expect(mgr.connectedCount()).toBe(0);
+    expect(mgr.get('i1')).toBeUndefined();
+    expect(mgr.get('i2')).toBeUndefined();
   });
 
-  it('startHeartbeat arms exactly one interval regardless of connection count', () => {
+  function makeHeartbeatHarness(overrides = {}) {
     const intervals = [];
+    const clearedIds = [];
+    let nextId = 0;
     const mgr = new ConnectionManager({
       connectionFactory: ({ instanceId }) => fakeConn(instanceId),
       isViewIdle: () => false,
-      setInterval_: (fn, ms) => { intervals.push({ fn, ms }); return intervals.length - 1; },
-      clearInterval_: () => {},
+      setInterval_: (fn, ms) => {
+        const id = nextId;
+        nextId += 1;
+        intervals.push({ id, fn, ms });
+        return id;
+      },
+      clearInterval_: (id) => { clearedIds.push(id); },
+      ...overrides,
     });
+    return { mgr, intervals, clearedIds };
+  }
+
+  it('startHeartbeat arms exactly one interval regardless of connection count', () => {
+    const { mgr, intervals } = makeHeartbeatHarness();
     mgr.ensure('i1', 'ws://r/ws');
     mgr.ensure('i2', 'ws://r/ws');
     mgr.ensure('i3', 'ws://r/ws');
@@ -128,5 +143,30 @@ describe('ConnectionManager', () => {
     mgr.startHeartbeat();
     expect(intervals).toHaveLength(1);
     expect(intervals[0].ms).toBe(25000);
+  });
+
+  it('stopHeartbeat clears the armed interval and allows a fresh one to be armed', () => {
+    const { mgr, intervals, clearedIds } = makeHeartbeatHarness();
+    mgr.startHeartbeat();
+    const firstId = intervals[0].id;
+    mgr.stopHeartbeat();
+    expect(clearedIds).toEqual([firstId]);
+
+    mgr.startHeartbeat();
+    expect(intervals).toHaveLength(2);
+  });
+
+  it('stopHeartbeat is a no-op when no heartbeat is running', () => {
+    const { mgr, clearedIds } = makeHeartbeatHarness();
+    mgr.stopHeartbeat();
+    expect(clearedIds).toEqual([]);
+  });
+
+  it('destroyAll clears the heartbeat interval', () => {
+    const { mgr, intervals, clearedIds } = makeHeartbeatHarness();
+    mgr.startHeartbeat();
+    const firstId = intervals[0].id;
+    mgr.destroyAll();
+    expect(clearedIds).toEqual([firstId]);
   });
 });
