@@ -15,8 +15,11 @@ class PtyRegistry {
     this.instances = new Map(); // instanceId -> PtyManager
     this.lastAccessTime = new Map(); // instanceId -> timestamp
 
-    // Start idle cleanup interval
+    // Start idle cleanup interval. This is a background maintenance timer,
+    // not user-facing work, so it must not hold the event loop open on its
+    // own (e.g. keeping `node --test` or a script running forever).
     this.cleanupInterval = setInterval(() => this.cleanupIdleInstances(), 60000);
+    this.cleanupInterval.unref();
   }
 
   /**
