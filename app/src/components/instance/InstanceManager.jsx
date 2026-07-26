@@ -47,7 +47,6 @@ function InstanceManager({ isOpen, onClose, editInstanceId, startInAddMode }) {
     updateInstance,
     removeInstance,
     switchInstance,
-    sendToInstance,
     instanceColors,
     getInstanceState,
   } = useInstance();
@@ -188,28 +187,25 @@ function InstanceManager({ isOpen, onClose, editInstanceId, startInAddMode }) {
   }, [resetForm, onClose]);
 
   // PTY control handlers
-  const handleStartPty = useCallback((instance) => {
+  const handleStartPty = useCallback(async (instance) => {
     if (!instance.workingDir) {
       alert('Please set a working directory for this instance');
       return;
     }
-    // If already connected, re-send set-instance to trigger deferred PTY start on relay.
-    // switchInstance alone won't re-send set-instance if the WS is already open.
-    const dims = storage.getJSON('terminal-dims', { cols: 50, rows: 24 });
-    const sent = sendToInstance(instance.id, {
-      type: 'set-instance',
-      instanceId: instance.id,
-      workingDir: instance.workingDir,
-      cliType: instance.cliType || 'claude',
-      cols: dims.cols,
-      rows: dims.rows,
-    });
-    if (!sent) {
-      // Not connected yet — switchInstance will connect and send set-instance
-      switchInstance(instance.id);
+    // Start via the REST API, not set-instance: the relay refuses to
+    // auto-start a session the user explicitly stopped, and POST
+    // /api/pty/start is the path that clears that stop. The relay
+    // broadcasts pty-status to this instance's listeners, so the UI updates
+    // without a set-instance round trip.
+    setPtyLoading(true);
+    try {
+      await healthApi.startPty(instance.workingDir, instance.id, instance.cliType || 'claude');
+    } catch (error) {
+      console.error('Failed to start PTY:', error);
     }
+    setPtyLoading(false);
     onClose();
-  }, [switchInstance, sendToInstance, onClose]);
+  }, [onClose]);
 
   const handleStopPty = useCallback(async (instanceId) => {
     setPtyLoading(true);
