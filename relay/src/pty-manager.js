@@ -117,6 +117,10 @@ class PtyManager {
     this.status = 'starting';
     this.intentionalStop = false;
     this.stoppedByUser = false;
+    // Claim a generation for this attempt (see _startGeneration). stop() and
+    // any later start() bump the counter, so both _start and the trailing
+    // reset below can tell "still the current attempt" from "superseded".
+    const generation = ++this._startGeneration;
     try {
       await this._start(workingDir, cols, rows);
     } catch (error) {
@@ -128,17 +132,27 @@ class PtyManager {
       throw error;
     }
     // A stop() during the await leaves status already 'stopped'; do not clobber it.
-    if (this.status === 'starting') {
+    //
+    // The generation check matters when this attempt was superseded: a
+    // stop()+start() pair during the await can leave the *newer* attempt
+    // sitting at 'starting' when this (stale) one returns. Resetting then
+    // would make isBusy false while a start is genuinely in flight - which is
+    // exactly the blind window the 'starting' state exists to close: the
+    // registry could evict the instance mid-start, and another start() would
+    // pass the guards and redo the ~30s self-update. The 'finished without
+    // spawning' warning would be misleading for the same reason.
+    if (this.status === 'starting' && this._startGeneration === generation) {
       this.status = 'stopped';
       logger.warn({ instanceId: this.instanceId }, 'PTY start finished without spawning');
     }
   }
 
   async _start(workingDir, cols, rows) {
-    // Claim this start attempt. Anything that invalidates it (stop(), or a
-    // later start()) bumps the counter, so the check after the self-update
-    // await below can tell "still the current attempt" from "superseded".
-    const generation = ++this._startGeneration;
+    // The generation claimed by start() for this attempt. Anything that
+    // invalidates it (stop(), or a later start()) bumps the counter, so the
+    // check after the self-update await below can tell "still the current
+    // attempt" from "superseded".
+    const generation = this._startGeneration;
 
     // Clear deferred start since we're starting now
     this.deferredStartDir = null;
