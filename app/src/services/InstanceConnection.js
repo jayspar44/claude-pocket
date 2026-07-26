@@ -164,9 +164,6 @@ export class InstanceConnection {
     this._clearConnectTimer();
     this._teardownSocket();
 
-    // Count this failure before checking the ceiling: the Nth drop is the one
-    // that must give up, not schedule an (N+1)th socket first.
-    this.attempts += 1;
     if (this.attempts >= MAX_RECONNECT_ATTEMPTS) {
       this._setState(S.DISCONNECTED, {
         disconnectReason: 'dropped',
@@ -175,7 +172,8 @@ export class InstanceConnection {
       return;
     }
 
-    const delay = RECONNECT_DELAYS[Math.min(this.attempts - 1, RECONNECT_DELAYS.length - 1)];
+    const delay = RECONNECT_DELAYS[Math.min(this.attempts, RECONNECT_DELAYS.length - 1)];
+    this.attempts += 1;
     this._setState(S.RECONNECTING, { disconnectReason: 'dropped', error });
     this._reconnectTimer = this.setTimer(() => {
       this._reconnectTimer = null;

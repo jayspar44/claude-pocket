@@ -73,15 +73,27 @@ describe('InstanceConnection: drops and backoff', () => {
   it('a repeated handshake failure exhausts the ladder instead of looping forever', () => {
     // The counter must reset on handshake, not on open. Resetting on open makes
     // a deterministic server-side set-instance failure retry forever.
+    //
+    // Loop until reconnecting stops rather than hardcoding an attempt count -
+    // that asserts the actual property ("eventually gives up") instead of
+    // baking in an off-by-one of the test's own. A bound keeps a regression
+    // that loops forever from hanging the suite.
     const { conn, timers } = make();
     conn.connect();
-    for (let i = 0; i < MAX_RECONNECT_ATTEMPTS; i++) {
+    const delaysUsed = [];
+    const bound = MAX_RECONNECT_ATTEMPTS + 2;
+    for (let i = 0; i < bound; i++) {
       FakeSocket.last.fireOpen();            // opens fine...
       FakeSocket.last.fireAbruptClose();     // ...but never completes handshake
-      if (conn.state === CONNECTION_STATES.RECONNECTING) timers.fireLast();
+      if (conn.state !== CONNECTION_STATES.RECONNECTING) break;
+      delaysUsed.push(timers.scheduled.at(-1).ms);
+      timers.fireLast();
     }
     expect(conn.state).toBe(CONNECTION_STATES.DISCONNECTED);
     expect(conn.error).toMatch(/multiple attempts/i);
+    // All five rungs, in order - an off-by-one in either direction (giving up
+    // early and stranding the 16s rung, or retrying past the ceiling) fails here.
+    expect(delaysUsed).toEqual(RECONNECT_DELAYS);
   });
 
   it('a successful handshake resets the counter', () => {
