@@ -191,7 +191,7 @@ class WebSocketHandler {
         // Auto-start PTY if not running but we have a working directory
         // Defer start until first resize arrives with real xterm.js dimensions
         // to prevent MCP tool calls rendering vertically with stale/fallback dimensions
-        if (!ptyManager.isBusy && (workingDir || ptyManager.currentWorkingDir)) {
+        if (!ptyManager.isBusy && !ptyManager.stoppedByUser && (workingDir || ptyManager.currentWorkingDir)) {
           const dir = workingDir || ptyManager.currentWorkingDir;
           logger.info({ clientId: ws.clientId, instanceId: newInstanceId, workingDir: dir, clientCols, clientRows }, 'PTY not running, deferring start until resize with real dimensions');
           ptyManager.setDeferredStart(dir);
@@ -208,6 +208,12 @@ class WebSocketHandler {
               ctx.sendReplay(pm, newInstanceId);
             }
           }, 3000);
+        } else if (!ptyManager.isBusy && ptyManager.stoppedByUser) {
+          logger.info(
+            { clientId: ws.clientId, instanceId: newInstanceId },
+            'Not auto-starting: session was explicitly stopped'
+          );
+          this.send(ws, { type: 'pty-status', ...ptyManager.getStatus() });
         } else if (!ptyManager.isBusy && !workingDir && !ptyManager.currentWorkingDir) {
           // No working directory - can't start Claude, send error to client
           logger.warn({ clientId: ws.clientId, instanceId: newInstanceId }, 'Cannot start CLI: no working directory configured');

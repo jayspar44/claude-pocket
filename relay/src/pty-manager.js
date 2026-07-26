@@ -69,6 +69,9 @@ class PtyManager {
     this.restartAttempts = 0;
     this.lastRestartTime = 0;
     this.intentionalStop = false;
+    // True after an explicit stop, so set-instance does not silently restart a
+    // session the user deliberately ended. Cleared by an explicit start().
+    this.stoppedByUser = false;
     // Diagnostics
     this.processStartTime = 0;
     this.lastOutputLines = []; // Keep last 10 lines for crash diagnosis
@@ -108,6 +111,7 @@ class PtyManager {
 
     this.status = 'starting';
     this.intentionalStop = false;
+    this.stoppedByUser = false;
     try {
       await this._start(workingDir, cols, rows);
     } catch (error) {
@@ -318,6 +322,7 @@ class PtyManager {
     // Record intent first, unconditionally: during 'starting' there is no
     // process to kill, and _start checks this flag before spawning.
     this.intentionalStop = true;
+    this.stoppedByUser = true;
 
     if (this.status === 'starting') {
       logger.info({ instanceId: this.instanceId }, 'Cancelling in-flight PTY start');
@@ -476,6 +481,7 @@ class PtyManager {
       instanceId: this.instanceId,
       cliType: this.cliType,
       running: this.isRunning,
+      stoppedByUser: this.stoppedByUser,
       pid: this.ptyProcess?.pid || null,
       bufferSize: this.outputBufferSize,
       bufferLines: this.outputBuffer.join('').split('\n').length,
