@@ -72,6 +72,11 @@ class PtyManager {
     // True after an explicit stop, so set-instance does not silently restart a
     // session the user deliberately ended. Cleared by an explicit start().
     this.stoppedByUser = false;
+    // Bumped by every _start attempt and by every stop(). _start captures the
+    // value before its self-update await and re-checks it afterwards, so an
+    // attempt that has since been stopped or superseded by a newer start()
+    // bails instead of spawning a CLI nothing holds a reference to.
+    this._startGeneration = 0;
     // Diagnostics
     this.processStartTime = 0;
     this.lastOutputLines = []; // Keep last 10 lines for crash diagnosis
@@ -130,6 +135,11 @@ class PtyManager {
   }
 
   async _start(workingDir, cols, rows) {
+    // Claim this start attempt. Anything that invalidates it (stop(), or a
+    // later start()) bumps the counter, so the check after the self-update
+    // await below can tell "still the current attempt" from "superseded".
+    const generation = ++this._startGeneration;
+
     // Clear deferred start since we're starting now
     this.deferredStartDir = null;
 
@@ -161,6 +171,20 @@ class PtyManager {
     // process that does not exist yet, so it records intent and we honour it here.
     if (this.intentionalStop) {
       logger.info({ instanceId: this.instanceId }, 'PTY start aborted by stop()');
+      return;
+    }
+
+    // A stop() followed by a fresh start() during the update window resets
+    // both status and intentionalStop, so neither flag can tell this (now
+    // stale) attempt to stand down. Without the generation check it spawns a
+    // second CLI that overwrites this.ptyProcess - the earlier process is
+    // then orphaned: still wired to onData, still writing into the buffer,
+    // and unreachable by stop().
+    if (this._startGeneration !== generation) {
+      logger.info(
+        { instanceId: this.instanceId, generation, current: this._startGeneration },
+        'PTY start superseded by a newer start; not spawning'
+      );
       return;
     }
 
@@ -359,6 +383,8 @@ class PtyManager {
     // process to kill, and _start checks this flag before spawning.
     this.intentionalStop = true;
     this.stoppedByUser = true;
+    // Invalidate any in-flight _start attempt (see _startGeneration).
+    this._startGeneration++;
     // A pending deferred start is an armed trigger: any later resize frame
     // would spawn the CLI the user just stopped. An explicit stop disarms it.
     this.deferredStartDir = null;
