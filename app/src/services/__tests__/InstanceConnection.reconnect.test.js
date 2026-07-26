@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { InstanceConnection, CONNECTION_STATES, RECONNECT_DELAYS, MAX_RECONNECT_ATTEMPTS } from '../InstanceConnection';
+import { InstanceConnection, CONNECTION_STATES, RECONNECT_DELAYS, MAX_RECONNECT_ATTEMPTS, CONNECTION_TIMEOUT } from '../InstanceConnection';
 import { FakeSocket } from './fakeSocket';
 
 // Collects scheduled timers so tests can fire them deterministically.
@@ -133,6 +133,62 @@ describe('InstanceConnection: drops and backoff', () => {
     expect(timeout).toBeDefined();
     timeout.fn();
     expect(conn.state).toBe(CONNECTION_STATES.RECONNECTING);
+  });
+
+  // Drives open/close rounds until the connection stops reconnecting, returning
+  // the delays it used. Bounded so a regression that loops forever fails instead
+  // of hanging the suite.
+  function drainLadder(conn, timers) {
+    const delaysUsed = [];
+    for (let i = 0; i < MAX_RECONNECT_ATTEMPTS + 2; i++) {
+      FakeSocket.last.fireOpen();
+      FakeSocket.last.fireAbruptClose();          // never completes handshake
+      if (conn.state !== CONNECTION_STATES.RECONNECTING) break;
+      delaysUsed.push(timers.scheduled.at(-1).ms);
+      timers.fireLast();
+    }
+    return delaysUsed;
+  }
+
+  it('a connect from fresh intent after exhaustion gets a full ladder again', () => {
+    // Resuming from background with the network still down is the common mobile
+    // case. The ladder having drained an hour ago says nothing about whether this
+    // attempt can succeed, so fresh intent must start a new ladder - otherwise
+    // resume gets one attempt and then gives up for good.
+    const { conn, timers } = make();
+    conn.connect();
+    expect(drainLadder(conn, timers)).toEqual(RECONNECT_DELAYS);
+    expect(conn.state).toBe(CONNECTION_STATES.DISCONNECTED);
+
+    conn.connect();                               // app resume / tab select
+    expect(conn.attempts).toBe(0);
+    // A full five rungs again, and it still terminates.
+    expect(drainLadder(conn, timers)).toEqual(RECONNECT_DELAYS);
+    expect(conn.state).toBe(CONNECTION_STATES.DISCONNECTED);
+  });
+
+  it('a deterministic handshake failure still exhausts the ladder and stops', () => {
+    // The regression guard for the reset above: the ladder's own retry must not
+    // reset the counter. A relay that accepts the socket and never answers
+    // set-instance fails identically every time, so it has to be given up on.
+    const { conn, timers } = make();
+    conn.connect();
+    const delaysUsed = [];
+    for (let i = 0; i < MAX_RECONNECT_ATTEMPTS + 2; i++) {
+      FakeSocket.last.fireOpen();                 // opens, set-instance sent...
+      const timeout = timers.scheduled
+        .filter((t) => t.ms === CONNECTION_TIMEOUT && !t.cleared).at(-1);
+      timeout.fn();                               // ...but pty-status never comes
+      if (conn.state !== CONNECTION_STATES.RECONNECTING) break;
+      delaysUsed.push(timers.scheduled.at(-1).ms);
+      timers.fireLast();
+    }
+    expect(conn.state).toBe(CONNECTION_STATES.DISCONNECTED);
+    expect(conn.error).toMatch(/multiple attempts/i);
+    expect(delaysUsed).toEqual(RECONNECT_DELAYS);
+    // Six sockets: the first attempt plus five rungs. A seventh means the
+    // counter reset somewhere on the retry path.
+    expect(FakeSocket.instances).toHaveLength(MAX_RECONNECT_ATTEMPTS + 1);
   });
 
   it('a handshake that never completes hits the connect timeout', () => {

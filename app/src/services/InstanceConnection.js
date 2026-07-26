@@ -73,9 +73,23 @@ export class InstanceConnection {
     this._setState(S.DISCONNECTED, { disconnectReason: reason });
   }
 
+  // An externally requested connect: tab select, app resume, an explicit user
+  // action. Fresh intent starts a NEW ladder, because the previous ladder's
+  // attempts say nothing about whether this one can succeed - without the reset,
+  // a resume from background after the ladder drained gets a single attempt and
+  // then gives up permanently.
   connect() {
     if (this.state === S.DESTROYED) return;
     if (this.state === S.CONNECTING || this.state === S.CONNECTED) return;
+    this.attempts = 0;
+    this._open();
+  }
+
+  // The ladder's own retry. Deliberately does NOT touch attempts: that is what
+  // bounds a deterministic handshake failure. Resetting the counter on every
+  // open is what made such a failure retry forever.
+  _open() {
+    if (this.state === S.DESTROYED) return;
     this._clearReconnectTimer();
     this.disconnectReason = null;
 
@@ -232,7 +246,7 @@ export class InstanceConnection {
     this._setState(S.RECONNECTING, { disconnectReason: 'dropped', error });
     this._reconnectTimer = this.setTimer(() => {
       this._reconnectTimer = null;
-      this.connect();
+      this._open();
     }, delay);
   }
 
