@@ -267,8 +267,11 @@ class WebSocketHandler {
       case 'resize': {
         const ptyManager = ptyRegistry.get(instanceId);
         if (message.cols && message.rows) {
-          // If PTY is deferred, start it now with real xterm.js dimensions
-          if (!ptyManager.isBusy && ptyManager.deferredStartDir) {
+          // If PTY is deferred, start it now with real xterm.js dimensions.
+          // stoppedByUser is checked as well as deferredStartDir: stop()
+          // clears the deferred dir, but a resize must never be the thing
+          // that revives a session the user explicitly ended.
+          if (!ptyManager.isBusy && !ptyManager.stoppedByUser && ptyManager.deferredStartDir) {
             if (ws._deferredStartTimer) {
               clearTimeout(ws._deferredStartTimer);
               ws._deferredStartTimer = null;
@@ -374,7 +377,9 @@ class WebSocketHandler {
   async runDeferredStartFallback(ws, newInstanceId, clientCols, clientRows, ctx) {
     ws._deferredStartTimer = null;
     const pm = ptyRegistry.get(newInstanceId);
-    if (!pm.isBusy && pm.deferredStartDir) {
+    // stoppedByUser guard: same reasoning as the resize handler above - an
+    // explicit stop between set-instance and this timer must win.
+    if (!pm.isBusy && !pm.stoppedByUser && pm.deferredStartDir) {
       logger.info({ instanceId: newInstanceId, clientCols, clientRows }, 'Deferred start fallback: no resize received, starting with set-instance dimensions');
       try {
         await pm.start(pm.deferredStartDir, clientCols, clientRows);

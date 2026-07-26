@@ -359,6 +359,9 @@ class PtyManager {
     // process to kill, and _start checks this flag before spawning.
     this.intentionalStop = true;
     this.stoppedByUser = true;
+    // A pending deferred start is an armed trigger: any later resize frame
+    // would spawn the CLI the user just stopped. An explicit stop disarms it.
+    this.deferredStartDir = null;
 
     if (this.status === 'starting') {
       logger.info({ instanceId: this.instanceId }, 'Cancelling in-flight PTY start');
