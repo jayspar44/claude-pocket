@@ -56,6 +56,7 @@ class PtyManager {
     this.currentWorkingDir = null;
     this.pendingWorkingDir = null; // For updating workingDir without restart
     this.deferredStartDir = null; // For deferring PTY start until first resize with real dimensions
+    this.starting = false; // Guards the await window inside start() against re-entry
     // Batching state
     this.batchQueue = '';
     this.batchTimer = null;
@@ -89,7 +90,25 @@ class PtyManager {
       logger.warn({ instanceId: this.instanceId }, 'PTY process already running');
       return;
     }
+    // ptyProcess is not assigned until after the CLI self-update below, which can
+    // block for up to 30s. Without this flag a second start() arriving in that
+    // window passes the guard above and spawns a duplicate CLI process: both feed
+    // the same buffer, so output renders twice, and stop/restart only reaches the
+    // second one - leaving the first alive until the relay itself is restarted.
+    if (this.starting) {
+      logger.warn({ instanceId: this.instanceId }, 'PTY start already in progress');
+      return;
+    }
+    this.starting = true;
 
+    try {
+      await this._start(workingDir, cols, rows);
+    } finally {
+      this.starting = false;
+    }
+  }
+
+  async _start(workingDir, cols, rows) {
     // Clear deferred start since we're starting now
     this.deferredStartDir = null;
 

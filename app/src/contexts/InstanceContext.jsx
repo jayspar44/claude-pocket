@@ -22,12 +22,6 @@ const HEARTBEAT_INTERVAL = 25000;
 const HEARTBEAT_TIMEOUT = 5000;
 const MAX_CONCURRENT_CONNECTIONS = 3;
 
-// Relay close code for a socket the relay considers orphaned or superseded.
-// The relay sends a close frame, so the handshake completes cleanly - but unlike
-// an ordinary clean close this is not the client's own decision to disconnect,
-// so it must still drive a reconnect.
-const CLOSE_CODE_EVICTED = 4002;
-
 // Storage keys (will be prefixed with port by storage utility)
 const INSTANCES_KEY = 'instances';
 const ACTIVE_INSTANCE_KEY = 'active-instance';
@@ -169,6 +163,10 @@ export function InstanceProvider({ children }) {
   // Track app visibility for notifications (Capacitor's visibilityState is unreliable)
   const isAppVisibleRef = useRef(true);
   const pongTimeoutsRef = useRef({});
+  // instanceId -> true when this client initiated the disconnect, so onclose can
+  // tell "we hung up" from "we were hung up on" and only skip reconnect for the
+  // former. Consumed (deleted) by the onclose that follows.
+  const deliberateDisconnectsRef = useRef({});
   const listenersRef = useRef({}); // Map<instanceId, Set<callback>>
   const connectInstanceRef = useRef(null); // Ref for self-referencing in reconnect
 
@@ -289,6 +287,12 @@ export function InstanceProvider({ children }) {
       delete wsRefs.current[instanceId];
     }
 
+    // Connecting supersedes any pending intent to stay disconnected. Without this
+    // the flag outlives its socket whenever onclose is skipped by the identity
+    // guard, and would then suppress the reconnect after a *later* unexpected
+    // drop.
+    delete deliberateDisconnectsRef.current[instanceId];
+
     updateInstanceState(instanceId, { connectionState: 'connecting', error: null });
 
     try {
@@ -336,7 +340,7 @@ export function InstanceProvider({ children }) {
         }));
       };
 
-      ws.onclose = (event) => {
+      ws.onclose = () => {
         // A close event can arrive long after this socket was superseded - most
         // often on mobile, where a backgrounded WebView defers delivery until the
         // app resumes and has already reconnected. Without this identity check the
@@ -351,12 +355,16 @@ export function InstanceProvider({ children }) {
         delete wsRefs.current[instanceId];
         cleanupTimers(instanceId);
 
-        // An eviction closes cleanly, but the client did not ask to disconnect -
-        // treating it as a normal close would leave this instance dark until the
-        // user manually reselects it, since resume only reconnects the active one.
-        const evicted = event.code === CLOSE_CODE_EVICTED;
+        // Reconnect unless *this client* chose to disconnect. Keying off
+        // event.wasClean asks the wrong question: a heartbeat timeout or a
+        // relay-side eviction can complete a clean handshake, and treating those
+        // as intentional leaves the instance dark until the user reselects it,
+        // since resume only reconnects the active instance. Only
+        // disconnectInstance sets this flag.
+        const deliberate = deliberateDisconnectsRef.current[instanceId] === true;
+        delete deliberateDisconnectsRef.current[instanceId];
 
-        if (!event.wasClean || evicted) {
+        if (!deliberate) {
           const attempt = reconnectAttemptsRef.current[instanceId] || 0;
           if (attempt >= MAX_RECONNECT_ATTEMPTS) {
             updateInstanceState(instanceId, {
@@ -486,16 +494,23 @@ export function InstanceProvider({ children }) {
 
   // Disconnect from instance
   const disconnectInstance = useCallback((instanceId) => {
-    if (reconnectTimeoutsRef.current[instanceId]) {
-      clearTimeout(reconnectTimeoutsRef.current[instanceId]);
-      delete reconnectTimeoutsRef.current[instanceId];
-    }
-
     cleanupTimers(instanceId);
 
-    if (wsRefs.current[instanceId]) {
-      wsRefs.current[instanceId].close(1000, 'Manual disconnect');
-      delete wsRefs.current[instanceId];
+    const ws = wsRefs.current[instanceId];
+    if (ws) {
+      const live = ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING;
+      if (live) {
+        // Mark before closing so the onclose this triggers knows the disconnect
+        // was ours and must not reconnect. Leave the ref in place: onclose's
+        // identity guard would otherwise skip this socket, and the flag would
+        // never be consumed - suppressing the *next* unexpected disconnect's
+        // reconnect instead of this one.
+        deliberateDisconnectsRef.current[instanceId] = true;
+        ws.close(1000, 'Manual disconnect');
+      } else {
+        // Already closed, so no onclose is coming to do this for us.
+        delete wsRefs.current[instanceId];
+      }
     }
 
     // Stop foreground service if no other connections are active (Android only)
@@ -522,7 +537,14 @@ export function InstanceProvider({ children }) {
   const sendToInstance = useCallback((instanceId, message) => {
     const ws = wsRefs.current[instanceId];
     if (ws?.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify(message));
+      // Stamp every set-instance centrally. The relay uses appClientId to spot a
+      // superseded socket; set-instance is re-sent from several places (the
+      // instance manager's Start button among them), and one caller forgetting
+      // it silently disables that detection for the socket.
+      const payload = message.type === 'set-instance'
+        ? { ...message, appClientId: APP_CLIENT_ID }
+        : message;
+      ws.send(JSON.stringify(payload));
       return true;
     }
     return false;
