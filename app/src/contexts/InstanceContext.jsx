@@ -211,6 +211,13 @@ export function InstanceProvider({ children }) {
 
   // Clean up timers for instance
   const cleanupTimers = useCallback((instanceId) => {
+    // Reconnect timers are keyed by instanceId, so scheduling a new one only
+    // overwrites the ref — the previously scheduled timer still fires. Clear it
+    // here so a superseded reconnect can't spawn an extra socket later.
+    if (reconnectTimeoutsRef.current[instanceId]) {
+      clearTimeout(reconnectTimeoutsRef.current[instanceId]);
+      delete reconnectTimeoutsRef.current[instanceId];
+    }
     if (connectionTimeoutsRef.current[instanceId]) {
       clearTimeout(connectionTimeoutsRef.current[instanceId]);
       delete connectionTimeoutsRef.current[instanceId];
@@ -255,6 +262,19 @@ export function InstanceProvider({ children }) {
     if (existingWs?.readyState === WebSocket.OPEN ||
         existingWs?.readyState === WebSocket.CONNECTING) {
       return;
+    }
+
+    // Never leave a superseded socket behind. Anything still in the slot here is
+    // CLOSING/CLOSED, but closing explicitly (rather than just overwriting the
+    // ref) guarantees we can't orphan a socket that would keep its own PTY
+    // listener on the relay and deliver a duplicate copy of every byte.
+    if (existingWs) {
+      try {
+        existingWs.close(1000, 'Superseded by new connection');
+      } catch {
+        // Already closed - nothing to do
+      }
+      delete wsRefs.current[instanceId];
     }
 
     updateInstanceState(instanceId, { connectionState: 'connecting', error: null });
@@ -304,6 +324,17 @@ export function InstanceProvider({ children }) {
       };
 
       ws.onclose = (event) => {
+        // A close event can arrive long after this socket was superseded - most
+        // often on mobile, where a backgrounded WebView defers delivery until the
+        // app resumes and has already reconnected. Without this identity check the
+        // stale close evicts whatever is in the slot, which by then is the current
+        // live socket: it stays open, keeps its own PTY listener on the relay, and
+        // every byte of output gets rendered an extra time. Only the socket still
+        // registered for this instance may mutate connection state.
+        if (wsRefs.current[instanceId] !== ws) {
+          return;
+        }
+
         delete wsRefs.current[instanceId];
         cleanupTimers(instanceId);
 

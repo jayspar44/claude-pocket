@@ -4,6 +4,17 @@ const { DEFAULT_INSTANCE_ID } = require('./pty-registry');
 const config = require('./config');
 const logger = require('./logger');
 
+// Orphan eviction tuning.
+//
+// A client that is still genuinely attached sends {type:'ping'} on the app-level
+// heartbeat (25s in the mobile client). A *leaked* socket — one the client
+// superseded but never closed — goes permanently silent, because the client keys
+// its heartbeat timer by instanceId, so each new socket overwrites the previous
+// one's timer. Silence is therefore the signal that separates an orphan from a
+// second real viewer, and it needs no client-side cooperation.
+const ORPHAN_IDLE_MS = 75000;  // 3 missed client heartbeats
+const ORPHAN_SWEEP_MS = 30000;
+
 class WebSocketHandler {
   constructor(server) {
     this.wss = new WebSocketServer({
@@ -20,6 +31,7 @@ class WebSocketHandler {
       const clientId = this.generateClientId();
       ws.clientId = clientId;
       ws.instanceId = DEFAULT_INSTANCE_ID; // Default instance until set-instance received
+      ws.lastClientMessage = Date.now(); // Liveness for orphan eviction
       this.clients.add(ws);
 
       logger.info({ clientId, ip: req.socket.remoteAddress }, 'WebSocket client connected');
@@ -73,6 +85,7 @@ class WebSocketHandler {
 
       // Handle incoming messages
       ws.on('message', (data) => {
+        ws.lastClientMessage = Date.now();
         try {
           const message = JSON.parse(data.toString());
           this.handleMessage(ws, message, { setupPtyListener, sendReplay, skipUntilReplay: () => skipUntilReplay, setSkipReplay: (v) => { skipUntilReplay = v; } });
@@ -118,8 +131,49 @@ class WebSocketHandler {
       });
     }, config.ws.pingInterval);
 
+    // Evict orphaned sockets. A buggy or superseded client can leave several
+    // sockets open on the same instance; each one carries its own PTY listener,
+    // so every output batch is delivered once per socket and the terminal renders
+    // duplicated output. Only sockets that have gone silent are evicted, and only
+    // when a live sibling exists on the same instance — so a genuine second
+    // viewer (which keeps heartbeating) is never disturbed.
+    this.orphanSweepInterval = setInterval(() => {
+      const now = Date.now();
+      const byInstance = new Map();
+
+      this.clients.forEach((ws) => {
+        if (ws.readyState !== ws.OPEN) return;
+        const id = ws.instanceId || DEFAULT_INSTANCE_ID;
+        if (!byInstance.has(id)) byInstance.set(id, []);
+        byInstance.get(id).push(ws);
+      });
+
+      const isFresh = (ws) => now - (ws.lastClientMessage || 0) < ORPHAN_IDLE_MS;
+
+      for (const [instanceId, sockets] of byInstance) {
+        if (sockets.length < 2) continue;
+
+        const stale = sockets.filter((ws) => !isFresh(ws));
+        const surviving = sockets.length - stale.length;
+        // If every socket is quiet we cannot tell orphan from idle viewer - leave them.
+        if (surviving === 0) continue;
+
+        for (const ws of stale) {
+          logger.warn({
+            clientId: ws.clientId,
+            instanceId,
+            idleMs: now - (ws.lastClientMessage || 0),
+            evicting: stale.length,
+            surviving,
+          }, 'Evicting orphaned WebSocket (silent while a live client is attached)');
+          ws.close(4002, 'Orphaned connection');
+        }
+      }
+    }, ORPHAN_SWEEP_MS);
+
     this.wss.on('close', () => {
       clearInterval(this.pingInterval);
+      clearInterval(this.orphanSweepInterval);
     });
   }
 
