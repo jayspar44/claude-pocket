@@ -21,9 +21,10 @@ class PtyRegistry {
     // that object entirely - without this, a later get() would construct a
     // brand-new manager with stoppedByUser defaulting back to false, and
     // set-instance would silently restart a session the user just stopped.
-    // Only remove() calls that pass { userInitiated: true } record here -
+    // Written by remove({ userInitiated: true }) and recordUserStop() only -
     // housekeeping eviction (cleanupIdleInstances, removeOldestIdle) must
-    // NOT, or an idle-evicted instance would stop being able to auto-start.
+    // NOT record, or an idle-evicted instance would stop being able to
+    // auto-start.
     // Pruned in cleanupIdleInstances() so an id nobody revisits doesn't
     // linger forever; cleared by clearUserStop() on any deliberate start.
     this.stoppedByUserAt = new Map();
@@ -132,6 +133,21 @@ class PtyRegistry {
     }
 
     return false;
+  }
+
+  /**
+   * Remember that the user stopped this instance, without removing it. Call
+   * this from any path where the user stops a session but the manager object
+   * survives (POST /api/pty/stop): PtyManager.stop() sets stoppedByUser on
+   * the manager, but that flag dies with the object, and idle cleanup evicts
+   * a stopped instance with no listeners after 30 minutes. Without this
+   * record, the next get() builds a manager with stoppedByUser back to false
+   * and set-instance restarts the session the user deliberately ended.
+   * @param {string} instanceId - The instance identifier
+   */
+  recordUserStop(instanceId) {
+    const id = instanceId || DEFAULT_INSTANCE_ID;
+    this.stoppedByUserAt.set(id, Date.now());
   }
 
   /**

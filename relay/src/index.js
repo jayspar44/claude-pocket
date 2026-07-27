@@ -262,6 +262,11 @@ app.post('/api/pty/stop', (req, res) => {
     const ptyManager = ptyRegistry.get(instanceId);
 
     ptyManager.stop();
+    // stop() marks the manager object, but that flag dies with it: idle
+    // cleanup evicts a stopped, listener-less instance after 30 minutes, and
+    // the next get() would build a manager willing to auto-start again.
+    // Record the intent in the registry so the stop outlives the object.
+    ptyRegistry.recordUserStop(instanceId);
     if (clearBuffer) {
       ptyManager.clearBuffer();
     }
