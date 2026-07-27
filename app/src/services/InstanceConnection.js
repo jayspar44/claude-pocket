@@ -33,7 +33,7 @@ export const STICKY_DISCONNECT_REASONS = Object.freeze(['user', 'idle']);
  * - CONNECTING or CONNECTED: leave it alone. DESTROYED can never be reopened.
  * - RECONNECTING is deliberately reconnectable. connect() cancels the pending
  *   retry and starts a fresh ladder, so a resume mid-backoff comes back at once
- *   instead of watching out a 16s rung.
+ *   instead of waiting out a 16s rung.
  * - DISCONNECTED for a sticky reason stays down unless there is user intent.
  *   Without that gate every app foreground resurrects the session the user just
  *   stopped; the reason is then written but never read, and "disconnect sticks"
