@@ -204,7 +204,7 @@ export default function Settings() {
   }, []);
 
   const handleStopAllInstances = useCallback(async () => {
-    if (!confirm('Stop all CLI instances on the relay? This will terminate all running sessions.')) {
+    if (!confirm('Stop all CLI instances on the relay?\n\nThis terminates every running session and marks them stopped, so no tab will restart automatically when you next open it — tap Start on each instance you want back.')) {
       return;
     }
     setStoppingAll(true);
@@ -660,7 +660,8 @@ export default function Settings() {
             <span>{stoppingAll ? 'Stopping...' : 'Stop All Server Instances'}</span>
           </button>
           <p className="text-xs text-gray-500">
-            Stops all CLI PTY processes on the relay server
+            Stops all CLI PTY processes on the relay server. Stopped sessions do not
+            auto-restart — tap Start on an instance to bring it back.
           </p>
 
           <button
