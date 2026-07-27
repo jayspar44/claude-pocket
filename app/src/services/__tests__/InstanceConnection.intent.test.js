@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { InstanceConnection, CONNECTION_STATES, shouldConnect } from '../InstanceConnection';
-import { FakeSocket } from './fakeSocket';
+import { FakeSocket, READY } from './fakeSocket';
 
 function makeTimers() {
   const scheduled = [];
@@ -253,5 +253,63 @@ describe('shouldConnect: reasons are read, not just written', () => {
     connectFully(conn);
     conn.destroy();
     expect(shouldConnect(conn, { userIntent: true })).toBe(false);
+  });
+});
+
+// The failure the old code caught with a readyState check and this one lost:
+// Android freezes the WebView while backgrounded, so the close event for a
+// socket the OS tore down can be dropped or arrive after appStateChange. The
+// state still says CONNECTED, so nothing reconnects, the input bar stays
+// enabled, and every keystroke is silently discarded.
+describe('InstanceConnection: a socket that died without a close event', () => {
+  beforeEach(() => FakeSocket.reset());
+
+  it('is not connected as far as shouldConnect is concerned', () => {
+    const { conn } = make();
+    connectFully(conn);
+    FakeSocket.last.readyState = READY.CLOSED;   // no close event ever arrives
+    expect(conn.state).toBe(CONNECTION_STATES.CONNECTED);
+    expect(conn.isSocketGone()).toBe(true);
+    expect(shouldConnect(conn)).toBe(true);
+  });
+
+  it('counts a CLOSING socket as gone too', () => {
+    const { conn } = make();
+    connectFully(conn);
+    FakeSocket.last.readyState = READY.CLOSING;
+    expect(shouldConnect(conn)).toBe(true);
+  });
+
+  it('connect() reopens over it instead of returning early', () => {
+    const { conn } = make();
+    connectFully(conn);
+    FakeSocket.last.readyState = READY.CLOSED;
+    conn.connect();
+    expect(conn.state).toBe(CONNECTION_STATES.CONNECTING);
+    expect(FakeSocket.instances).toHaveLength(2);
+  });
+
+  it('still leaves a connection whose socket is open alone', () => {
+    const { conn } = make();
+    connectFully(conn);
+    expect(conn.isSocketGone()).toBe(false);
+    expect(shouldConnect(conn)).toBe(false);
+    expect(shouldConnect(conn, { userIntent: true })).toBe(false);
+    conn.connect();
+    expect(FakeSocket.instances).toHaveLength(1);
+  });
+});
+
+describe('InstanceConnection: a ping that cannot be sent', () => {
+  beforeEach(() => FakeSocket.reset());
+
+  it('drops the connection instead of leaving it green and dead', () => {
+    const { conn, timers } = make();
+    connectFully(conn);
+    FakeSocket.last.readyState = READY.CLOSED;   // send() now throws
+    conn.ping();
+    expect(conn.state).toBe(CONNECTION_STATES.RECONNECTING);
+    // and the ladder is running, so it comes back on its own
+    expect(timers.scheduled.filter((t) => !t.cleared && t.ms === 1000)).toHaveLength(1);
   });
 });

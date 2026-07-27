@@ -30,7 +30,11 @@ export const STICKY_DISCONNECT_REASONS = Object.freeze(['user', 'idle']);
  * tab changing because another was deleted).
  *
  * - No connection object yet, or one that is IDLE: open it.
- * - CONNECTING or CONNECTED: leave it alone. DESTROYED can never be reopened.
+ * - CONNECTING or CONNECTED with a socket still alive: leave it alone. A socket
+ *   the OS closed without ever delivering a close event leaves the state saying
+ *   CONNECTED while nothing can be sent - routine on Android, where the WebView
+ *   is frozen while backgrounded - so isSocketGone() has the last word.
+ *   DESTROYED can never be reopened.
  * - RECONNECTING is deliberately reconnectable. connect() cancels the pending
  *   retry and starts a fresh ladder, so a resume mid-backoff comes back at once
  *   instead of waiting out a 16s rung.
@@ -43,7 +47,8 @@ export const STICKY_DISCONNECT_REASONS = Object.freeze(['user', 'idle']);
  */
 export const shouldConnect = (conn, { userIntent = false } = {}) => {
   if (!conn) return true;
-  if (conn.state === S.CONNECTING || conn.state === S.CONNECTED || conn.state === S.DESTROYED) {
+  if (conn.state === S.DESTROYED) return false;
+  if ((conn.state === S.CONNECTING || conn.state === S.CONNECTED) && !conn.isSocketGone()) {
     return false;
   }
   if (!userIntent && STICKY_DISCONNECT_REASONS.includes(conn.disconnectReason)) {
@@ -51,6 +56,11 @@ export const shouldConnect = (conn, { userIntent = false } = {}) => {
   }
   return true;
 };
+
+// WebSocket.CLOSING / CLOSED as numbers: this module is unit-tested in a node
+// environment that has no global WebSocket.
+const WS_CLOSING = 2;
+const WS_CLOSED = 3;
 
 export const RECONNECT_DELAYS = [1000, 2000, 4000, 8000, 16000];
 export const MAX_RECONNECT_ATTEMPTS = 5;
@@ -131,9 +141,24 @@ export class InstanceConnection {
   // then gives up permanently.
   connect() {
     if (this.state === S.DESTROYED) return;
-    if (this.state === S.CONNECTING || this.state === S.CONNECTED) return;
+    if (this.state === S.CONNECTING || this.state === S.CONNECTED) {
+      if (!this.isSocketGone()) return;
+      // The state says connected but the socket is not: it was closed without a
+      // close event ever reaching us. Clear the corpse out first so the fresh
+      // open is not racing a socket that may still deliver one.
+      this._clearAllTimers();
+      this._teardownSocket();
+    }
     this.attempts = 0;
     this._open();
+  }
+
+  // Whether this connection's socket can still carry traffic. Only meaningful
+  // while the state claims CONNECTING or CONNECTED; in every other state there
+  // is no socket, and the state itself already says so.
+  isSocketGone() {
+    if (!this.ws) return true;
+    return this.ws.readyState === WS_CLOSING || this.ws.readyState === WS_CLOSED;
   }
 
   // The ladder's own retry. Deliberately does NOT touch attempts: that is what
@@ -228,7 +253,13 @@ export class InstanceConnection {
 
   ping() {
     if (this.state !== S.CONNECTED) return;
-    if (!this.send({ type: 'ping' })) return;
+    // A ping that cannot be sent is evidence the socket is gone. Returning here
+    // arms no pong timer, so nothing else would ever notice: shouldConnect
+    // leaves CONNECTED alone and the heartbeat keeps ticking over a dead socket.
+    if (!this.send({ type: 'ping' })) {
+      this._drop('Ping failed');
+      return;
+    }
     this._clearPongTimer();
     this._pongTimer = this.setTimer(() => {
       this._pongTimer = null;
