@@ -201,6 +201,15 @@ class WebSocketHandler {
 
         const ptyManager = ctx.setupPtyListener(newInstanceId, cliType);
 
+        // userStart is set only by the app's Start button, never by an
+        // automatic (re)connect, so it is the one signal that may undo an
+        // explicit stop. Without it "stop means stopped" would also block the
+        // user's own Start; with it, reconnects still decline to auto-start.
+        if (message.userStart) {
+          ptyManager.stoppedByUser = false;
+          ptyRegistry.clearUserStop(newInstanceId);
+        }
+
         // Auto-start PTY if not running but we have a working directory
         // Defer start until first resize arrives with real xterm.js dimensions
         // to prevent MCP tool calls rendering vertically with stale/fallback dimensions

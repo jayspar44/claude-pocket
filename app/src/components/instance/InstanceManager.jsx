@@ -47,6 +47,7 @@ function InstanceManager({ isOpen, onClose, editInstanceId, startInAddMode }) {
     updateInstance,
     removeInstance,
     switchInstance,
+    sendToInstance,
     instanceColors,
     getInstanceState,
   } = useInstance();
@@ -187,25 +188,37 @@ function InstanceManager({ isOpen, onClose, editInstanceId, startInAddMode }) {
   }, [resetForm, onClose]);
 
   // PTY control handlers
-  const handleStartPty = useCallback(async (instance) => {
+  const handleStartPty = useCallback((instance) => {
     if (!instance.workingDir) {
       alert('Please set a working directory for this instance');
       return;
     }
-    // Start via the REST API, not set-instance: the relay refuses to
-    // auto-start a session the user explicitly stopped, and POST
-    // /api/pty/start is the path that clears that stop. The relay
-    // broadcasts pty-status to this instance's listeners, so the UI updates
-    // without a set-instance round trip.
-    setPtyLoading(true);
-    try {
-      await healthApi.startPty(instance.workingDir, instance.id, instance.cliType || 'claude');
-    } catch (error) {
-      console.error('Failed to start PTY:', error);
+    // If already connected, re-send set-instance to trigger deferred PTY start on relay.
+    // switchInstance alone won't re-send set-instance if the WS is already open.
+    //
+    // Deliberately NOT POST /api/pty/start: only set-instance rebinds this
+    // socket's PTY listener (a DELETE /api/instances replaces the manager
+    // object the listener is attached to), only it carries the client's real
+    // terminal dimensions, and it has no 10s axios timeout to trip over the
+    // CLI self-update. userStart tells the relay this is an explicit user
+    // start, so it clears any remembered stop - which is the one thing the
+    // REST route did that plain set-instance did not.
+    const dims = storage.getJSON('terminal-dims', { cols: 50, rows: 24 });
+    const sent = sendToInstance(instance.id, {
+      type: 'set-instance',
+      instanceId: instance.id,
+      workingDir: instance.workingDir,
+      cliType: instance.cliType || 'claude',
+      cols: dims.cols,
+      rows: dims.rows,
+      userStart: true,
+    });
+    if (!sent) {
+      // Not connected yet — switchInstance will connect and send set-instance
+      switchInstance(instance.id);
     }
-    setPtyLoading(false);
     onClose();
-  }, [onClose]);
+  }, [switchInstance, sendToInstance, onClose]);
 
   const handleStopPty = useCallback(async (instanceId) => {
     setPtyLoading(true);
