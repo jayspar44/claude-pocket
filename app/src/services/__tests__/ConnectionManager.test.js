@@ -205,4 +205,85 @@ describe('ConnectionManager', () => {
     mgr.destroyAll();
     expect(clearedIds).toEqual([firstId]);
   });
+
+  // The heartbeat exists to avoid waking the radio; leaving it armed with nothing
+  // connected is the cost it was meant to remove. The invariant throughout is
+  // still ONE interval, ever - never two live at once.
+  describe('the heartbeat follows the live connections', () => {
+    const liveIntervals = ({ intervals, clearedIds }) => (
+      intervals.filter((i) => !clearedIds.includes(i.id))
+    );
+
+    it('arms nothing until the first connect', () => {
+      const h = makeHeartbeatHarness();
+      h.mgr.ensure('i1', 'ws://r/ws');
+      expect(h.intervals).toHaveLength(0);
+
+      h.mgr.connect('i1', 'ws://r/ws');
+      expect(h.intervals).toHaveLength(1);
+    });
+
+    it('still arms only one interval however many instances connect', () => {
+      const h = makeHeartbeatHarness();
+      h.mgr.connect('i1', 'ws://r/ws');
+      h.mgr.connect('i2', 'ws://r/ws');
+      h.mgr.connect('i3', 'ws://r/ws');
+      expect(h.intervals).toHaveLength(1);
+      expect(liveIntervals(h)).toHaveLength(1);
+    });
+
+    it('keeps ticking while any other connection is still live', () => {
+      const h = makeHeartbeatHarness();
+      h.mgr.connect('i1', 'ws://r/ws');
+      h.mgr.connect('i2', 'ws://r/ws');
+      h.mgr.disconnect('i1', 'user');
+      expect(h.clearedIds).toEqual([]);
+      expect(liveIntervals(h)).toHaveLength(1);
+    });
+
+    it('releases the interval when the last connection is disconnected', () => {
+      const h = makeHeartbeatHarness();
+      h.mgr.connect('i1', 'ws://r/ws');
+      h.mgr.disconnect('i1', 'user');
+      expect(h.clearedIds).toEqual([h.intervals[0].id]);
+      expect(liveIntervals(h)).toHaveLength(0);
+    });
+
+    it('releases the interval on disconnectAll', () => {
+      const h = makeHeartbeatHarness();
+      h.mgr.connect('i1', 'ws://r/ws');
+      h.mgr.connect('i2', 'ws://r/ws');
+      h.mgr.disconnectAll('user');
+      expect(h.clearedIds).toEqual([h.intervals[0].id]);
+    });
+
+    it('releases the interval when the last connection is removed', () => {
+      const h = makeHeartbeatHarness();
+      h.mgr.connect('i1', 'ws://r/ws');
+      h.mgr.remove('i1');
+      expect(h.clearedIds).toEqual([h.intervals[0].id]);
+    });
+
+    it('releases the interval on the tick after a connection dies on its own', () => {
+      // A drained reconnect ladder never calls back into the manager, so nothing
+      // but the tick can notice that the map has gone quiet.
+      const h = makeHeartbeatHarness();
+      h.mgr.connect('i1', 'ws://r/ws');
+      h.mgr.get('i1').state = 'disconnected';    // ladder exhausted behind our back
+      expect(h.clearedIds).toEqual([]);
+
+      h.intervals[0].fn();                       // the 25s tick
+      expect(h.clearedIds).toEqual([h.intervals[0].id]);
+    });
+
+    it('arms exactly one fresh interval when a connection comes back', () => {
+      const h = makeHeartbeatHarness();
+      h.mgr.connect('i1', 'ws://r/ws');
+      h.mgr.disconnect('i1', 'user');
+      h.mgr.get('i1').state = 'connecting';
+      h.mgr.connect('i1', 'ws://r/ws');
+      expect(h.intervals).toHaveLength(2);
+      expect(liveIntervals(h)).toHaveLength(1);
+    });
+  });
 });

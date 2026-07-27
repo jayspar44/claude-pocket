@@ -46,14 +46,17 @@ export class ConnectionManager {
 
   connect(instanceId, url) {
     this.ensure(instanceId, url).connect();
+    this._syncHeartbeat();
   }
 
   disconnect(instanceId, reason = 'user') {
     this.connections.get(instanceId)?.disconnect(reason);
+    this._syncHeartbeat();
   }
 
   disconnectAll(reason = 'user') {
     this.connections.forEach((conn) => conn.disconnect(reason));
+    this._syncHeartbeat();
   }
 
   send(instanceId, message) {
@@ -84,6 +87,7 @@ export class ConnectionManager {
     if (!conn) return;
     conn.destroy();
     this.connections.delete(instanceId);
+    this._syncHeartbeat();
   }
 
   destroyAll() {
@@ -92,6 +96,8 @@ export class ConnectionManager {
     this.stopHeartbeat();
   }
 
+  // Idempotent: exactly one interval exists at a time, however many connections
+  // there are and however often this is called.
   startHeartbeat() {
     if (this._heartbeat !== null) return;
     this._heartbeat = this.setInterval_(() => this.tick(), this.heartbeatMs);
@@ -103,9 +109,22 @@ export class ConnectionManager {
     this._heartbeat = null;
   }
 
+  // Armed on the first live connection and released as soon as none is left.
+  // Holding it open while everything is disconnected wakes the radio every 25s to
+  // iterate an idle map, which is exactly the cost the shared heartbeat exists to
+  // avoid. Called after anything that can change what is live.
+  _syncHeartbeat() {
+    if (this.hasLiveConnections()) this.startHeartbeat();
+    else this.stopHeartbeat();
+  }
+
   tick() {
     this.connections.forEach((conn) => conn.ping());
     this._sweepIdle();
+    // A connection that died on its own - network loss, or a drained reconnect
+    // ladder - never calls back into the manager, so the tick is where its death
+    // releases the timer. Worst case that costs one extra wake-up.
+    this._syncHeartbeat();
   }
 
   // Evaluated by timestamp comparison on the tick, never by a long setTimeout.

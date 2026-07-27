@@ -336,7 +336,7 @@ export function InstanceProvider({ children }) {
       },
     });
     managerRef.current = mgr;
-    mgr.startHeartbeat();
+    // The heartbeat arms itself on the first live connection - see _syncHeartbeat.
     return () => {
       mgr.destroyAll();
       managerRef.current = null;
