@@ -270,7 +270,7 @@ export default function Settings() {
         : `Restored ${serverInst.instanceId.slice(0, 8)}`;
       const created = addInstance(name, getRelayUrl(), serverInst.workingDir, null, serverInst.instanceId);
       if (created?.error === 'instance-limit') {
-        alert(`Limit reached: the relay accepts at most ${created.limit} instances. Stop one first.`);
+        alert(`Limit reached: at most ${created.limit} tabs. Delete a tab first — stopping a session leaves its tab in place.`);
         return;
       }
       connectInstance(serverInst.instanceId);

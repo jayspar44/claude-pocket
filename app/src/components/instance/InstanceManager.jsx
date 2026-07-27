@@ -153,7 +153,7 @@ function InstanceManager({ isOpen, onClose, editInstanceId, startInAddMode }) {
         formData.cliType
       );
       if (newInstance?.error === 'instance-limit') {
-        alert(`Limit reached: the relay accepts at most ${newInstance.limit} instances. Stop one first.`);
+        alert(`Limit reached: at most ${newInstance.limit} tabs. Delete a tab first — stopping a session leaves its tab in place.`);
         return;
       }
       switchInstance(newInstance.id);
