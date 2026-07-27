@@ -27,13 +27,14 @@ const startForegroundService = () => {
 
 const stopForegroundService = () => {
   if (!WebSocketService || !webSocketServiceRunning) return;
-  WebSocketService.stop()
-    .then(() => {
-      webSocketServiceRunning = false;
-    })
-    .catch(err => {
-      console.warn('[InstanceContext] Failed to stop foreground service:', err);
-    });
+  // The flag records intent, not native completion. Clearing it only once stop()
+  // resolves lets a connect that lands while the stop is in flight skip start()
+  // - and the pending stop then clears the flag under a live socket, leaving the
+  // app holding an open WebSocket with no foreground service.
+  webSocketServiceRunning = false;
+  WebSocketService.stop().catch(err => {
+    console.warn('[InstanceContext] Failed to stop foreground service:', err);
+  });
 };
 
 const InstanceContext = createContext(null);
