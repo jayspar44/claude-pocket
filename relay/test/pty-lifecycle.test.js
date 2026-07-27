@@ -124,6 +124,79 @@ test('a resize during the start window sets the spawn dimensions', async () => {
   assert.deepEqual(pm.spawnedAt, { cols: 92, rows: 40 });
 });
 
+// Finding 7: lastCols/lastRows survive stop(), so on a session that died
+// without user intent (three crashes exhaust MAX_RESTART_ATTEMPTS) they hold
+// the PREVIOUS session's geometry. The dimensions the caller passes are the
+// current ones - the deferred start fires from a live resize frame - so they
+// must replace the stale record, not lose to it.
+test('the caller dimensions beat a stale lastCols from a dead session', async () => {
+  const pm = new PtyManager('t9', 'claude');
+  stubSelfUpdate(pm, Promise.resolve());
+  stubSpawn(pm);
+
+  // Landscape session ran at 100x40 and then died on its own.
+  pm.lastCols = 100;
+  pm.lastRows = 40;
+
+  // User reopens in portrait; the resize handler starts the deferred PTY with
+  // the dimensions xterm.js just reported.
+  await pm.start('/tmp', 60, 90);
+
+  assert.deepEqual(pm.spawnedAt, { cols: 60, rows: 90 }, 'the CLI must spawn at the current geometry');
+  assert.deepEqual({ cols: pm.lastCols, rows: pm.lastRows }, { cols: 60, rows: 90 });
+});
+
+test('a caller that passes no dimensions keeps the known-good lastCols', async () => {
+  // POST /api/pty/start and POST /api/pty/restart pass none at all: nothing
+  // current is on offer, so the client's last reported geometry must stand
+  // rather than dropping to the 50x24 config fallback.
+  const pm = new PtyManager('t10', 'claude');
+  stubSelfUpdate(pm, Promise.resolve());
+  stubSpawn(pm);
+
+  pm.lastCols = 120;
+  pm.lastRows = 40;
+
+  await pm.start('/tmp');
+
+  assert.deepEqual(pm.spawnedAt, { cols: 120, rows: 40 }, 'a dimension-less start must not downgrade to the fallback');
+});
+
+// Finding 7 (second half): resize() only recorded lastCols/lastRows when a
+// ptyProcess existed, so a stopped session could not learn its new geometry -
+// which is what left the stale record above in place across a rotation.
+test('resize() records dimensions even with no process running', () => {
+  const pm = new PtyManager('t11', 'claude');
+  assert.equal(pm.status, 'stopped');
+  assert.equal(pm.ptyProcess, null);
+
+  pm.resize(64, 88);
+
+  assert.deepEqual({ cols: pm.lastCols, rows: pm.lastRows }, { cols: 64, rows: 88 });
+});
+
+// Finding 9: the wrapper's catch sets status='stopped' unconditionally, but
+// _start assigns this.ptyProcess (and wires onData/onExit) before the rest of
+// its try block runs. A throw after that assignment leaves a LIVE CLI child
+// behind a 'stopped' status; guarding on status alone would let the next
+// start() spawn a second CLI over the top of it, orphaning the first beyond
+// the reach of stop().
+test('a live ptyProcess blocks a start even when status says stopped', async () => {
+  const pm = new PtyManager('t12', 'claude');
+  stubSelfUpdate(pm, Promise.resolve());
+  stubSpawn(pm);
+
+  // Exactly the state _start leaves behind when it throws after the
+  // this.ptyProcess assignment: a real child process, status reset to stopped.
+  pm.ptyProcess = fakePtyProcess(4242);
+  pm.status = 'stopped';
+
+  await pm.start('/tmp', 80, 24);
+
+  assert.equal(pm.spawns, 0, 'a second CLI must not be spawned over a live process');
+  assert.equal(pm.ptyProcess.pid, 4242, 'the live process must still be the one the manager tracks');
+});
+
 test('a throwing spawn leaves status stopped and broadcasts pty-error', async () => {
   const pm = new PtyManager('t8', 'claude');
   stubSelfUpdate(pm, Promise.resolve());

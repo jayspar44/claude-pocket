@@ -106,8 +106,13 @@ class PtyManager {
   }
 
   async start(workingDir, cols, rows) {
-    if (this.status === 'running') {
-      logger.warn({ instanceId: this.instanceId }, 'PTY process already running');
+    // A live ptyProcess blocks a start even when status disagrees: if _start
+    // throws after assigning this.ptyProcess, the wrapper's catch sets status
+    // back to 'stopped' while the CLI child is still alive and wired to
+    // onData. Checking status alone would let the next start() spawn a second
+    // CLI over the top of it, orphaning the first beyond the reach of stop().
+    if (this.status === 'running' || this.ptyProcess) {
+      logger.warn({ instanceId: this.instanceId, status: this.status }, 'PTY process already running');
       return;
     }
     if (this.status === 'starting') {
@@ -168,6 +173,16 @@ class PtyManager {
     this.currentWorkingDir = effectiveWorkingDir;
     this.intentionalStop = false;
 
+    // Record the caller's dimensions NOW, before the self-update await, so
+    // they replace any stale lastCols/lastRows left over from a previous
+    // session (a landscape session that crashed, reopened in portrait) - the
+    // callers that pass dimensions at all pass current ones. Callers with
+    // nothing to offer (POST /api/pty/start, POST /api/pty/restart, a
+    // dimension-less set-instance) pass nothing and leave lastCols intact,
+    // rather than dropping the session to config.pty.cols (50).
+    if (cols) this.lastCols = cols;
+    if (rows) this.lastRows = rows;
+
     // Run CLI self-update before starting (best-effort, non-blocking on failure).
     // Skipped for CLIs whose registry entry sets supportsUpdate: false.
     const cliEntry = getCliEntry(this.cliType);
@@ -202,20 +217,12 @@ class PtyManager {
       return;
     }
 
-    // Computed after the update await so a resize arriving during the window
-    // is honoured rather than discarded.
-    //
-    // lastCols/lastRows deliberately win over the caller's cols/rows, and
-    // survive stop(): they are the real xterm.js dimensions the client last
-    // reported (via resize, or via set-instance during 'starting'), whereas
-    // the arguments are a caller-side fallback that is frequently absent -
-    // POST /api/pty/start and POST /api/pty/restart pass none at all. If the
-    // arguments won, a restart or a Start-after-Stop would drop the session
-    // back to config.pty.cols (50) and make MCP tool output render vertically
-    // until the next resize. The client's own dimensions are never stale in
-    // practice: resize() updates them on every terminal geometry change.
-    const spawnCols = this.lastCols || cols || config.pty.cols;
-    const spawnRows = this.lastRows || rows || config.pty.rows;
+    // Read lastCols/lastRows only here, after the update await: the caller's
+    // dimensions were folded into them above, so anything written since (a
+    // resize, or a set-instance carrying real dimensions) is genuinely newer
+    // and must win over what this attempt was originally given.
+    const spawnCols = this.lastCols || config.pty.cols;
+    const spawnRows = this.lastRows || config.pty.rows;
     this.lastCols = spawnCols;
     this.lastRows = spawnRows;
 
@@ -457,10 +464,13 @@ class PtyManager {
   }
 
   resize(cols, rows) {
+    // Record the dimensions even with no process: they are what the next
+    // spawn falls back to, and a resize while stopped is precisely when
+    // lastCols would otherwise keep the previous session's stale geometry.
+    this.lastCols = cols;
+    this.lastRows = rows;
     if (this.ptyProcess) {
       this.ptyProcess.resize(cols, rows);
-      this.lastCols = cols;
-      this.lastRows = rows;
       logger.debug({ cols, rows }, 'Terminal resized');
     }
   }
