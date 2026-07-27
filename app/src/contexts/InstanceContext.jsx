@@ -5,6 +5,7 @@ import { notificationService } from '../services/NotificationService';
 import { InstanceConnection, CONNECTION_STATES, shouldConnect } from '../services/InstanceConnection';
 import { ConnectionManager, IDLE_DISCONNECT_MS } from '../services/ConnectionManager';
 import { canAddInstance } from '../services/instanceLimit';
+import { createForegroundService } from '../services/foregroundService';
 import { healthApi } from '../api/relay-api';
 import { storage } from '../utils/storage';
 
@@ -13,29 +14,11 @@ const WebSocketService = Capacitor.isNativePlatform()
   ? registerPlugin('WebSocketService')
   : null;
 
-// Track WebSocketService state to prevent multiple start attempts
-let webSocketServiceRunning = false;
-
-const startForegroundService = () => {
-  if (!WebSocketService || webSocketServiceRunning) return;
-  webSocketServiceRunning = true;
-  WebSocketService.start().catch(err => {
-    webSocketServiceRunning = false;
-    console.warn('[InstanceContext] Failed to start foreground service:', err);
-  });
-};
-
-const stopForegroundService = () => {
-  if (!WebSocketService || !webSocketServiceRunning) return;
-  // The flag records intent, not native completion. Clearing it only once stop()
-  // resolves lets a connect that lands while the stop is in flight skip start()
-  // - and the pending stop then clears the flag under a live socket, leaving the
-  // app holding an open WebSocket with no foreground service.
-  webSocketServiceRunning = false;
-  WebSocketService.stop().catch(err => {
-    console.warn('[InstanceContext] Failed to stop foreground service:', err);
-  });
-};
+// One service for the app, guarded by one flag that records intent - see
+// createForegroundService for why that matters.
+const foregroundService = createForegroundService(WebSocketService);
+const startForegroundService = () => foregroundService.start();
+const stopForegroundService = () => foregroundService.stop();
 
 const InstanceContext = createContext(null);
 
@@ -343,7 +326,7 @@ export function InstanceProvider({ children }) {
       managerRef.current = null;
       // destroy() sets DESTROYED without going through _setState, so no
       // onStateChange fires and the release below is the only one that runs. A
-      // WebView reload resets webSocketServiceRunning to false while the native
+      // WebView reload resets the foreground-service flag to false while the native
       // notification survives, so skipping this leaves an orphaned service that
       // the next start() would double up on.
       stopForegroundService();
