@@ -242,19 +242,25 @@ export default function Settings() {
 
   const handleStopInstance = useCallback(async (instanceId) => {
     setStoppingInstance(instanceId);
+    // Same snapshot as above, and for a sharper reason: this button renders for
+    // every SERVER instance, including ones whose tab is offline or orphaned.
+    // Restoring unconditionally would open a socket the user did not have, and
+    // that socket re-sends set-instance - which arms a deferred start and
+    // respawns the very CLI the user had stopped.
+    const wasLive = isLiveConnectionState(getInstanceState(instanceId).connectionState);
     try {
       disconnectInstance(instanceId);
       await instancesApi.delete(instanceId);
       // Re-fetch will happen via the interval
     } catch (error) {
       console.error('Failed to stop instance:', error);
-      // Same as above: the CLI survived the failed stop, so the tab must not be
+      // The CLI survived the failed stop, so a tab that WAS live must not be
       // left holding a sticky 'user' disconnect it can never recover from.
-      connectInstance(instanceId);
+      if (wasLive) connectInstance(instanceId);
       alert(error.response?.data?.error || 'Failed to stop instance');
     }
     setStoppingInstance(null);
-  }, [disconnectInstance, connectInstance]);
+  }, [disconnectInstance, connectInstance, getInstanceState]);
 
   const handleRestoreInstance = useCallback((serverInst) => {
     const existing = appInstances.find(a => a.id === serverInst.instanceId);
