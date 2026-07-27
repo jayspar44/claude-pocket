@@ -416,10 +416,14 @@ export function InstanceProvider({ children }) {
       disconnectInstance(instanceId);
       managerRef.current?.remove(instanceId);
       if (instanceId === activeInstanceId) {
-        setTimeout(() => connectInstance(instanceId), 100);
+        // The new URL is passed straight through rather than read back out of
+        // instancesRef after a delay: a timer racing the React commit reads the
+        // old record on a slow render, and ensure() then pins the connection to
+        // the old URL for the rest of the session.
+        managerRef.current?.connect(instanceId, updates.relayUrl);
       }
     }
-  }, [activeInstanceId, disconnectInstance, connectInstance]);
+  }, [activeInstanceId, disconnectInstance]);
 
   const removeInstance = useCallback((instanceId) => {
     if (instances.length <= 1) return; // Keep at least one instance
