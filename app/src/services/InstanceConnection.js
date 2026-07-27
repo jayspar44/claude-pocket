@@ -174,10 +174,11 @@ export class InstanceConnection {
       this._handleMessage(message);
     };
 
-    ws.onerror = () => {
-      if (this.ws !== ws) return;
-    };
-
+    // No onerror handler on purpose. The browser always follows a socket error
+    // with a close, so onclose is where the drop is handled; an onerror that only
+    // stashed a string would be overwritten by that close, and nothing renders
+    // this connection's `error` anyway - the UI shows ptyError. Adding one back
+    // means plumbing the message through _drop, not assigning it here.
     ws.onclose = () => {
       // A close event can arrive long after this socket was superseded, which is
       // routine on mobile. Only the current socket may change state.

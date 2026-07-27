@@ -364,7 +364,7 @@ export function InstanceProvider({ children }) {
   }, []);
 
   const disconnectAllInstances = useCallback((reason = 'user') => {
-    managerRef.current.disconnectAll(reason);
+    managerRef.current?.disconnectAll(reason);
   }, []);
 
   const sendToInstance = useCallback((instanceId, message) => (
