@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { ChevronLeft, Server, Type, Trash2, Info, Check, FileX, Bell, RotateCcw, Square, Download, ScrollText, X, Link } from 'lucide-react';
 import { useRelay } from '../hooks/useRelay';
 import { useInstance, normalizeCliType } from '../contexts/InstanceContext';
+import { isLiveConnectionState } from '../services/InstanceConnection';
 import { healthApi, filesApi, instancesApi } from '../api/relay-api';
 import { version } from '../../../version.json';
 import { versionCode } from '../../android-version.json';
@@ -26,7 +27,15 @@ const envConfig = {
 export default function Settings() {
   const navigate = useNavigate();
   const { getRelayUrl, setRelayUrl, connectionState } = useRelay();
-  const { instances: appInstances, addInstance, connectInstance, switchInstance } = useInstance();
+  const {
+    instances: appInstances,
+    addInstance,
+    connectInstance,
+    switchInstance,
+    disconnectInstance,
+    disconnectAllInstances,
+    getInstanceState,
+  } = useInstance();
 
   const [relayUrlInput, setRelayUrlInput] = useState(getRelayUrl());
   const [fontSizeInput, setFontSizeInput] = useState(() => {
@@ -208,27 +217,50 @@ export default function Settings() {
       return;
     }
     setStoppingAll(true);
+    // Which tabs to put back if the stop fails - captured before disconnecting,
+    // because afterwards every one of them reads as offline.
+    const wasLive = appInstances
+      .filter((inst) => isLiveConnectionState(getInstanceState(inst.id).connectionState))
+      .map((inst) => inst.id);
     try {
+      // Disconnect first, with reason 'user', so nothing auto-reconnects and
+      // re-sends set-instance. That would arm a deferred start on the relay and
+      // bring back every CLI the user just stopped.
+      disconnectAllInstances('user');
       const response = await instancesApi.deleteAll();
       alert(`Stopped ${response.data.count} instance(s)`);
     } catch (error) {
       console.error('Failed to stop instances:', error);
+      // The CLIs are still running, so undo the intent. Leaving it in place
+      // strands them: 'user' is sticky, so neither the foreground handler nor
+      // the mount effect reconnects, and the tabs sit Offline for good.
+      wasLive.forEach((id) => connectInstance(id));
       alert(error.response?.data?.error || 'Failed to stop instances');
     }
     setStoppingAll(false);
-  }, []);
+  }, [appInstances, getInstanceState, disconnectAllInstances, connectInstance]);
 
   const handleStopInstance = useCallback(async (instanceId) => {
     setStoppingInstance(instanceId);
+    // Same snapshot as above, and for a sharper reason: this button renders for
+    // every SERVER instance, including ones whose tab is offline or orphaned.
+    // Restoring unconditionally would open a socket the user did not have, and
+    // that socket re-sends set-instance - which arms a deferred start and
+    // respawns the very CLI the user had stopped.
+    const wasLive = isLiveConnectionState(getInstanceState(instanceId).connectionState);
     try {
+      disconnectInstance(instanceId);
       await instancesApi.delete(instanceId);
       // Re-fetch will happen via the interval
     } catch (error) {
       console.error('Failed to stop instance:', error);
+      // The CLI survived the failed stop, so a tab that WAS live must not be
+      // left holding a sticky 'user' disconnect it can never recover from.
+      if (wasLive) connectInstance(instanceId);
       alert(error.response?.data?.error || 'Failed to stop instance');
     }
     setStoppingInstance(null);
-  }, []);
+  }, [disconnectInstance, connectInstance, getInstanceState]);
 
   const handleRestoreInstance = useCallback((serverInst) => {
     const existing = appInstances.find(a => a.id === serverInst.instanceId);
@@ -242,7 +274,11 @@ export default function Settings() {
       const name = serverInst.instanceId === 'default'
         ? 'Default (Restored)'
         : `Restored ${serverInst.instanceId.slice(0, 8)}`;
-      addInstance(name, getRelayUrl(), serverInst.workingDir, null, serverInst.instanceId);
+      const created = addInstance(name, getRelayUrl(), serverInst.workingDir, null, serverInst.instanceId);
+      if (created?.error === 'instance-limit') {
+        alert(`Limit reached: at most ${created.limit} tabs. Delete a tab first — stopping a session leaves its tab in place.`);
+        return;
+      }
       connectInstance(serverInst.instanceId);
       switchInstance(serverInst.instanceId);
     }

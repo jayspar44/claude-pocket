@@ -50,6 +50,8 @@ function InstanceManager({ isOpen, onClose, editInstanceId, startInAddMode }) {
     sendToInstance,
     instanceColors,
     getInstanceState,
+    connectInstance,
+    disconnectInstance,
   } = useInstance();
 
   const [ptyLoading, setPtyLoading] = useState(false);
@@ -150,6 +152,10 @@ function InstanceManager({ isOpen, onClose, editInstanceId, startInAddMode }) {
         null,
         formData.cliType
       );
+      if (newInstance?.error === 'instance-limit') {
+        alert(`Limit reached: at most ${newInstance.limit} tabs. Delete a tab first — stopping a session leaves its tab in place.`);
+        return;
+      }
       switchInstance(newInstance.id);
       // Close modal after adding (switch to new instance)
       // PTY starts automatically via WebSocket set-instance → deferred start → resize
@@ -223,12 +229,19 @@ function InstanceManager({ isOpen, onClose, editInstanceId, startInAddMode }) {
   const handleStopPty = useCallback(async (instanceId) => {
     setPtyLoading(true);
     try {
+      // Disconnect first, with reason 'user', so nothing auto-reconnects and
+      // re-sends set-instance: that arms a deferred start on the relay and
+      // respawns the CLI the user just stopped.
+      disconnectInstance(instanceId);
       await healthApi.stopPty(instanceId);
     } catch (error) {
       console.error('Failed to stop PTY:', error);
+      // The CLI is still running, so undo the intent - otherwise the sticky
+      // 'user' reason keeps the tab offline until it is tapped.
+      connectInstance(instanceId);
     }
     setPtyLoading(false);
-  }, []);
+  }, [disconnectInstance, connectInstance]);
 
   const handleRestartPty = useCallback(async (instanceId) => {
     setPtyLoading(true);
