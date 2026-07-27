@@ -495,7 +495,14 @@ export function InstanceProvider({ children }) {
     // intent: it revives a connection lost to the network (including one still
     // mid-backoff, which comes back at once instead of waiting out its rung) but
     // leaves a session the user stopped alone.
-    const reconnectActiveIfNeeded = () => {
+    //
+    // Every connection is swept, not just the active one: a background tab that
+    // drained its ladder during the outage stays dark otherwise - no output and
+    // no task-complete notification - until the user happens to tap it.
+    const reconnectIfNeeded = () => {
+      managerRef.current?.reconnectAll();
+      // The active tab may have no connection object at all yet, which the
+      // manager's map cannot know about.
       const instanceId = activeInstanceIdRef.current;
       if (!instanceId) return;
       if (!shouldConnect(managerRef.current?.get(instanceId))) return;
@@ -510,7 +517,7 @@ export function InstanceProvider({ children }) {
 
       if (document.hidden) return;
 
-      reconnectActiveIfNeeded();
+      reconnectIfNeeded();
     };
 
     document.addEventListener('visibilitychange', handleVisibilityChange);

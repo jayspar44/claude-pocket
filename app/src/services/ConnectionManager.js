@@ -1,4 +1,4 @@
-import { InstanceConnection, isLiveConnectionState } from './InstanceConnection';
+import { InstanceConnection, isLiveConnectionState, shouldConnect } from './InstanceConnection';
 
 export const HEARTBEAT_INTERVAL = 25000;
 export const IDLE_DISCONNECT_MS = 3600000;   // 1 hour
@@ -46,6 +46,18 @@ export class ConnectionManager {
 
   connect(instanceId, url) {
     this.ensure(instanceId, url).connect();
+    this._syncHeartbeat();
+  }
+
+  // Every connection the app has opened gets its own decision, not just the
+  // active one. Two tabs backgrounded through a network outage both drain their
+  // ladders; reviving only the active tab leaves the other silent - no output and
+  // no task-complete notification - until the user happens to tap it. Carries no
+  // user intent, so a session the user stopped stays stopped.
+  reconnectAll() {
+    this.connections.forEach((conn) => {
+      if (shouldConnect(conn)) conn.connect();
+    });
     this._syncHeartbeat();
   }
 

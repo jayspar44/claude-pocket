@@ -11,6 +11,7 @@ function fakeConn(instanceId) {
     send: vi.fn(() => true),
     ping: vi.fn(),
     isIdleSince: vi.fn(() => false),
+    isSocketGone: vi.fn(() => false),
     destroy: vi.fn(function () { this.state = 'destroyed'; }),
   };
 }
@@ -267,6 +268,17 @@ describe('ConnectionManager', () => {
       expect(h.clearedIds).toEqual([h.intervals[0].id]);
     });
 
+    it('arms a fresh interval when a connection comes back after reconnectAll', () => {
+      const h = makeHeartbeatHarness();
+      h.mgr.connect('i1', 'ws://r/ws');
+      h.mgr.disconnect('i1', 'user');
+      const c = h.mgr.get('i1');
+      c.disconnectReason = 'dropped';           // an involuntary loss, not the user
+      c.connect.mockImplementation(function () { this.state = 'connecting'; });
+      h.mgr.reconnectAll();
+      expect(liveIntervals(h)).toHaveLength(1);
+    });
+
     it('arms exactly one fresh interval when a connection comes back', () => {
       const h = makeHeartbeatHarness();
       h.mgr.connect('i1', 'ws://r/ws');
@@ -275,6 +287,47 @@ describe('ConnectionManager', () => {
       h.mgr.connect('i1', 'ws://r/ws');
       expect(h.intervals).toHaveLength(2);
       expect(liveIntervals(h)).toHaveLength(1);
+    });
+  });
+  // A resume must revive every connection, not just the active tab's. Two tabs
+  // backgrounded through a 40s outage both drain their ladders; reviving only the
+  // active one leaves the other with no output and no task-complete notification
+  // until the user happens to tap it.
+  describe('reconnectAll', () => {
+    it('revives every connection shouldConnect allows, and only those', () => {
+      const h = makeHeartbeatHarness();
+      const dropped = h.mgr.ensure('i1', 'ws://r/ws');
+      dropped.state = 'disconnected';
+      dropped.disconnectReason = 'dropped';        // ladder drained while backgrounded
+      const stopped = h.mgr.ensure('i2', 'ws://r/ws');
+      stopped.state = 'disconnected';
+      stopped.disconnectReason = 'user';           // the user stopped this one
+      const backingOff = h.mgr.ensure('i3', 'ws://r/ws');
+      backingOff.state = 'reconnecting';
+      backingOff.disconnectReason = 'dropped';
+      const healthy = h.mgr.ensure('i4', 'ws://r/ws');   // fakeConn starts connected
+
+      h.mgr.reconnectAll();
+
+      expect(dropped.connect).toHaveBeenCalledTimes(1);
+      expect(backingOff.connect).toHaveBeenCalledTimes(1);
+      expect(stopped.connect).not.toHaveBeenCalled();
+      expect(healthy.connect).not.toHaveBeenCalled();
+    });
+
+    it('carries no user intent, so an idle-swept session stays down', () => {
+      const h = makeHeartbeatHarness();
+      const swept = h.mgr.ensure('i1', 'ws://r/ws');
+      swept.state = 'disconnected';
+      swept.disconnectReason = 'idle';
+      h.mgr.reconnectAll();
+      expect(swept.connect).not.toHaveBeenCalled();
+    });
+
+    it('is a no-op with no connections', () => {
+      const h = makeHeartbeatHarness();
+      expect(() => h.mgr.reconnectAll()).not.toThrow();
+      expect(h.intervals).toHaveLength(0);
     });
   });
 });
