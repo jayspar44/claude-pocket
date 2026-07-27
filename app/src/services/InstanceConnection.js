@@ -78,6 +78,14 @@ export class InstanceConnection {
     setTimer = (fn, ms) => setTimeout(fn, ms),
     clearTimer = (id) => clearTimeout(id),
   }) {
+    // No default: a connection whose handshake payload is missing throws inside
+    // onopen, never sends set-instance, and burns the whole reconnect ladder
+    // before settling on disconnected ~41s later. Fail here instead, where the
+    // caller that forgot it is still on the stack.
+    if (typeof getHandshakePayload !== 'function') {
+      throw new TypeError('InstanceConnection requires a getHandshakePayload function');
+    }
+
     this.instanceId = instanceId;
     this.url = url;
     this.getHandshakePayload = getHandshakePayload;

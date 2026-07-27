@@ -118,3 +118,24 @@ describe('InstanceConnection: connect and handshake', () => {
     expect(FakeSocket.last.lastSent).toEqual({ type: 'input', data: 'x' });
   });
 });
+
+describe('InstanceConnection: the handshake payload is required', () => {
+  beforeEach(() => FakeSocket.reset());
+
+  // Without the guard this constructs happily and fails ~41s later: onopen
+  // throws, set-instance is never sent, the relay never replies pty-status, and
+  // the connect timer plus the whole reconnect ladder run their course.
+  it('refuses to construct without getHandshakePayload', () => {
+    expect(() => new InstanceConnection({ instanceId: 'inst-1', url: 'ws://relay/ws' }))
+      .toThrow(TypeError);
+    expect(FakeSocket.instances).toHaveLength(0);
+  });
+
+  it('refuses a getHandshakePayload that is not callable', () => {
+    expect(() => new InstanceConnection({
+      instanceId: 'inst-1',
+      url: 'ws://relay/ws',
+      getHandshakePayload: { workingDir: '/tmp' },
+    })).toThrow(TypeError);
+  });
+});
