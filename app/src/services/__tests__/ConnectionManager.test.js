@@ -37,20 +37,11 @@ describe('ConnectionManager', () => {
     expect(created).toHaveLength(1);
   });
 
-  it('connectedCount counts only connected connections', () => {
-    const { mgr } = make();
-    mgr.ensure('i1', 'ws://r/ws');
-    mgr.ensure('i2', 'ws://r/ws');
-    expect(mgr.connectedCount()).toBe(2);
-    mgr.get('i2').state = 'reconnecting';
-    expect(mgr.connectedCount()).toBe(1);
-  });
-
   it('hasLiveConnections counts CONNECTING and RECONNECTING, not just CONNECTED', () => {
     const { mgr } = make();
     const c = mgr.ensure('i1', 'ws://r/ws');
+    expect(mgr.hasLiveConnections()).toBe(true);
     c.state = 'reconnecting';
-    expect(mgr.connectedCount()).toBe(0);
     expect(mgr.hasLiveConnections()).toBe(true);
     c.state = 'connecting';
     expect(mgr.hasLiveConnections()).toBe(true);
@@ -63,7 +54,7 @@ describe('ConnectionManager', () => {
   it('stays live when the last CONNECTED instance is swept while another backs off', () => {
     // The scenario the foreground-service release gate has to survive: A has been
     // idle an hour, B is mid-backoff behind a dead network, both backgrounded. The
-    // sweep disconnects A, and connectedCount() is then 0 - releasing on that
+    // sweep disconnects A, so nothing is CONNECTED any more - releasing on that
     // would let Android kill the process before B's retry ever fires.
     const { mgr } = make({ isViewIdle: () => true });
     const a = mgr.ensure('i1', 'ws://r/ws');
@@ -74,7 +65,7 @@ describe('ConnectionManager', () => {
     mgr.tick();
 
     expect(a.disconnect).toHaveBeenCalledWith('idle');
-    expect(mgr.connectedCount()).toBe(0);
+    expect(a.state).toBe('disconnected');
     expect(mgr.hasLiveConnections()).toBe(true);
 
     // Once B gives up too, nothing is live and the service may be released.
@@ -146,7 +137,7 @@ describe('ConnectionManager', () => {
     mgr.ensure('i2', 'ws://r/ws');
     mgr.destroyAll();
     created.forEach((c) => expect(c.destroy).toHaveBeenCalled());
-    expect(mgr.connectedCount()).toBe(0);
+    expect(mgr.hasLiveConnections()).toBe(false);
     expect(mgr.get('i1')).toBeUndefined();
     expect(mgr.get('i2')).toBeUndefined();
   });

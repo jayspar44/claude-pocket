@@ -1,4 +1,4 @@
-import { InstanceConnection, CONNECTION_STATES, isLiveConnectionState } from './InstanceConnection';
+import { InstanceConnection, isLiveConnectionState } from './InstanceConnection';
 
 export const HEARTBEAT_INTERVAL = 25000;
 export const IDLE_DISCONNECT_MS = 3600000;   // 1 hour
@@ -63,18 +63,13 @@ export class ConnectionManager {
     return this.connections.get(instanceId)?.send(message) ?? false;
   }
 
-  connectedCount() {
-    let n = 0;
-    this.connections.forEach((c) => {
-      if (c.state === CONNECTION_STATES.CONNECTED) n += 1;
-    });
-    return n;
-  }
-
-  // Wider than connectedCount(): a connection in CONNECTING or RECONNECTING is
-  // still live. Anything that keeps the process alive for the sake of the
-  // sockets - the Android foreground service - must be held until this is false,
-  // or a connection can be killed during its own backoff and never come back.
+  // The ONLY liveness predicate. A CONNECTED-only count used to sit beside this
+  // one and picking the narrower of the two is how a connection came to be killed
+  // during its own backoff; one predicate means there is nothing to pick.
+  // CONNECTING and RECONNECTING count as live: anything that keeps the process
+  // alive for the sake of the sockets - the Android foreground service, the
+  // heartbeat - must be held until this is false, or a connection can be cut off
+  // mid-backoff and never come back.
   hasLiveConnections() {
     for (const conn of this.connections.values()) {
       if (isLiveConnectionState(conn.state)) return true;
