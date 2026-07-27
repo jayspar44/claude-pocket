@@ -17,6 +17,41 @@ export const isLiveConnectionState = (state) => (
   state === S.CONNECTING || state === S.CONNECTED || state === S.RECONNECTING
 );
 
+// Reasons that represent the client's own decision to stop. Only fresh user
+// consent may undo one - see shouldConnect.
+export const STICKY_DISCONNECT_REASONS = Object.freeze(['user', 'idle']);
+
+/**
+ * The one rule every (re)connect trigger asks before calling connect().
+ *
+ * Triggers differ on a single axis: whether the trigger is fresh user consent
+ * (`userIntent: true` - selecting a tab, the reconnect button) or merely the app
+ * noticing something (`userIntent: false` - a foreground, a mount, the active
+ * tab changing because another was deleted).
+ *
+ * - No connection object yet, or one that is IDLE: open it.
+ * - CONNECTING or CONNECTED: leave it alone. DESTROYED can never be reopened.
+ * - RECONNECTING is deliberately reconnectable. connect() cancels the pending
+ *   retry and starts a fresh ladder, so a resume mid-backoff comes back at once
+ *   instead of watching out a 16s rung.
+ * - DISCONNECTED for a sticky reason stays down unless there is user intent.
+ *   Without that gate every app foreground resurrects the session the user just
+ *   stopped; the reason is then written but never read, and "disconnect sticks"
+ *   rests on the absence of triggers instead of on a rule.
+ * - DISCONNECTED for any other reason ('dropped', or null after a socketFactory
+ *   throw) is an involuntary loss, so it reconnects on its own.
+ */
+export const shouldConnect = (conn, { userIntent = false } = {}) => {
+  if (!conn) return true;
+  if (conn.state === S.CONNECTING || conn.state === S.CONNECTED || conn.state === S.DESTROYED) {
+    return false;
+  }
+  if (!userIntent && STICKY_DISCONNECT_REASONS.includes(conn.disconnectReason)) {
+    return false;
+  }
+  return true;
+};
+
 export const RECONNECT_DELAYS = [1000, 2000, 4000, 8000, 16000];
 export const MAX_RECONNECT_ATTEMPTS = 5;
 export const CONNECTION_TIMEOUT = 10000;

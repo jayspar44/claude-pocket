@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { InstanceConnection, CONNECTION_STATES } from '../InstanceConnection';
+import { InstanceConnection, CONNECTION_STATES, shouldConnect } from '../InstanceConnection';
 import { FakeSocket } from './fakeSocket';
 
 function makeTimers() {
@@ -166,5 +166,92 @@ describe('InstanceConnection: destroy', () => {
     conn.destroy();
     timers.fireLast();
     expect(FakeSocket.instances).toHaveLength(1);
+  });
+});
+
+// The policy every (re)connect trigger consults. Driven through real connections
+// wherever possible, so the reasons under test are the ones the connection
+// actually writes rather than strings this file made up.
+describe('shouldConnect: reasons are read, not just written', () => {
+  beforeEach(() => FakeSocket.reset());
+
+  it('leaves a user-disconnected connection down without user intent', () => {
+    // Finding 1: "Stop All Sessions", then lock/unlock the phone. The foreground
+    // must not resurrect the CLI the user just stopped.
+    const { conn } = make();
+    connectFully(conn);
+    conn.disconnect('user');
+    expect(shouldConnect(conn)).toBe(false);
+  });
+
+  it('leaves an idle-swept connection down without user intent', () => {
+    const { conn } = make();
+    connectFully(conn);
+    conn.disconnect('idle');
+    expect(shouldConnect(conn)).toBe(false);
+  });
+
+  it('reopens a user-disconnected connection when the user selects the tab', () => {
+    const { conn } = make();
+    connectFully(conn);
+    conn.disconnect('user');
+    expect(shouldConnect(conn, { userIntent: true })).toBe(true);
+  });
+
+  it('reconnects a connection still backing off, so a resume shortens the wait', () => {
+    // Finding 2: dropped at rung 5, user foregrounds. Waiting out 16s of spinner
+    // when connect() would cancel the timer and retry now is the regression.
+    const { conn } = make();
+    connectFully(conn);
+    FakeSocket.last.fireAbruptClose();
+    expect(conn.state).toBe(CONNECTION_STATES.RECONNECTING);
+    expect(shouldConnect(conn)).toBe(true);
+  });
+
+  it('reconnects after the ladder is exhausted', () => {
+    const { conn } = make();
+    connectFully(conn);
+    conn.attempts = 5;                          // MAX_RECONNECT_ATTEMPTS
+    FakeSocket.last.fireAbruptClose();
+    expect(conn.state).toBe(CONNECTION_STATES.DISCONNECTED);
+    expect(conn.disconnectReason).toBe('dropped');
+    expect(shouldConnect(conn)).toBe(true);
+  });
+
+  it('reconnects after a socketFactory throw leaves no reason', () => {
+    const conn = new InstanceConnection({
+      instanceId: 'inst-1',
+      url: 'ws://relay/ws',
+      getHandshakePayload: () => ({}),
+      socketFactory: () => { throw new Error('bad url'); },
+    });
+    conn.connect();
+    expect(conn.state).toBe(CONNECTION_STATES.DISCONNECTED);
+    expect(conn.disconnectReason).toBe(null);
+    expect(shouldConnect(conn)).toBe(true);
+  });
+
+  it('connects when there is no connection object yet', () => {
+    expect(shouldConnect(undefined)).toBe(true);
+  });
+
+  it('leaves a connected or connecting connection alone, intent or not', () => {
+    const { conn } = make();
+    conn.connect();
+    expect(conn.state).toBe(CONNECTION_STATES.CONNECTING);
+    expect(shouldConnect(conn)).toBe(false);
+    expect(shouldConnect(conn, { userIntent: true })).toBe(false);
+
+    FakeSocket.last.fireOpen();
+    FakeSocket.last.fireMessage({ type: 'pty-status' });
+    expect(shouldConnect(conn)).toBe(false);
+    expect(shouldConnect(conn, { userIntent: true })).toBe(false);
+  });
+
+  it('never reopens a destroyed connection', () => {
+    const { conn } = make();
+    connectFully(conn);
+    conn.destroy();
+    expect(shouldConnect(conn, { userIntent: true })).toBe(false);
   });
 });

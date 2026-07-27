@@ -2,7 +2,7 @@ import { createContext, useContext, useState, useCallback, useRef, useEffect, us
 import { Capacitor, registerPlugin } from '@capacitor/core';
 import { App } from '@capacitor/app';
 import { notificationService } from '../services/NotificationService';
-import { InstanceConnection, CONNECTION_STATES, isLiveConnectionState } from '../services/InstanceConnection';
+import { InstanceConnection, CONNECTION_STATES, shouldConnect } from '../services/InstanceConnection';
 import { ConnectionManager, IDLE_DISCONNECT_MS } from '../services/ConnectionManager';
 import { canAddInstance } from '../services/instanceLimit';
 import { healthApi } from '../api/relay-api';
@@ -37,9 +37,6 @@ const stopForegroundService = () => {
 };
 
 const InstanceContext = createContext(null);
-
-// A connection that is already up, coming up, or backing off must be left alone.
-const isConnectionBusy = (conn) => Boolean(conn) && isLiveConnectionState(conn.state);
 
 // Storage keys (will be prefixed with port by storage utility)
 const INSTANCES_KEY = 'instances';
@@ -467,8 +464,8 @@ export function InstanceProvider({ children }) {
     ));
 
     // Selecting a tab is consent to connect it, including one the user
-    // previously disconnected.
-    if (!isConnectionBusy(managerRef.current?.get(instanceId))) {
+    // previously disconnected - the documented recovery path from a stop.
+    if (shouldConnect(managerRef.current?.get(instanceId), { userIntent: true })) {
       connectInstance(instanceId);
     }
   }, [updateInstanceState, connectInstance]);
@@ -489,10 +486,14 @@ export function InstanceProvider({ children }) {
 
   // Reconnect when app returns from background + track visibility for notifications
   useEffect(() => {
+    // A foreground is the app noticing, not the user asking, so it carries no
+    // intent: it revives a connection lost to the network (including one still
+    // mid-backoff, which comes back at once instead of waiting out its rung) but
+    // leaves a session the user stopped alone.
     const reconnectActiveIfNeeded = () => {
       const instanceId = activeInstanceIdRef.current;
       if (!instanceId) return;
-      if (isConnectionBusy(managerRef.current?.get(instanceId))) return;
+      if (!shouldConnect(managerRef.current?.get(instanceId))) return;
       connectInstance(instanceId);
     };
 
@@ -576,16 +577,26 @@ export function InstanceProvider({ children }) {
     return instanceStates[id] || createInstanceState();
   }, [instanceStates]);
 
-  // Selecting a tab is consent to connect it, including one the user previously
-  // disconnected. But a connection that is already up, coming up, or backing off
-  // must be left alone. `instances` is deliberately not a dependency - it is read
-  // through instancesRef, because listing it re-fires this effect on every
-  // lastViewedAt write.
+  // Connects the active instance on mount, and covers the one case switchInstance
+  // cannot: addInstance + switchInstance in the same handler, where the new
+  // instance is not in instancesRef yet and switchInstance bails out.
+  //
+  // This effect carries NO user intent, even though a tab switch is one of its
+  // triggers. Selecting a tab connects through switchInstance, which asks with
+  // intent; the same activeInstanceId write also reaches here, but so do a
+  // provider remount and removeInstance promoting a survivor to active - and
+  // neither is consent. Gating here is what stops a re-render from resurrecting a
+  // stopped session, and it costs nothing for a brand-new instance, which has no
+  // connection object and so no reason to respect.
+  //
+  // `instances` is deliberately not a dependency - it is read through
+  // instancesRef, because listing it re-fires this effect on every lastViewedAt
+  // write.
   useEffect(() => {
     if (!activeInstanceId) return;
     const instance = instancesRef.current.find((i) => i.id === activeInstanceId);
     if (!instance) return;
-    if (!isConnectionBusy(managerRef.current?.get(activeInstanceId))) {
+    if (shouldConnect(managerRef.current?.get(activeInstanceId))) {
       connectInstance(activeInstanceId);
     }
   }, [activeInstanceId, connectInstance]);
