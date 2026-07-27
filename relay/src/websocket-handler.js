@@ -223,24 +223,33 @@ class WebSocketHandler {
           // Extracted to a method (rather than an inline async arrow) so the
           // try/catch around pm.start() can be exercised directly in tests
           // without waiting on a real 3s timer.
+          //
+          // Pass the frame's own dimensions, undefined included, rather than
+          // clientCols/clientRows: start() seeds lastCols/lastRows from
+          // whatever it is handed, so passing the config fallback (50x24) for
+          // a frame that carried no dimensions would overwrite known-good
+          // geometry.
           if (ws._deferredStartTimer) clearTimeout(ws._deferredStartTimer);
           ws._deferredStartTimer = setTimeout(() => {
-            this.runDeferredStartFallback(ws, newInstanceId, clientCols, clientRows, ctx);
+            this.runDeferredStartFallback(ws, newInstanceId, message.cols, message.rows, ctx);
           }, 3000);
-        } else if (!ptyManager.isBusy && ptyManager.stoppedByUser) {
-          logger.info(
-            { clientId: ws.clientId, instanceId: newInstanceId },
-            'Not auto-starting: session was explicitly stopped'
-          );
-          this.send(ws, { type: 'pty-status', ...ptyManager.getStatus() });
         } else if (!ptyManager.isBusy && !workingDir && !ptyManager.currentWorkingDir) {
-          // No working directory - can't start Claude, send error to client
+          // No working directory - can't start Claude, send error to client.
+          // Checked ahead of stoppedByUser: an instance that is both stopped
+          // and misconfigured needs the actionable error, otherwise the client
+          // shows an idle terminal with no hint and a disabled Start button.
           logger.warn({ clientId: ws.clientId, instanceId: newInstanceId }, 'Cannot start CLI: no working directory configured');
           this.send(ws, {
             type: 'pty-error',
             message: 'No working directory configured. Set a project folder in instance settings.',
             instanceId: newInstanceId,
           });
+        } else if (!ptyManager.isBusy && ptyManager.stoppedByUser) {
+          logger.info(
+            { clientId: ws.clientId, instanceId: newInstanceId },
+            'Not auto-starting: session was explicitly stopped'
+          );
+          this.send(ws, { type: 'pty-status', ...ptyManager.getStatus() });
         } else if (workingDir && ptyManager.currentWorkingDir !== workingDir) {
           // Store pending working dir for next restart
           ptyManager.pendingWorkingDir = workingDir;
@@ -250,13 +259,16 @@ class WebSocketHandler {
         // Resize PTY to client dimensions before sending replay
         if (ptyManager.isRunning) {
           ptyManager.resize(clientCols, clientRows);
-        } else if (ptyManager.status === 'starting') {
+        } else if (ptyManager.status === 'starting' && message.cols && message.rows) {
           // No process to resize yet. Record the dimensions so the spawn uses
           // them instead of whatever dimensions the in-flight start() call was
           // given - otherwise a reconnecting client's real dimensions are lost
-          // and the CLI spawns at the fallback size.
-          ptyManager.lastCols = clientCols;
-          ptyManager.lastRows = clientRows;
+          // and the CLI spawns at the fallback size. Only for a frame that
+          // actually carries dimensions: clientCols falls back to
+          // config.pty.cols (50), which would downgrade a correct in-flight
+          // 120x40 spawn whenever a client omits them.
+          ptyManager.lastCols = message.cols;
+          ptyManager.lastRows = message.rows;
         }
 
         // Send replay for this instance

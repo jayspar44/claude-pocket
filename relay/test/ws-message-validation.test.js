@@ -39,6 +39,19 @@ function fakeWs() {
   return { OPEN: 1, readyState: 1, send() {}, clientId: 'c1' };
 }
 
+// Same surface, but keeps the frames handleMessage sends back so the branch
+// that ran can be identified from what the client would actually receive.
+function recordingWs() {
+  const sent = [];
+  return {
+    OPEN: 1,
+    readyState: 1,
+    clientId: 'c2',
+    sent,
+    send(raw) { sent.push(JSON.parse(raw)); },
+  };
+}
+
 function fakeCtx(ptyManager) {
   return {
     setupPtyListener: () => ptyManager,
@@ -85,4 +98,78 @@ test('set-instance during the start window records client dimensions instead of 
   release();
   await started;
   assert.deepEqual(pm.spawnedAt, { cols: 92, rows: 40 });
+});
+
+// Finding 8: the same branch, for a frame that carries NO dimensions - a
+// non-app client, an older build, or a client whose terminal-dims key is
+// absent. clientCols/clientRows fall back to config.pty.cols (50x24), so
+// assigning those onto lastCols downgrades a correct in-flight 120x40 spawn.
+test('a dimension-less set-instance must not downgrade an in-flight spawn', async () => {
+  const pm = new PtyManager('t13', 'claude');
+  let release;
+  const gate = new Promise((r) => { release = r; });
+  pm._runSelfUpdate = () => gate;
+  pm._spawnPty = function (command, args, options) {
+    this.spawnedAt = { cols: options.cols, rows: options.rows };
+    return { pid: 1, kill() {}, write() {}, resize() {}, onData() {}, onExit() {} };
+  };
+
+  // A start is in flight with the client's real tablet geometry.
+  const started = pm.start('/tmp', 120, 40);
+  assert.equal(pm.status, 'starting');
+
+  const handler = Object.create(WebSocketHandler.prototype);
+  await handler.handleMessage(fakeWs(), {
+    type: 'set-instance',
+    instanceId: 't13',
+    // no cols/rows at all
+  }, fakeCtx(pm));
+
+  assert.deepEqual(
+    { cols: pm.lastCols, rows: pm.lastRows },
+    { cols: 120, rows: 40 },
+    'a frame with no dimensions must leave known-good geometry alone'
+  );
+
+  release();
+  await started;
+  assert.deepEqual(pm.spawnedAt, { cols: 120, rows: 40 }, 'the CLI must not spawn believing it has 50 columns');
+});
+
+// Finding 6: the stoppedByUser branch used to sit ahead of the
+// no-working-directory branch, so an instance that is both stopped and
+// misconfigured got a bare pty-status - an idle terminal with no explanation
+// and a Start button the app disables because workingDir is empty.
+test('a stopped instance with no working directory still gets the actionable error', async () => {
+  const pm = new PtyManager('t14', 'claude');
+  pm.stoppedByUser = true;               // user stopped it earlier
+  assert.equal(pm.currentWorkingDir, null); // and it has no project folder
+
+  const handler = Object.create(WebSocketHandler.prototype);
+  const ws = recordingWs();
+
+  await handler.handleMessage(ws, {
+    type: 'set-instance',
+    instanceId: 't14',
+    // no workingDir
+  }, fakeCtx(pm));
+
+  const error = ws.sent.find((m) => m.type === 'pty-error');
+  assert.ok(error, 'the client must be told what to fix, not left with a bare pty-status');
+  assert.match(error.message, /No working directory configured/);
+});
+
+test('a stopped instance that IS configured still gets the quiet pty-status', async () => {
+  // The reorder must not turn an ordinary user-stopped session into an error.
+  const pm = new PtyManager('t15', 'claude');
+  pm.currentWorkingDir = '/tmp';
+  pm.stoppedByUser = true;
+
+  const handler = Object.create(WebSocketHandler.prototype);
+  const ws = recordingWs();
+
+  await handler.handleMessage(ws, { type: 'set-instance', instanceId: 't15' }, fakeCtx(pm));
+
+  assert.equal(ws.sent.some((m) => m.type === 'pty-error'), false, 'a configured stopped session is not an error');
+  assert.ok(ws.sent.some((m) => m.type === 'pty-status'), 'it still reports status');
 });
