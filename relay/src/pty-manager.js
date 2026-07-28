@@ -52,7 +52,11 @@ class PtyManager {
     this.outputBuffer = [];
     this.outputBufferSize = 0;
     this.listeners = new Set();
-    this.isRunning = false;
+    // Lifecycle: 'stopped' -> 'starting' -> 'running' -> 'stopped'.
+    // 'starting' exists because ptyProcess is not assigned until after the CLI
+    // self-update, which can block for 30s. Without a distinct state, both
+    // start() and stop() are blind during that window.
+    this.status = 'stopped';
     this.currentWorkingDir = null;
     this.pendingWorkingDir = null; // For updating workingDir without restart
     this.deferredStartDir = null; // For deferring PTY start until first resize with real dimensions
@@ -65,6 +69,14 @@ class PtyManager {
     this.restartAttempts = 0;
     this.lastRestartTime = 0;
     this.intentionalStop = false;
+    // True after an explicit stop, so set-instance does not silently restart a
+    // session the user deliberately ended. Cleared by an explicit start().
+    this.stoppedByUser = false;
+    // Bumped by every _start attempt and by every stop(). _start captures the
+    // value before its self-update await and re-checks it afterwards, so an
+    // attempt that has since been stopped or superseded by a newer start()
+    // bails instead of spawning a CLI nothing holds a reference to.
+    this._startGeneration = 0;
     // Diagnostics
     this.processStartTime = 0;
     this.lastOutputLines = []; // Keep last 10 lines for crash diagnosis
@@ -79,16 +91,73 @@ class PtyManager {
     return getCliEntry(this.cliType).label;
   }
 
+  // Retained so existing callers and the /api/health payload keep working.
+  get isRunning() {
+    return this.status === 'running';
+  }
+
+  get isBusy() {
+    return this.status !== 'stopped';
+  }
+
   setDeferredStart(workingDir) {
     this.deferredStartDir = workingDir;
     logger.info({ instanceId: this.instanceId, workingDir }, 'Deferred PTY start until first resize with real dimensions');
   }
 
   async start(workingDir, cols, rows) {
-    if (this.ptyProcess) {
-      logger.warn({ instanceId: this.instanceId }, 'PTY process already running');
+    // A live ptyProcess blocks a start even when status disagrees: if _start
+    // throws after assigning this.ptyProcess, the wrapper's catch sets status
+    // back to 'stopped' while the CLI child is still alive and wired to
+    // onData. Checking status alone would let the next start() spawn a second
+    // CLI over the top of it, orphaning the first beyond the reach of stop().
+    if (this.status === 'running' || this.ptyProcess) {
+      logger.warn({ instanceId: this.instanceId, status: this.status }, 'PTY process already running');
       return;
     }
+    if (this.status === 'starting') {
+      throw new Error('PTY start already in progress');
+    }
+
+    this.status = 'starting';
+    this.intentionalStop = false;
+    this.stoppedByUser = false;
+    // Claim a generation for this attempt (see _startGeneration). stop() and
+    // any later start() bump the counter, so both _start and the trailing
+    // reset below can tell "still the current attempt" from "superseded".
+    const generation = ++this._startGeneration;
+    try {
+      await this._start(workingDir, cols, rows);
+    } catch (error) {
+      this.status = 'stopped';
+      // Tell every connected client why nothing started (e.g. the CLI binary
+      // is missing or misconfigured) - regardless of which caller invoked
+      // start() (HTTP route, WS deferred-start fallback, crash auto-restart).
+      this.broadcast({ type: 'pty-error', message: error.message });
+      throw error;
+    }
+    // A stop() during the await leaves status already 'stopped'; do not clobber it.
+    //
+    // The generation check matters when this attempt was superseded: a
+    // stop()+start() pair during the await can leave the *newer* attempt
+    // sitting at 'starting' when this (stale) one returns. Resetting then
+    // would make isBusy false while a start is genuinely in flight - which is
+    // exactly the blind window the 'starting' state exists to close: the
+    // registry could evict the instance mid-start, and another start() would
+    // pass the guards and redo the ~30s self-update. The 'finished without
+    // spawning' warning would be misleading for the same reason.
+    if (this.status === 'starting' && this._startGeneration === generation) {
+      this.status = 'stopped';
+      logger.warn({ instanceId: this.instanceId }, 'PTY start finished without spawning');
+    }
+  }
+
+  async _start(workingDir, cols, rows) {
+    // The generation claimed by start() for this attempt. Anything that
+    // invalidates it (stop(), or a later start()) bumps the counter, so the
+    // check after the self-update await below can tell "still the current
+    // attempt" from "superseded".
+    const generation = this._startGeneration;
 
     // Clear deferred start since we're starting now
     this.deferredStartDir = null;
@@ -101,13 +170,18 @@ class PtyManager {
       throw new Error('workingDir is required to start PTY');
     }
 
-    const spawnCols = cols || config.pty.cols;
-    const spawnRows = rows || config.pty.rows;
-    this.lastCols = spawnCols;
-    this.lastRows = spawnRows;
-
     this.currentWorkingDir = effectiveWorkingDir;
     this.intentionalStop = false;
+
+    // Record the caller's dimensions NOW, before the self-update await, so
+    // they replace any stale lastCols/lastRows left over from a previous
+    // session (a landscape session that crashed, reopened in portrait) - the
+    // callers that pass dimensions at all pass current ones. Callers with
+    // nothing to offer (POST /api/pty/start, POST /api/pty/restart, a
+    // dimension-less set-instance) pass nothing and leave lastCols intact,
+    // rather than dropping the session to config.pty.cols (50).
+    if (cols) this.lastCols = cols;
+    if (rows) this.lastRows = rows;
 
     // Run CLI self-update before starting (best-effort, non-blocking on failure).
     // Skipped for CLIs whose registry entry sets supportsUpdate: false.
@@ -116,24 +190,41 @@ class PtyManager {
       const updateCommand = cliEntry.getCommand();
       this.broadcast({ type: 'pty-status', ...this.getStatus(), updating: true });
       try {
-        await new Promise((resolve) => {
-          execFile(updateCommand, ['update'], {
-            timeout: 30000,
-            env: config.pty.env,
-          }, (error, stdout, stderr) => {
-            if (error) {
-              logger.warn({ cliType: this.cliType, error: error.message, stderr }, `${this.cliLabel} update failed (continuing anyway)`);
-            } else {
-              const output = (stdout || '').trim();
-              if (output) logger.info({ cliType: this.cliType, output }, `${this.cliLabel} update completed`);
-            }
-            resolve(); // Always resolve — update failure shouldn't block start
-          });
-        });
+        await this._runSelfUpdate(updateCommand);
       } catch (error) {
         logger.warn({ cliType: this.cliType, error: error.message }, `${this.cliLabel} update threw unexpectedly (continuing anyway)`);
       }
     }
+
+    // stop() may have been called during the update await. It cannot kill a
+    // process that does not exist yet, so it records intent and we honour it here.
+    if (this.intentionalStop) {
+      logger.info({ instanceId: this.instanceId }, 'PTY start aborted by stop()');
+      return;
+    }
+
+    // A stop() followed by a fresh start() during the update window resets
+    // both status and intentionalStop, so neither flag can tell this (now
+    // stale) attempt to stand down. Without the generation check it spawns a
+    // second CLI that overwrites this.ptyProcess - the earlier process is
+    // then orphaned: still wired to onData, still writing into the buffer,
+    // and unreachable by stop().
+    if (this._startGeneration !== generation) {
+      logger.info(
+        { instanceId: this.instanceId, generation, current: this._startGeneration },
+        'PTY start superseded by a newer start; not spawning'
+      );
+      return;
+    }
+
+    // Read lastCols/lastRows only here, after the update await: the caller's
+    // dimensions were folded into them above, so anything written since (a
+    // resize, or a set-instance carrying real dimensions) is genuinely newer
+    // and must win over what this attempt was originally given.
+    const spawnCols = this.lastCols || config.pty.cols;
+    const spawnRows = this.lastRows || config.pty.rows;
+    this.lastCols = spawnCols;
+    this.lastRows = spawnRows;
 
     // Restore buffer from disk if available
     this.loadBuffer();
@@ -142,7 +233,7 @@ class PtyManager {
 
     try {
       const command = cliEntry.getCommand();
-      const proc = pty.spawn(command, [], {
+      const proc = this._spawnPty(command, [], {
         name: 'xterm-256color',
         cols: spawnCols,
         rows: spawnRows,
@@ -151,7 +242,7 @@ class PtyManager {
       });
 
       this.ptyProcess = proc;
-      this.isRunning = true;
+      this.status = 'running';
       this.processStartTime = Date.now();
       this.lastOutputLines = [];
 
@@ -213,7 +304,7 @@ class PtyManager {
 
         // Only clear if this is still the current process (prevents race condition on restart)
         if (this.ptyProcess === proc) {
-          this.isRunning = false;
+          this.status = 'stopped';
           this.ptyProcess = null;
         }
         this.broadcast({ type: 'pty-status', running: this.isRunning, exitCode, signal });
@@ -229,6 +320,34 @@ class PtyManager {
       logger.error({ error: error.message }, `Failed to start ${this.cliLabel} process`);
       throw error;
     }
+  }
+
+  // Injection seams for _start, overridable per-instance so tests can run the
+  // real _start body without a real CLI binary on PATH. Both default to the
+  // real implementation, so production behaviour is unchanged.
+
+  // The CLI self-update (`<cli> update`). Always resolves - update failure
+  // is logged and swallowed, never blocks start().
+  _runSelfUpdate(updateCommand) {
+    return new Promise((resolve) => {
+      execFile(updateCommand, ['update'], {
+        timeout: 30000,
+        env: config.pty.env,
+      }, (error, stdout, stderr) => {
+        if (error) {
+          logger.warn({ cliType: this.cliType, error: error.message, stderr }, `${this.cliLabel} update failed (continuing anyway)`);
+        } else {
+          const output = (stdout || '').trim();
+          if (output) logger.info({ cliType: this.cliType, output }, `${this.cliLabel} update completed`);
+        }
+        resolve(); // Always resolve — update failure shouldn't block start
+      });
+    });
+  }
+
+  // The actual node-pty spawn call.
+  _spawnPty(command, args, options) {
+    return pty.spawn(command, args, options);
   }
 
   scheduleRestart() {
@@ -260,12 +379,29 @@ class PtyManager {
     // Notify clients of pending restart
     this.broadcast({ type: 'pty-restarting', attempt: this.restartAttempts });
 
-    setTimeout(async () => {
-      if (!this.ptyProcess && !this.intentionalStop) {
-        logger.info(`Auto-restarting ${this.cliLabel} process`);
+    setTimeout(() => this.attemptAutoRestart(), AUTO_RESTART_DELAY_MS);
+  }
+
+  // Extracted from scheduleRestart's setTimeout so the try/catch around
+  // start() can be exercised directly in tests without a real timer, and so
+  // the rejection path is obviously guarded. Runs from a bare setTimeout with
+  // no caller to await it, so a rejection here (e.g. pty.spawn failing
+  // because the configured CLI binary is missing or misconfigured) MUST be
+  // caught locally - otherwise it is an unhandled rejection and, under
+  // Node's default --unhandled-rejections=throw, takes down the whole relay
+  // process, killing every other instance's session along with it.
+  async attemptAutoRestart() {
+    if (!this.ptyProcess && !this.intentionalStop) {
+      logger.info(`Auto-restarting ${this.cliLabel} process`);
+      try {
         await this.start(this.currentWorkingDir, this.lastCols, this.lastRows);
+      } catch (error) {
+        // start() already logs the failure and broadcasts a pty-error to any
+        // connected listeners; this catch exists only to stop the rejection
+        // from propagating unhandled.
+        logger.error({ instanceId: this.instanceId, error: error.message }, 'Auto-restart failed');
       }
-    }, AUTO_RESTART_DELAY_MS);
+    }
   }
 
   resetRestartCounter() {
@@ -274,29 +410,46 @@ class PtyManager {
   }
 
   stop() {
-    if (this.ptyProcess) {
-      logger.info(`Stopping ${this.cliLabel} process`);
-      this.intentionalStop = true; // Prevent auto-restart
-      // Flush any pending batched output
-      if (this.batchTimer) {
-        clearTimeout(this.batchTimer);
-        this.flushBatch();
-      }
-      // Flush any pending buffer save
-      if (this.saveTimer) {
-        clearTimeout(this.saveTimer);
-        this.saveTimer = null;
-        this.saveBuffer();
-      }
-      // Clear idle timer
-      if (this.idleTimer) {
-        clearTimeout(this.idleTimer);
-        this.idleTimer = null;
-      }
-      this.ptyProcess.kill();
-      this.ptyProcess = null;
-      this.isRunning = false;
+    // Record intent first, unconditionally: during 'starting' there is no
+    // process to kill, and _start checks this flag before spawning.
+    this.intentionalStop = true;
+    this.stoppedByUser = true;
+    // Invalidate any in-flight _start attempt (see _startGeneration).
+    this._startGeneration++;
+    // A pending deferred start is an armed trigger: any later resize frame
+    // would spawn the CLI the user just stopped. An explicit stop disarms it.
+    this.deferredStartDir = null;
+
+    if (this.status === 'starting') {
+      logger.info({ instanceId: this.instanceId }, 'Cancelling in-flight PTY start');
+      this.status = 'stopped';
+      return;
     }
+    if (!this.ptyProcess) {
+      this.status = 'stopped';
+      return;
+    }
+
+    logger.info(`Stopping ${this.cliLabel} process`);
+    // Flush any pending batched output
+    if (this.batchTimer) {
+      clearTimeout(this.batchTimer);
+      this.flushBatch();
+    }
+    // Flush any pending buffer save
+    if (this.saveTimer) {
+      clearTimeout(this.saveTimer);
+      this.saveTimer = null;
+      this.saveBuffer();
+    }
+    // Clear idle timer
+    if (this.idleTimer) {
+      clearTimeout(this.idleTimer);
+      this.idleTimer = null;
+    }
+    this.ptyProcess.kill();
+    this.ptyProcess = null;
+    this.status = 'stopped';
   }
 
   write(data) {
@@ -311,10 +464,13 @@ class PtyManager {
   }
 
   resize(cols, rows) {
+    // Record the dimensions even with no process: they are what the next
+    // spawn falls back to, and a resize while stopped is precisely when
+    // lastCols would otherwise keep the previous session's stale geometry.
+    this.lastCols = cols;
+    this.lastRows = rows;
     if (this.ptyProcess) {
       this.ptyProcess.resize(cols, rows);
-      this.lastCols = cols;
-      this.lastRows = rows;
       logger.debug({ cols, rows }, 'Terminal resized');
     }
   }
@@ -424,6 +580,7 @@ class PtyManager {
       instanceId: this.instanceId,
       cliType: this.cliType,
       running: this.isRunning,
+      stoppedByUser: this.stoppedByUser,
       pid: this.ptyProcess?.pid || null,
       bufferSize: this.outputBufferSize,
       bufferLines: this.outputBuffer.join('').split('\n').length,

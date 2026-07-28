@@ -9,10 +9,23 @@ const config = {
     cols: 50,
     rows: 24,
     cwd: null, // Set at start time from app Settings
+    // `|| 10` (not a '10' default inside parseInt): a non-numeric
+    // MAX_INSTANCES parses to NaN, and `size >= NaN` is always false, which
+    // silently removes the instance cap altogether. Same pattern as `port`.
+    maxInstances: parseInt(process.env.MAX_INSTANCES, 10) || 10,
     env: (() => {
       const env = { ...process.env, TERM: 'xterm-256color', COLORTERM: 'truecolor' };
       // Strip CLAUDECODE to prevent "nested session" error when relay runs inside Claude
       delete env.CLAUDECODE;
+      // The CLIs spawned here are independent, long-lived top-level sessions, but
+      // PM2 captures its environment at `pm2 start` - so deploying from Claude
+      // Code's Bash tool (which `npm run deploy` is, via /deploy) bakes that tool's
+      // CLAUDE_CODE_CHILD_SESSION=1 into the relay and every PTY beneath it. The
+      // CLI then classifies itself as nested and drops out of --resume, --continue,
+      // prompt history and `claude agents`, so a crash becomes unrecoverable.
+      // Only this variable is stripped: the other inherited CLAUDE_CODE_* vars have
+      // run in production for months with no observed effect.
+      delete env.CLAUDE_CODE_CHILD_SESSION;
       return env;
     })(),
   },

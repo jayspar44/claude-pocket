@@ -50,6 +50,8 @@ function InstanceManager({ isOpen, onClose, editInstanceId, startInAddMode }) {
     sendToInstance,
     instanceColors,
     getInstanceState,
+    connectInstance,
+    disconnectInstance,
   } = useInstance();
 
   const [ptyLoading, setPtyLoading] = useState(false);
@@ -150,6 +152,10 @@ function InstanceManager({ isOpen, onClose, editInstanceId, startInAddMode }) {
         null,
         formData.cliType
       );
+      if (newInstance?.error === 'instance-limit') {
+        alert(`Limit reached: at most ${newInstance.limit} tabs. Delete a tab first — stopping a session leaves its tab in place.`);
+        return;
+      }
       switchInstance(newInstance.id);
       // Close modal after adding (switch to new instance)
       // PTY starts automatically via WebSocket set-instance → deferred start → resize
@@ -195,6 +201,14 @@ function InstanceManager({ isOpen, onClose, editInstanceId, startInAddMode }) {
     }
     // If already connected, re-send set-instance to trigger deferred PTY start on relay.
     // switchInstance alone won't re-send set-instance if the WS is already open.
+    //
+    // Deliberately NOT POST /api/pty/start: only set-instance rebinds this
+    // socket's PTY listener (a DELETE /api/instances replaces the manager
+    // object the listener is attached to), only it carries the client's real
+    // terminal dimensions, and it has no 10s axios timeout to trip over the
+    // CLI self-update. userStart tells the relay this is an explicit user
+    // start, so it clears any remembered stop - which is the one thing the
+    // REST route did that plain set-instance did not.
     const dims = storage.getJSON('terminal-dims', { cols: 50, rows: 24 });
     const sent = sendToInstance(instance.id, {
       type: 'set-instance',
@@ -203,6 +217,7 @@ function InstanceManager({ isOpen, onClose, editInstanceId, startInAddMode }) {
       cliType: instance.cliType || 'claude',
       cols: dims.cols,
       rows: dims.rows,
+      userStart: true,
     });
     if (!sent) {
       // Not connected yet — switchInstance will connect and send set-instance
@@ -214,12 +229,19 @@ function InstanceManager({ isOpen, onClose, editInstanceId, startInAddMode }) {
   const handleStopPty = useCallback(async (instanceId) => {
     setPtyLoading(true);
     try {
+      // Disconnect first, with reason 'user', so nothing auto-reconnects and
+      // re-sends set-instance: that arms a deferred start on the relay and
+      // respawns the CLI the user just stopped.
+      disconnectInstance(instanceId);
       await healthApi.stopPty(instanceId);
     } catch (error) {
       console.error('Failed to stop PTY:', error);
+      // The CLI is still running, so undo the intent - otherwise the sticky
+      // 'user' reason keeps the tab offline until it is tapped.
+      connectInstance(instanceId);
     }
     setPtyLoading(false);
-  }, []);
+  }, [disconnectInstance, connectInstance]);
 
   const handleRestartPty = useCallback(async (instanceId) => {
     setPtyLoading(true);

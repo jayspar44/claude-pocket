@@ -72,6 +72,7 @@ app.get('/api/health', (req, res) => {
     instanceCount: instances.length,
     clients: wsHandler.getConnectedClients(),
     workingDir: defaultInstance?.currentWorkingDir,
+    maxInstances: config.pty.maxInstances,
   });
 });
 
@@ -98,7 +99,15 @@ app.post('/api/instances', async (req, res) => {
 
     const ptyManager = ptyRegistry.get(instanceId, workingDir, cliType);
 
-    if (autoStart && !ptyManager.isRunning && workingDir) {
+    // isBusy, not isRunning: during 'starting' (the CLI self-update window,
+    // up to 30s) isRunning is still false, and calling start() again there
+    // throws 'PTY start already in progress' - a 500 for what is really
+    // "already on its way".
+    if (autoStart && !ptyManager.isBusy && workingDir) {
+      // Deliberate start requested by the caller: forget any earlier
+      // user-initiated stop so it doesn't re-seed stoppedByUser on a future
+      // remove()+get() cycle.
+      ptyRegistry.clearUserStop(instanceId);
       await ptyManager.start(workingDir);
     }
 
@@ -115,7 +124,10 @@ app.post('/api/instances', async (req, res) => {
 app.delete('/api/instances/:instanceId', (req, res) => {
   try {
     const { instanceId } = req.params;
-    const removed = ptyRegistry.remove(instanceId);
+    // userInitiated: this route only exists as a direct user action, so the
+    // registry must remember it - otherwise the next set-instance for this
+    // id silently restarts the session the user just stopped.
+    const removed = ptyRegistry.remove(instanceId, { userInitiated: true });
 
     if (!removed) {
       return res.status(404).json({ error: 'Instance not found' });
@@ -134,7 +146,8 @@ app.delete('/api/instances', (req, res) => {
     const removed = [];
 
     for (const instance of instances) {
-      if (ptyRegistry.remove(instance.instanceId)) {
+      // userInitiated: same reasoning as DELETE /api/instances/:instanceId.
+      if (ptyRegistry.remove(instance.instanceId, { userInitiated: true })) {
         removed.push(instance.instanceId);
       }
     }
@@ -200,6 +213,8 @@ app.post('/api/pty/restart', async (req, res) => {
 
     ptyManager.stop();
     ptyManager.clearBuffer();
+    // Deliberate restart: forget any earlier user-initiated stop.
+    ptyRegistry.clearUserStop(instanceId);
     await ptyManager.start(restartDir);
     res.json({ success: true, status: ptyManager.getStatus() });
   } catch (error) {
@@ -213,7 +228,17 @@ app.post('/api/pty/start', async (req, res) => {
     const { workingDir, instanceId = DEFAULT_INSTANCE_ID, cliType = 'claude' } = req.body;
     const ptyManager = ptyRegistry.get(instanceId, workingDir, cliType);
 
-    if (ptyManager.getStatus().running) {
+    // 'starting' is busy but not yet running: a second Start tapped during
+    // the CLI self-update window would otherwise reach start() and hit
+    // 'PTY start already in progress' as an HTTP 500. Report the in-flight
+    // start as success so a double tap is a no-op for the user, and still
+    // clear the remembered stop - this is a deliberate start either way.
+    if (ptyManager.status === 'starting') {
+      ptyRegistry.clearUserStop(instanceId);
+      return res.json({ success: true, status: ptyManager.getStatus(), workingDir: ptyManager.currentWorkingDir });
+    }
+
+    if (ptyManager.isRunning) {
       return res.status(400).json({ error: 'PTY already running. Stop it first or use restart.' });
     }
 
@@ -221,6 +246,8 @@ app.post('/api/pty/start', async (req, res) => {
       return res.status(400).json({ error: 'workingDir required for new instance' });
     }
 
+    // Deliberate start: forget any earlier user-initiated stop.
+    ptyRegistry.clearUserStop(instanceId);
     await ptyManager.start(workingDir || ptyManager.currentWorkingDir);
     res.json({ success: true, status: ptyManager.getStatus(), workingDir: ptyManager.currentWorkingDir });
   } catch (error) {
@@ -235,6 +262,11 @@ app.post('/api/pty/stop', (req, res) => {
     const ptyManager = ptyRegistry.get(instanceId);
 
     ptyManager.stop();
+    // stop() marks the manager object, but that flag dies with it: idle
+    // cleanup evicts a stopped, listener-less instance after 30 minutes, and
+    // the next get() would build a manager willing to auto-start again.
+    // Record the intent in the registry so the stop outlives the object.
+    ptyRegistry.recordUserStop(instanceId);
     if (clearBuffer) {
       ptyManager.clearBuffer();
     }
@@ -278,6 +310,7 @@ server.listen(config.port, config.host, () => {
 process.on('SIGINT', () => {
   logger.info('Shutting down relay server');
   ptyRegistry.shutdown();
+  wsHandler.close();
   server.close(() => {
     logger.info('Server closed');
     process.exit(0);
@@ -287,6 +320,7 @@ process.on('SIGINT', () => {
 process.on('SIGTERM', () => {
   logger.info('Received SIGTERM, shutting down');
   ptyRegistry.shutdown();
+  wsHandler.close();
   server.close(() => {
     process.exit(0);
   });

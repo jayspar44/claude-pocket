@@ -5,6 +5,22 @@ const config = require('./config');
 const logger = require('./logger');
 
 class WebSocketHandler {
+  // JSON.parse succeeds on null, numbers, strings and arrays. handleMessage
+  // destructures its argument, so anything that is not a plain object must be
+  // rejected here rather than throwing downstream.
+  static parseClientFrame(raw) {
+    let message;
+    try {
+      message = JSON.parse(raw);
+    } catch {
+      return { ok: false, reason: 'invalid-json' };
+    }
+    if (typeof message !== 'object' || message === null || Array.isArray(message)) {
+      return { ok: false, reason: 'not-an-object' };
+    }
+    return { ok: true, message };
+  }
+
   constructor(server) {
     this.wss = new WebSocketServer({
       server,
@@ -73,12 +89,31 @@ class WebSocketHandler {
 
       // Handle incoming messages
       ws.on('message', (data) => {
-        try {
-          const message = JSON.parse(data.toString());
-          this.handleMessage(ws, message, { setupPtyListener, sendReplay, skipUntilReplay: () => skipUntilReplay, setSkipReplay: (v) => { skipUntilReplay = v; } });
-        } catch (error) {
-          logger.error({ error: error.message, clientId }, 'Failed to parse WebSocket message');
+        const parsed = WebSocketHandler.parseClientFrame(data.toString());
+        if (!parsed.ok) {
+          logger.warn({ clientId, reason: parsed.reason }, 'Ignoring unusable WebSocket frame');
+          return;
         }
+        const message = parsed.message;
+        // handleMessage is async. An unhandled rejection here terminates the
+        // process under Node's default --unhandled-rejections=throw, taking
+        // every PTY session with it.
+        this.handleMessage(ws, message, {
+          setupPtyListener,
+          sendReplay,
+          skipUntilReplay: () => skipUntilReplay,
+          setSkipReplay: (v) => { skipUntilReplay = v; },
+        }).catch((error) => {
+          logger.error(
+            { error: error.message, clientId, type: message.type },
+            'Failed to handle WebSocket message'
+          );
+          this.send(ws, {
+            type: 'pty-error',
+            message: error.message,
+            instanceId: ws.instanceId,
+          });
+        });
       });
 
       // Handle client disconnect
@@ -123,6 +158,19 @@ class WebSocketHandler {
     });
   }
 
+  // wss.on('close') never fires for a server-attached WebSocketServer, so the
+  // shutdown path calls this directly. Safe to call more than once.
+  close() {
+    if (this.closed) return;
+    this.closed = true;
+    clearInterval(this.pingInterval);
+    // wss.close() only stops new connections; live sockets keep the http
+    // server's close callback from ever running.
+    this.wss.clients.forEach((ws) => ws.terminate());
+    this.clients.clear();
+    this.wss.close();
+  }
+
   async handleMessage(ws, message, ctx) {
     const { type, instanceId: msgInstanceId } = message;
 
@@ -153,34 +201,55 @@ class WebSocketHandler {
 
         const ptyManager = ctx.setupPtyListener(newInstanceId, cliType);
 
+        // userStart is set only by the app's Start button, never by an
+        // automatic (re)connect, so it is the one signal that may undo an
+        // explicit stop. Without it "stop means stopped" would also block the
+        // user's own Start; with it, reconnects still decline to auto-start.
+        if (message.userStart) {
+          ptyManager.stoppedByUser = false;
+          ptyRegistry.clearUserStop(newInstanceId);
+        }
+
         // Auto-start PTY if not running but we have a working directory
         // Defer start until first resize arrives with real xterm.js dimensions
         // to prevent MCP tool calls rendering vertically with stale/fallback dimensions
-        if (!ptyManager.isRunning && (workingDir || ptyManager.currentWorkingDir)) {
+        if (!ptyManager.isBusy && !ptyManager.stoppedByUser && (workingDir || ptyManager.currentWorkingDir)) {
           const dir = workingDir || ptyManager.currentWorkingDir;
           logger.info({ clientId: ws.clientId, instanceId: newInstanceId, workingDir: dir, clientCols, clientRows }, 'PTY not running, deferring start until resize with real dimensions');
           ptyManager.setDeferredStart(dir);
           // Send status so client knows PTY is not yet running
           this.send(ws, { type: 'pty-status', ...ptyManager.getStatus() });
-          // Fallback: start with set-instance dims if no resize arrives within 3s
+          // Fallback: start with set-instance dims if no resize arrives within 3s.
+          // Extracted to a method (rather than an inline async arrow) so the
+          // try/catch around pm.start() can be exercised directly in tests
+          // without waiting on a real 3s timer.
+          //
+          // Pass the frame's own dimensions, undefined included, rather than
+          // clientCols/clientRows: start() seeds lastCols/lastRows from
+          // whatever it is handed, so passing the config fallback (50x24) for
+          // a frame that carried no dimensions would overwrite known-good
+          // geometry.
           if (ws._deferredStartTimer) clearTimeout(ws._deferredStartTimer);
-          ws._deferredStartTimer = setTimeout(async () => {
-            ws._deferredStartTimer = null;
-            const pm = ptyRegistry.get(newInstanceId);
-            if (!pm.isRunning && pm.deferredStartDir) {
-              logger.info({ instanceId: newInstanceId, clientCols, clientRows }, 'Deferred start fallback: no resize received, starting with set-instance dimensions');
-              await pm.start(pm.deferredStartDir, clientCols, clientRows);
-              ctx.sendReplay(pm, newInstanceId);
-            }
+          ws._deferredStartTimer = setTimeout(() => {
+            this.runDeferredStartFallback(ws, newInstanceId, message.cols, message.rows, ctx);
           }, 3000);
-        } else if (!ptyManager.isRunning && !workingDir && !ptyManager.currentWorkingDir) {
-          // No working directory - can't start Claude, send error to client
+        } else if (!ptyManager.isBusy && !workingDir && !ptyManager.currentWorkingDir) {
+          // No working directory - can't start Claude, send error to client.
+          // Checked ahead of stoppedByUser: an instance that is both stopped
+          // and misconfigured needs the actionable error, otherwise the client
+          // shows an idle terminal with no hint and a disabled Start button.
           logger.warn({ clientId: ws.clientId, instanceId: newInstanceId }, 'Cannot start CLI: no working directory configured');
           this.send(ws, {
             type: 'pty-error',
             message: 'No working directory configured. Set a project folder in instance settings.',
             instanceId: newInstanceId,
           });
+        } else if (!ptyManager.isBusy && ptyManager.stoppedByUser) {
+          logger.info(
+            { clientId: ws.clientId, instanceId: newInstanceId },
+            'Not auto-starting: session was explicitly stopped'
+          );
+          this.send(ws, { type: 'pty-status', ...ptyManager.getStatus() });
         } else if (workingDir && ptyManager.currentWorkingDir !== workingDir) {
           // Store pending working dir for next restart
           ptyManager.pendingWorkingDir = workingDir;
@@ -190,6 +259,16 @@ class WebSocketHandler {
         // Resize PTY to client dimensions before sending replay
         if (ptyManager.isRunning) {
           ptyManager.resize(clientCols, clientRows);
+        } else if (ptyManager.status === 'starting' && message.cols && message.rows) {
+          // No process to resize yet. Record the dimensions so the spawn uses
+          // them instead of whatever dimensions the in-flight start() call was
+          // given - otherwise a reconnecting client's real dimensions are lost
+          // and the CLI spawns at the fallback size. Only for a frame that
+          // actually carries dimensions: clientCols falls back to
+          // config.pty.cols (50), which would downgrade a correct in-flight
+          // 120x40 spawn whenever a client omits them.
+          ptyManager.lastCols = message.cols;
+          ptyManager.lastRows = message.rows;
         }
 
         // Send replay for this instance
@@ -209,8 +288,11 @@ class WebSocketHandler {
       case 'resize': {
         const ptyManager = ptyRegistry.get(instanceId);
         if (message.cols && message.rows) {
-          // If PTY is deferred, start it now with real xterm.js dimensions
-          if (!ptyManager.isRunning && ptyManager.deferredStartDir) {
+          // If PTY is deferred, start it now with real xterm.js dimensions.
+          // stoppedByUser is checked as well as deferredStartDir: stop()
+          // clears the deferred dir, but a resize must never be the thing
+          // that revives a session the user explicitly ended.
+          if (!ptyManager.isBusy && !ptyManager.stoppedByUser && ptyManager.deferredStartDir) {
             if (ws._deferredStartTimer) {
               clearTimeout(ws._deferredStartTimer);
               ws._deferredStartTimer = null;
@@ -218,6 +300,12 @@ class WebSocketHandler {
             logger.info({ instanceId, cols: message.cols, rows: message.rows }, 'Starting deferred PTY with real resize dimensions');
             await ptyManager.start(ptyManager.deferredStartDir, message.cols, message.rows);
             ctx.sendReplay(ptyManager, instanceId);
+          } else if (ptyManager.status === 'starting') {
+            // No process to resize yet. Record the dimensions so the spawn uses
+            // them instead of the set-instance fallback, which is what makes MCP
+            // tool output render vertically.
+            ptyManager.lastCols = message.cols;
+            ptyManager.lastRows = message.rows;
           } else {
             ptyManager.resize(message.cols, message.rows);
           }
@@ -239,6 +327,10 @@ class WebSocketHandler {
         ptyManager.stop();
         ptyManager.clearBuffer();
         ptyManager.resetRestartCounter();
+        // Deliberate restart: forget any earlier user-initiated stop so a
+        // later remove()+get() cycle for this id doesn't re-seed
+        // stoppedByUser from a decision the user has since reversed.
+        ptyRegistry.clearUserStop(instanceId);
         await ptyManager.start(workingDir, restartCols, restartRows);
         this.send(ws, { type: 'pty-status', ...ptyManager.getStatus() });
         break;
@@ -293,6 +385,32 @@ class WebSocketHandler {
 
       default:
         logger.warn({ type, clientId: ws.clientId }, 'Unknown WebSocket message type');
+    }
+  }
+
+  // Fires ~3s after set-instance arms a deferred start, if no resize arrived
+  // with real dimensions in the meantime. Runs from a bare setTimeout with no
+  // caller to await it, so a rejection here (e.g. pty.spawn failing because
+  // the configured CLI binary is missing or misconfigured) MUST be caught
+  // locally - otherwise it is an unhandled rejection and, under Node's
+  // default --unhandled-rejections=throw, takes down the whole relay process,
+  // killing every other instance's session along with it.
+  async runDeferredStartFallback(ws, newInstanceId, clientCols, clientRows, ctx) {
+    ws._deferredStartTimer = null;
+    const pm = ptyRegistry.get(newInstanceId);
+    // stoppedByUser guard: same reasoning as the resize handler above - an
+    // explicit stop between set-instance and this timer must win.
+    if (!pm.isBusy && !pm.stoppedByUser && pm.deferredStartDir) {
+      logger.info({ instanceId: newInstanceId, clientCols, clientRows }, 'Deferred start fallback: no resize received, starting with set-instance dimensions');
+      try {
+        await pm.start(pm.deferredStartDir, clientCols, clientRows);
+        ctx.sendReplay(pm, newInstanceId);
+      } catch (error) {
+        // pm.start() already logs the failure and broadcasts a pty-error to
+        // any connected listeners; this catch exists only to stop the
+        // rejection from propagating unhandled.
+        logger.error({ instanceId: newInstanceId, error: error.message }, 'Deferred start fallback failed');
+      }
     }
   }
 
