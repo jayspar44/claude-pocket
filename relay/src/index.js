@@ -278,9 +278,6 @@ server.listen(config.port, config.host, () => {
 process.on('SIGINT', () => {
   logger.info('Shutting down relay server');
   ptyRegistry.shutdown();
-  // Clears the ping interval and closes live sockets. Without this, server.close()
-  // waits on still-open WebSocket connections and its callback may never run.
-  wsHandler.close();
   server.close(() => {
     logger.info('Server closed');
     process.exit(0);
@@ -290,7 +287,6 @@ process.on('SIGINT', () => {
 process.on('SIGTERM', () => {
   logger.info('Received SIGTERM, shutting down');
   ptyRegistry.shutdown();
-  wsHandler.close();
   server.close(() => {
     process.exit(0);
   });

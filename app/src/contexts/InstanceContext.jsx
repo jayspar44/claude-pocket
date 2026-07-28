@@ -58,16 +58,6 @@ const DEFAULT_INSTANCE_ID = 'default';
 // Generate unique ID
 const generateId = () => `inst-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
 
-// Identity for this running app instance, sent with every set-instance. It lets
-// the relay recognise a reconnect as *the same app* and drop the socket it
-// replaces immediately, instead of inferring orphanhood from ~75s of silence.
-//
-// Deliberately per page load, not persisted: supersede semantics only hold within
-// one running context. A second tab is a genuine second viewer and must get its
-// own id, or the two would evict each other in a reconnect loop. Sockets left by
-// a previous page load fall to the relay's silence sweep instead.
-const APP_CLIENT_ID = `app-${Date.now()}-${Math.random().toString(36).slice(2, 11)}`;
-
 // Backward-compat migration: rename Gemini -> Antigravity (added 2026-05-23)
 export const normalizeCliType = (cliType) => cliType === 'gemini' ? 'antigravity' : cliType;
 
@@ -163,10 +153,6 @@ export function InstanceProvider({ children }) {
   // Track app visibility for notifications (Capacitor's visibilityState is unreliable)
   const isAppVisibleRef = useRef(true);
   const pongTimeoutsRef = useRef({});
-  // instanceId -> true when this client initiated the disconnect, so onclose can
-  // tell "we hung up" from "we were hung up on" and only skip reconnect for the
-  // former. Consumed (deleted) by the onclose that follows.
-  const deliberateDisconnectsRef = useRef({});
   const listenersRef = useRef({}); // Map<instanceId, Set<callback>>
   const connectInstanceRef = useRef(null); // Ref for self-referencing in reconnect
 
@@ -225,13 +211,6 @@ export function InstanceProvider({ children }) {
 
   // Clean up timers for instance
   const cleanupTimers = useCallback((instanceId) => {
-    // Reconnect timers are keyed by instanceId, so scheduling a new one only
-    // overwrites the ref — the previously scheduled timer still fires. Clear it
-    // here so a superseded reconnect can't spawn an extra socket later.
-    if (reconnectTimeoutsRef.current[instanceId]) {
-      clearTimeout(reconnectTimeoutsRef.current[instanceId]);
-      delete reconnectTimeoutsRef.current[instanceId];
-    }
     if (connectionTimeoutsRef.current[instanceId]) {
       clearTimeout(connectionTimeoutsRef.current[instanceId]);
       delete connectionTimeoutsRef.current[instanceId];
@@ -278,21 +257,6 @@ export function InstanceProvider({ children }) {
       return;
     }
 
-    // Anything still in the slot is CLOSING/CLOSED (OPEN/CONNECTING returned
-    // above), so there is nothing left to close here - close() is a no-op on
-    // those states. Just release the slot. A socket that is CLOSING on this side
-    // but still OPEN on the relay is handled there: the appClientId sent with
-    // set-instance lets the relay drop the socket this one replaces.
-    if (existingWs) {
-      delete wsRefs.current[instanceId];
-    }
-
-    // Connecting supersedes any pending intent to stay disconnected. Without this
-    // the flag outlives its socket whenever onclose is skipped by the identity
-    // guard, and would then suppress the reconnect after a *later* unexpected
-    // drop.
-    delete deliberateDisconnectsRef.current[instanceId];
-
     updateInstanceState(instanceId, { connectionState: 'connecting', error: null });
 
     try {
@@ -332,7 +296,6 @@ export function InstanceProvider({ children }) {
         ws.send(JSON.stringify({
           type: 'set-instance',
           instanceId: instance.id,
-          appClientId: APP_CLIENT_ID,
           workingDir: instance.workingDir || null,
           cliType: instance.cliType || 'claude',
           cols: dims.cols,
@@ -340,31 +303,11 @@ export function InstanceProvider({ children }) {
         }));
       };
 
-      ws.onclose = () => {
-        // A close event can arrive long after this socket was superseded - most
-        // often on mobile, where a backgrounded WebView defers delivery until the
-        // app resumes and has already reconnected. Without this identity check the
-        // stale close evicts whatever is in the slot, which by then is the current
-        // live socket: it stays open, keeps its own PTY listener on the relay, and
-        // every byte of output gets rendered an extra time. Only the socket still
-        // registered for this instance may mutate connection state.
-        if (wsRefs.current[instanceId] !== ws) {
-          return;
-        }
-
+      ws.onclose = (event) => {
         delete wsRefs.current[instanceId];
         cleanupTimers(instanceId);
 
-        // Reconnect unless *this client* chose to disconnect. Keying off
-        // event.wasClean asks the wrong question: a heartbeat timeout or a
-        // relay-side eviction can complete a clean handshake, and treating those
-        // as intentional leaves the instance dark until the user reselects it,
-        // since resume only reconnects the active instance. Only
-        // disconnectInstance sets this flag.
-        const deliberate = deliberateDisconnectsRef.current[instanceId] === true;
-        delete deliberateDisconnectsRef.current[instanceId];
-
-        if (!deliberate) {
+        if (!event.wasClean) {
           const attempt = reconnectAttemptsRef.current[instanceId] || 0;
           if (attempt >= MAX_RECONNECT_ATTEMPTS) {
             updateInstanceState(instanceId, {
@@ -387,26 +330,10 @@ export function InstanceProvider({ children }) {
       };
 
       ws.onerror = () => {
-        // Same identity check as onclose: a superseded socket dying abnormally
-        // fires error before close, and `error` is only ever cleared by a fresh
-        // connect - so without this the live socket carries a permanent bogus
-        // error while reporting connectionState 'connected'.
-        if (wsRefs.current[instanceId] !== ws) {
-          return;
-        }
         updateInstanceState(instanceId, { error: 'WebSocket connection error' });
       };
 
       ws.onmessage = (event) => {
-        // A superseded socket can still deliver frames queued before its close
-        // handshake completed. Listeners are keyed by instanceId, not by socket,
-        // so those frames would be written into the live terminal on top of the
-        // replay the new socket just rendered - duplicated output, the exact
-        // symptom this is all here to prevent.
-        if (wsRefs.current[instanceId] !== ws) {
-          return;
-        }
-
         try {
           const message = JSON.parse(event.data);
 
@@ -494,23 +421,16 @@ export function InstanceProvider({ children }) {
 
   // Disconnect from instance
   const disconnectInstance = useCallback((instanceId) => {
+    if (reconnectTimeoutsRef.current[instanceId]) {
+      clearTimeout(reconnectTimeoutsRef.current[instanceId]);
+      delete reconnectTimeoutsRef.current[instanceId];
+    }
+
     cleanupTimers(instanceId);
 
-    const ws = wsRefs.current[instanceId];
-    if (ws) {
-      const live = ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING;
-      if (live) {
-        // Mark before closing so the onclose this triggers knows the disconnect
-        // was ours and must not reconnect. Leave the ref in place: onclose's
-        // identity guard would otherwise skip this socket, and the flag would
-        // never be consumed - suppressing the *next* unexpected disconnect's
-        // reconnect instead of this one.
-        deliberateDisconnectsRef.current[instanceId] = true;
-        ws.close(1000, 'Manual disconnect');
-      } else {
-        // Already closed, so no onclose is coming to do this for us.
-        delete wsRefs.current[instanceId];
-      }
+    if (wsRefs.current[instanceId]) {
+      wsRefs.current[instanceId].close(1000, 'Manual disconnect');
+      delete wsRefs.current[instanceId];
     }
 
     // Stop foreground service if no other connections are active (Android only)
@@ -537,14 +457,7 @@ export function InstanceProvider({ children }) {
   const sendToInstance = useCallback((instanceId, message) => {
     const ws = wsRefs.current[instanceId];
     if (ws?.readyState === WebSocket.OPEN) {
-      // Stamp every set-instance centrally. The relay uses appClientId to spot a
-      // superseded socket; set-instance is re-sent from several places (the
-      // instance manager's Start button among them), and one caller forgetting
-      // it silently disables that detection for the socket.
-      const payload = message.type === 'set-instance'
-        ? { ...message, appClientId: APP_CLIENT_ID }
-        : message;
-      ws.send(JSON.stringify(payload));
+      ws.send(JSON.stringify(message));
       return true;
     }
     return false;
