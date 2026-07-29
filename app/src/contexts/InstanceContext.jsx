@@ -4,7 +4,7 @@ import { App } from '@capacitor/app';
 import { notificationService } from '../services/NotificationService';
 import { InstanceConnection, CONNECTION_STATES, shouldConnect } from '../services/InstanceConnection';
 import { ConnectionManager, IDLE_DISCONNECT_MS } from '../services/ConnectionManager';
-import { canAddInstance } from '../services/instanceLimit';
+import { canAddInstance, createInstanceLimitSource } from '../services/instanceLimit';
 import { createForegroundService } from '../services/foregroundService';
 import { healthApi } from '../api/relay-api';
 import { storage } from '../utils/storage';
@@ -143,19 +143,27 @@ export function InstanceProvider({ children }) {
     return states;
   });
 
-  // The relay's instance cap, read from /api/health. null until fetched (or if
-  // the field is absent or the fetch failed), in which case canAddInstance
-  // defers to the relay rather than guessing a cap of its own.
+  // The relay's instance cap, read from /api/health. null until it arrives, in
+  // which case canAddInstance defers to the relay rather than guessing a cap of
+  // its own - which is only safe because the source below keeps trying until it
+  // has one. A single mount fetch that failed left the app with no cap at all
+  // for the whole session.
   const [relayMaxInstances, setRelayMaxInstances] = useState(null);
+  const [limitSource] = useState(() => createInstanceLimitSource({
+    fetchHealth: () => healthApi.check(),
+    onLimit: (max) => setRelayMaxInstances(max),
+  }));
 
-  useEffect(() => {
-    healthApi.check()
-      .then((res) => {
-        const max = res?.data?.maxInstances;
-        if (Number.isFinite(max)) setRelayMaxInstances(max);
-      })
-      .catch(() => { /* fall back to the default */ });
-  }, []);
+  // Read through a ref by the connection layer below, like every other callback
+  // it reaches for, so the manager effect stays mount-only. The source itself
+  // never changes identity, so the ref needs no refresh effect.
+  const limitSourceRef = useRef(limitSource);
+
+  // At mount, and again from onStateChange whenever a connection reaches
+  // CONNECTED - the strongest evidence the app has that the relay is reachable,
+  // and an event that already happens, so no polling loop is added. A no-op
+  // once the limit is known.
+  useEffect(() => { limitSource.refresh(); }, [limitSource]);
 
   // Track app visibility for notifications (Capacitor's visibilityState is unreliable)
   const isAppVisibleRef = useRef(true);
@@ -305,6 +313,10 @@ export function InstanceProvider({ children }) {
           // service and let Android kill the process before that retry fires.
           if (state === CONNECTION_STATES.CONNECTED) {
             startForegroundService();
+            // A reachable relay is the one thing the cap fetch was missing.
+            // No-op once it is known; read through the ref so this effect stays
+            // mount-only.
+            limitSourceRef.current?.refresh();
           } else if (state === CONNECTION_STATES.DISCONNECTED
             && !mgr.hasLiveConnections()) {
             stopForegroundService();
