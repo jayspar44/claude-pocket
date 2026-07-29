@@ -4,6 +4,7 @@ import { ChevronLeft, Server, Type, Trash2, Info, Check, FileX, Bell, RotateCcw,
 import { useRelay } from '../hooks/useRelay';
 import { useInstance, normalizeCliType } from '../contexts/InstanceContext';
 import { isLiveConnectionState } from '../services/InstanceConnection';
+import { instancesToReconnectAfterStopAll } from '../services/stopAll';
 import { healthApi, filesApi, instancesApi } from '../api/relay-api';
 import { version } from '../../../version.json';
 import { versionCode } from '../../android-version.json';
@@ -228,13 +229,17 @@ export default function Settings() {
       // bring back every CLI the user just stopped.
       disconnectAllInstances('user');
       const response = await instancesApi.deleteAll();
-      // Put the sockets back before saying so. The stops are recorded on the
-      // relay (DELETE /api/instances removes each manager as userInitiated),
-      // and a reconnect's set-instance carries no userStart, so no CLI comes
-      // back with them - but the confirm above promises the user can "tap
-      // Start on each instance you want back", and that control only renders
-      // while the tab is connected.
-      wasLive.forEach((id) => connectInstance(id));
+      // Put the sockets back before saying so: the confirm above promises the
+      // user can "tap Start on each instance you want back", and that control
+      // only renders while the tab is connected.
+      //
+      // Only the tabs the relay actually stopped, though. Those ids carry a
+      // stop record, so their reconnect's set-instance declines to auto-start;
+      // an id the relay never held has no record, and reconnecting it arms a
+      // deferred start - spawning a CLI as a direct consequence of the dialog
+      // that promised nothing would restart. See instancesToReconnectAfterStopAll.
+      instancesToReconnectAfterStopAll(wasLive, response.data?.removed)
+        .forEach((id) => connectInstance(id));
       alert(`Stopped ${response.data.count} instance(s)`);
     } catch (error) {
       console.error('Failed to stop instances:', error);
