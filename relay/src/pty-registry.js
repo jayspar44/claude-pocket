@@ -25,8 +25,8 @@ class PtyRegistry {
     // housekeeping eviction (cleanupIdleInstances, removeOldestIdle) must
     // NOT record, or an idle-evicted instance would stop being able to
     // auto-start.
-    // Pruned in cleanupIdleInstances() so an id nobody revisits doesn't
-    // linger forever; cleared by clearUserStop() on any deliberate start.
+    // Entries are removed by clearUserStop() on any deliberate start, and
+    // never by elapsed time - see cleanupIdleInstances().
     this.stoppedByUserAt = new Map();
 
     // Start idle cleanup interval. This is a background maintenance timer,
@@ -219,14 +219,13 @@ class PtyRegistry {
       logger.info({ removed: toRemove.length, remaining: this.instances.size }, 'Idle instance cleanup complete');
     }
 
-    // Bound stoppedByUserAt's growth: an id nobody has revisited within the
-    // same idle window is forgotten, so a user who stops a session and never
-    // comes back doesn't leave an entry sitting there forever.
-    for (const [id, stoppedAt] of this.stoppedByUserAt) {
-      if (now - stoppedAt > IDLE_TIMEOUT_MS) {
-        this.stoppedByUserAt.delete(id);
-      }
-    }
+    // stoppedByUserAt is deliberately NOT pruned here. A stop is a decision,
+    // not a cache entry: expiring it after 30 minutes means the next app
+    // launch silently restarts every CLI the user stopped, which is exactly
+    // what the record exists to prevent. Growth is bounded by the number of
+    // distinct instance ids the user has stopped - at most MAX_INSTANCES
+    // worth of short strings on a phone client - and clearUserStop() removes
+    // an entry as soon as the user starts that session again.
   }
 
   /**

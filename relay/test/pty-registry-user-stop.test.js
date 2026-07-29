@@ -76,6 +76,29 @@ test('clearUserStop() clears a recorded stop so a later get() does not seed it',
   ptyRegistry.remove(id);
 });
 
+// Finding 7: cleanupIdleInstances() used to prune stoppedByUserAt entries
+// older than IDLE_TIMEOUT_MS. Stop All records every stop and its confirm
+// dialog promises no tab will restart automatically - but half an hour later
+// the records were gone, and the next app launch (a fresh ConnectionManager,
+// so no client-side sticky reason either) restarted every CLI the user had
+// stopped. A stop is a decision, not a cache entry.
+test('a user stop is still honoured long after the idle timeout', () => {
+  const id = 'user-stop-expiry-test';
+  ptyRegistry.get(id, '/tmp', 'claude');
+  ptyRegistry.remove(id, { userInitiated: true });
+
+  // Age the record well past the 30-minute housekeeping window without
+  // waiting on a real timer, then run the sweep that used to prune it.
+  ptyRegistry.stoppedByUserAt.set(id, Date.now() - 24 * 60 * 60 * 1000);
+  ptyRegistry.cleanupIdleInstances();
+
+  const fresh = ptyRegistry.get(id);
+  assert.equal(fresh.stoppedByUser, true, 'a stop the user made must outlive the idle window');
+
+  ptyRegistry.remove(id);
+  ptyRegistry.clearUserStop(id);
+});
+
 test('clearUserStop() is a no-op for an id that was never recorded', () => {
   assert.doesNotThrow(() => ptyRegistry.clearUserStop('never-stopped-id'));
 });
