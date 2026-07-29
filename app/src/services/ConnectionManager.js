@@ -2,7 +2,6 @@ import { InstanceConnection, isLiveConnectionState, shouldConnect } from './Inst
 
 export const HEARTBEAT_INTERVAL = 25000;
 export const IDLE_DISCONNECT_MS = 3600000;   // 1 hour
-export const DEFAULT_MAX_INSTANCES = 10;
 
 /**
  * Owns the per-instance connections and ONE shared heartbeat.

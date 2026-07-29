@@ -144,8 +144,8 @@ export function InstanceProvider({ children }) {
   });
 
   // The relay's instance cap, read from /api/health. null until fetched (or if
-  // the field is absent), in which case canAddInstance falls back to
-  // DEFAULT_MAX_INSTANCES.
+  // the field is absent or the fetch failed), in which case canAddInstance
+  // defers to the relay rather than guessing a cap of its own.
   const [relayMaxInstances, setRelayMaxInstances] = useState(null);
 
   useEffect(() => {
