@@ -205,7 +205,7 @@ npm run build          # Production build
 | `relay/.env` | `HOST` | 0.0.0.0 |
 | | `PORT` | 4501 (4503 for DEV, set by `ecosystem.config.js`) |
 | | `CLAUDE_COMMAND` | claude |
-| | `MAX_INSTANCES` | 10 — max concurrent PTYs; published in `/api/health` and mirrored by the app as its tab cap |
+| | `MAX_INSTANCES` | 10 — max concurrent PTYs; published in `/api/health`, which the app mirrors as its tab cap once that fetch succeeds (it retries on each connect) |
 | | `ALLOWED_ORIGINS` | * |
 | | `SHELL` | /bin/zsh |
 | | `NODE_ENV` | development |
@@ -256,9 +256,10 @@ thing that clears a stopped session's `stoppedByUser` on the relay. An auto-reco
 never carry it, or "stop means stopped" breaks and stopped CLIs resurrect on the next network blip.
 
 **The client completes its handshake on the relay's `pty-status` reply, not on socket open.** A
-socket that opens but whose `set-instance` fails is not connected. Any relay path that answers
-`set-instance` must therefore reply — a `pty-error` with no `pty-status` leaves the client retrying
-its whole reconnect ladder with a blank terminal.
+socket that opens but whose `set-instance` fails is not connected. Every `set-instance` path must
+therefore answer: a `pty-status` when accepted, or a `pty-error` carrying `handshakeFailed: true`
+when refused (e.g. the instance cap is reached). A refusal ends the attempt in `disconnected` with
+the error shown — it does not retry, and it is not sticky, so selecting the tab tries once more.
 
 ## Android Builds
 
