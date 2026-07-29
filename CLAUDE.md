@@ -93,11 +93,22 @@ app/src/                         relay/src/
 │  ├─ input/InputBar,QuickActions├─ pty-registry.js
 │  ├─ command/CommandPalette     ├─ websocket-handler.js
 │  ├─ StatusBar.jsx              ├─ ansi-preprocessor.js
-│  └─ files/FileBrowser          └─ routes/commands,files,builds
-├─ contexts/Relay,Instance,Theme
+│  └─ files/FileBrowser          ├─ routes/commands,files,builds
+├─ contexts/Relay,Instance,Theme └─ ../test/ (node:test)
+├─ services/
+│  ├─ InstanceConnection.js  one socket + its timers, per instance
+│  ├─ ConnectionManager.js   the map + one shared heartbeat
+│  ├─ instanceLimit.js, foregroundService.js
+│  ├─ NotificationService.js
+│  └─ __tests__/ (vitest)
 ├─ pages/Terminal,Settings
 └─ api/relay-api.js
 ```
+
+**Socket ownership:** `InstanceConnection` owns exactly one WebSocket and every timer belonging to
+it — the object *is* the reference. `InstanceContext` holds no socket state. Do not reintroduce a
+map keyed by instanceId that implies a socket's existence; that was the cause of #8 (output rendered
+3-4x and growing), because any path that dropped the entry leaked the socket permanently.
 
 ## Development
 
@@ -105,6 +116,40 @@ app/src/                         relay/src/
 npm run install-all && cp relay/.env.example relay/.env
 npm run dev:local    # app:4500, relay:4501
 ```
+
+## Testing
+
+| Package | Runner | Location | Command |
+|---------|--------|----------|---------|
+| `relay/` | built-in `node:test` | `relay/test/*.test.js` | `cd relay && npm test` |
+| `app/` | Vitest | `app/src/**/__tests__/*.test.js` | `cd app && npm test` (or `npm run test:app` from root) |
+
+- **The app suite runs in the `node` environment — no jsdom, no React Testing Library.** That is
+  deliberate: the connection layer takes an injected socket and clock, so every transition is
+  testable without a browser. React components and hooks are therefore *not* covered. Adding jsdom is
+  a real decision, not a default — say so rather than doing it silently.
+- **`npm test` must exit on its own.** If it hangs, something leaked a handle (an un-`unref`'d
+  interval is the usual cause). Fix the leak; do not reach for `--test-force-exit`.
+- When fixing a bug, prove the test fails without the fix: revert the line, capture the failure,
+  restore. A test that passes either way is worse than an acknowledged gap.
+
+## Gotchas
+
+- **Deploying re-captures the environment.** `deploy.sh` (and `npm run deploy`, `/deploy`) does
+  `pm2 delete` + `pm2 start`, so PM2 snapshots the deploying shell's env and replays it on every
+  later restart. `pm2 restart` alone does not. Deploying from Claude Code's Bash tool therefore bakes
+  that tool's env into the relay — which is why the relay strips `CLAUDECODE` and
+  `CLAUDE_CODE_CHILD_SESSION` from spawned PTYs (`relay/src/config.js`). Without the latter, every
+  spawned CLI thinks it is a nested session and loses `--resume`/`--continue` history.
+- **A busy PTY is never idle-reaped** — `cleanupIdleInstances` and `removeOldestIdle` both require
+  `!isBusy && listeners === 0`, and `isBusy` covers `starting` as well as `running`. So dropping
+  every WebSocket from an instance cannot kill its CLI — the buffer replays on reconnect. Useful for
+  clearing stuck connections on a live relay.
+- **PM2's `pm2 jlist` shows the env each process was launched with** — the fastest way to see what a
+  deploy captured.
+- **The relay and app deploy independently.** An older APK can be talking to a newer relay, so a
+  relay change that alters what the client sees (close codes, new frame fields) has to stay
+  compatible with builds already on phones.
 
 ## NPM Scripts
 
@@ -158,10 +203,15 @@ npm run build          # Production build
 | Location | Variable | Default |
 |----------|----------|---------|
 | `relay/.env` | `HOST` | 0.0.0.0 |
+| | `PORT` | 4501 (4503 for DEV, set by `ecosystem.config.js`) |
 | | `CLAUDE_COMMAND` | claude |
+| | `MAX_INSTANCES` | 10 — max concurrent PTYs; published in `/api/health` and mirrored by the app as its tab cap |
 | | `ALLOWED_ORIGINS` | * |
 | | `SHELL` | /bin/zsh |
 | | `NODE_ENV` | development |
+| | `LOG_LEVEL` | info |
+| | `BUILDS_BASE` | `../claude-pocket-aabs` (sibling of the repo) |
+| | `BUILDS_DIR` | `$BUILDS_BASE/dev` or `/prod` by folder — what `/api/builds` serves |
 | `app/.env.production` | `VITE_RELAY_HOST` | minibox.rattlesnake-mimosa.ts.net |
 | | `VITE_PROD_APP_PORT` | 4500 |
 | | `VITE_PROD_RELAY_PORT` | 4501 |
@@ -179,7 +229,7 @@ npm run build          # Production build
 **REST:**
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| `/api/health` | GET | Health check |
+| `/api/health` | GET | Health check; returns `maxInstances` (the relay's PTY cap) |
 | `/api/instances` | GET/POST/DELETE | Multi-instance management |
 | `/api/pty/status` | GET | PTY process status |
 | `/api/pty/start` | POST | Start PTY process |
@@ -198,8 +248,17 @@ npm run build          # Production build
 **WebSocket `/ws`:**
 | Direction | Message Types |
 |-----------|---------------|
-| Client→Server | `input` \| `submit` \| `resize` \| `interrupt` \| `restart` \| `status` \| `set-instance` \| `ping` |
-| Server→Client | `output` \| `replay` \| `status` \| `pty-status` \| `pty-crash` \| `ready` \| `pong` |
+| Client→Server | `input` \| `submit` \| `resize` \| `interrupt` \| `restart` \| `status` \| `set-instance` \| `replay` \| `ping` |
+| Server→Client | `output` \| `replay` \| `status` \| `pty-status` \| `pty-error` \| `pty-crash` \| `pty-restarting` \| `task-complete` \| `ready` \| `pong` |
+
+**`set-instance` carries `userStart: true` only when the user explicitly taps Start.** It is the one
+thing that clears a stopped session's `stoppedByUser` on the relay. An auto-reconnect handshake must
+never carry it, or "stop means stopped" breaks and stopped CLIs resurrect on the next network blip.
+
+**The client completes its handshake on the relay's `pty-status` reply, not on socket open.** A
+socket that opens but whose `set-instance` fails is not connected. Any relay path that answers
+`set-instance` must therefore reply — a `pty-error` with no `pty-status` leaves the client retrying
+its whole reconnect ladder with a blank terminal.
 
 ## Android Builds
 
