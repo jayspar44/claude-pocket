@@ -91,6 +91,35 @@ describe('InstanceConnection: connect and handshake', () => {
     }));
   });
 
+  // Finding 3: when ptyRegistry.get() throws - "Maximum instances (N)
+  // reached" - the relay's only answer to set-instance is a pty-error. With
+  // the handshake keyed to pty-status alone the tab sat in CONNECTING until
+  // the 10s timeout, then ran the whole 1/2/4/8/16s ladder with a blank
+  // terminal, while the explanation had already arrived on the first attempt.
+  it('completes the handshake on a pty-error, the relay\'s other answer to set-instance', () => {
+    const { conn, onMessage } = make();
+    conn.connect();
+    FakeSocket.last.fireOpen();
+    FakeSocket.last.fireMessage({ type: 'pty-error', message: 'Maximum instances (3) reached' });
+    expect(conn.state).toBe(CONNECTION_STATES.CONNECTED);
+    expect(onMessage).toHaveBeenCalledWith('inst-1', expect.objectContaining({
+      type: 'pty-error',
+      message: 'Maximum instances (3) reached',
+    }));
+  });
+
+  // Guard on the above, not proof of it: this one holds either way. A
+  // pty-error is only handshake-completing while CONNECTING, so the ordinary
+  // mid-session one - a CLI that failed to spawn - must remain inert.
+  it('leaves a mid-session pty-error alone', () => {
+    const { conn } = make();
+    conn.connect();
+    FakeSocket.last.fireOpen();
+    FakeSocket.last.fireMessage({ type: 'pty-status', running: true });
+    FakeSocket.last.fireMessage({ type: 'pty-error', message: 'CLI failed to start' });
+    expect(conn.state).toBe(CONNECTION_STATES.CONNECTED);
+  });
+
   it('forwards every inbound message to onMessage', () => {
     const { conn, onMessage } = make();
     conn.connect();

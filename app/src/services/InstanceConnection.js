@@ -225,9 +225,14 @@ export class InstanceConnection {
       this._clearPongTimer();
       return;
     }
-    // The handshake completes on pty-status, not on socket open. A socket that
-    // opens but never completes set-instance is not connected.
-    if (message.type === 'pty-status' && this.state === S.CONNECTING) {
+    // The handshake completes on the relay's answer to set-instance, not on
+    // socket open: a socket that opens but never completes set-instance is not
+    // connected. pty-error is such an answer as much as pty-status is - the
+    // relay replies with it alone when the registry refuses the instance (the
+    // cap), and treating it as incomplete leaves the tab timing out and
+    // reconnecting forever with the explanation already in hand. Mid-session
+    // the state is CONNECTED, so an unrelated pty-error changes nothing here.
+    if ((message.type === 'pty-status' || message.type === 'pty-error') && this.state === S.CONNECTING) {
       this._clearConnectTimer();
       this.attempts = 0;   // reset on handshake, never on open
       this._setState(S.CONNECTED);
