@@ -19,6 +19,12 @@ export const isLiveConnectionState = (state) => (
 
 // Reasons that represent the client's own decision to stop. Only fresh user
 // consent may undo one - see shouldConnect.
+//
+// 'refused' is deliberately absent. A relay that cannot satisfy set-instance
+// (its cap is reached and nothing is evictable) is not the client deciding to
+// stop, and the condition clears the moment the user frees an instance - which
+// the tab has no way of hearing about. Leaving it non-sticky means the next
+// foreground or tab selection opens exactly ONE fresh socket and finds out.
 export const STICKY_DISCONNECT_REASONS = Object.freeze(['user', 'idle']);
 
 /**
@@ -225,14 +231,24 @@ export class InstanceConnection {
       this._clearPongTimer();
       return;
     }
+    // The relay's refusal of set-instance: its cap is reached and nothing is
+    // evictable, so no PTY manager was bound to that socket and no pty-status
+    // will ever follow. Handled ahead of the handshake check below, and only
+    // while CONNECTING - mid-session the state is CONNECTED and an ordinary
+    // pty-error (a CLI that failed to spawn) must leave the connection alone.
+    if (message.type === 'pty-error' && message.handshakeFailed && this.state === S.CONNECTING) {
+      this._refuse(message.message || 'The relay refused this instance');
+    }
     // The handshake completes on the relay's answer to set-instance, not on
     // socket open: a socket that opens but never completes set-instance is not
-    // connected. pty-error is such an answer as much as pty-status is - the
-    // relay replies with it alone when the registry refuses the instance (the
-    // cap), and treating it as incomplete leaves the tab timing out and
-    // reconnecting forever with the explanation already in hand. Mid-session
-    // the state is CONNECTED, so an unrelated pty-error changes nothing here.
-    if ((message.type === 'pty-status' || message.type === 'pty-error') && this.state === S.CONNECTING) {
+    // connected. That answer is a pty-status and nothing else. A pty-error is
+    // NOT one: on the refusal path the relay binds no manager and never clears
+    // skipUntilReplay, so treating it as a completed handshake parks the tab in
+    // CONNECTED over a socket that can never carry PTY output - and CONNECTED
+    // is the one state from which nothing reconnects (shouldConnect leaves it
+    // alone, StatusBar hides Reconnect). _refuse above is what ends that
+    // attempt instead.
+    if (message.type === 'pty-status' && this.state === S.CONNECTING) {
       this._clearConnectTimer();
       this.attempts = 0;   // reset on handshake, never on open
       this._setState(S.CONNECTED);
@@ -313,6 +329,36 @@ export class InstanceConnection {
     this._clearConnectTimer();
     this._clearReconnectTimer();
     this._clearPongTimer();
+  }
+
+  /**
+   * A set-instance the relay answered but could not satisfy.
+   *
+   * Not _drop: the ladder exists for losses a retry might fix, and this one is
+   * deterministic until the user frees an instance on the relay. Five 10s
+   * connect timeouts and a 1/2/4/8/16s ladder would spend a minute rediscovering
+   * an answer already in hand, with a blank terminal throughout.
+   *
+   * Not CONNECTED either, which is the trap this replaces: that state tells
+   * shouldConnect to leave the connection alone, hides StatusBar's Reconnect
+   * button and enables the composer, all over a socket the relay bound nothing
+   * to - every way back closed at once.
+   *
+   * DISCONNECTED is what keeps the tab recoverable. It is terminal only until
+   * the user acts: the Reconnect button calls connect() directly, selecting the
+   * tab connects with intent, and because 'refused' is not sticky an app
+   * foreground sweeps it up too. Each of those opens exactly one socket and
+   * either succeeds or is refused again - there is no timer here, so nothing
+   * repeats on its own.
+   *
+   * The reason itself reaches the UI through the pty-error frame that carried
+   * it: _handleMessage still forwards that to onMessage, which is what puts
+   * "Maximum instances (3) reached" on screen.
+   */
+  _refuse(error) {
+    this._clearAllTimers();
+    this._teardownSocket();
+    this._setState(S.DISCONNECTED, { disconnectReason: 'refused', error });
   }
 
   // Involuntary loss of the socket: network, relay restart, heartbeat timeout,

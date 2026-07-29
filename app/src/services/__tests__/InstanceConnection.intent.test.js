@@ -218,6 +218,25 @@ describe('shouldConnect: reasons are read, not just written', () => {
     expect(shouldConnect(conn)).toBe(true);
   });
 
+  // A relay that refused set-instance is not the client deciding to stop, and
+  // the tab has no way to hear about the user freeing an instance. Non-sticky
+  // means an app foreground sweeps it back up - one socket per foreground, no
+  // timer, no ladder - as well as the Reconnect button and tab selection.
+  it('reconnects a refused connection without needing user intent', () => {
+    const { conn } = make();
+    conn.connect();
+    FakeSocket.last.fireOpen();
+    FakeSocket.last.fireMessage({
+      type: 'pty-error',
+      message: 'Maximum instances (3) reached',
+      handshakeFailed: true,
+    });
+    expect(conn.state).toBe(CONNECTION_STATES.DISCONNECTED);
+    expect(conn.disconnectReason).toBe('refused');
+    expect(shouldConnect(conn)).toBe(true);
+    expect(shouldConnect(conn, { userIntent: true })).toBe(true);
+  });
+
   it('reconnects after a socketFactory throw leaves no reason', () => {
     const conn = new InstanceConnection({
       instanceId: 'inst-1',

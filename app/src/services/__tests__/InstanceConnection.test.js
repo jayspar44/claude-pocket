@@ -91,32 +91,82 @@ describe('InstanceConnection: connect and handshake', () => {
     }));
   });
 
-  // Finding 3: when ptyRegistry.get() throws - "Maximum instances (N)
-  // reached" - the relay's only answer to set-instance is a pty-error. With
-  // the handshake keyed to pty-status alone the tab sat in CONNECTING until
-  // the 10s timeout, then ran the whole 1/2/4/8/16s ladder with a blank
-  // terminal, while the explanation had already arrived on the first attempt.
-  it('completes the handshake on a pty-error, the relay\'s other answer to set-instance', () => {
+  // REPLACES 'completes the handshake on a pty-error', which asserted the
+  // opposite and is deliberately gone. Completing the handshake on any
+  // pty-error parked the tab in CONNECTED over a socket the relay had bound no
+  // PTY manager to: green dot, blank terminal, enabled composer, and every way
+  // back closed at once - shouldConnect leaves CONNECTED alone and StatusBar
+  // hides Reconnect while connected. A pty-error is not an answer that a
+  // handshake succeeded.
+  it('does not complete the handshake on a plain pty-error', () => {
+    const { conn } = make();
+    conn.connect();
+    FakeSocket.last.fireOpen();
+    FakeSocket.last.fireMessage({ type: 'pty-error', message: 'CLI failed to start' });
+    expect(conn.state).toBe(CONNECTION_STATES.CONNECTING);
+  });
+
+  // The relay's refusal: at MAX_INSTANCES with nothing evictable, set-instance
+  // throws and the answer carries handshakeFailed - no pty-status is coming.
+  // The tab ends DISCONNECTED, which is the only state it can be recovered
+  // from, with the reason forwarded so the UI can show it.
+  it('ends the attempt on a handshake-failed pty-error, in disconnected', () => {
     const { conn, onMessage } = make();
     conn.connect();
     FakeSocket.last.fireOpen();
-    FakeSocket.last.fireMessage({ type: 'pty-error', message: 'Maximum instances (3) reached' });
-    expect(conn.state).toBe(CONNECTION_STATES.CONNECTED);
+    FakeSocket.last.fireMessage({
+      type: 'pty-error',
+      message: 'Maximum instances (3) reached',
+      handshakeFailed: true,
+    });
+
+    expect(conn.state).toBe(CONNECTION_STATES.DISCONNECTED);
+    expect(conn.disconnectReason).toBe('refused');
+    expect(conn.error).toBe('Maximum instances (3) reached');
+    // Forwarded as well as acted on: ptyError is what puts the reason on screen.
     expect(onMessage).toHaveBeenCalledWith('inst-1', expect.objectContaining({
       type: 'pty-error',
       message: 'Maximum instances (3) reached',
     }));
   });
 
-  // Guard on the above, not proof of it: this one holds either way. A
-  // pty-error is only handshake-completing while CONNECTING, so the ordinary
-  // mid-session one - a CLI that failed to spawn - must remain inert.
+  // A refusal must not arm the ladder: it is deterministic until the user frees
+  // an instance on the relay, and nothing on this side can make that happen.
+  it('arms no retry after a refusal, and reconnects on user intent', () => {
+    const timers = [];
+    const { conn } = make({
+      setTimer: (fn, ms) => { timers.push({ fn, ms }); return timers.length; },
+      clearTimer: (id) => { timers[id - 1] = null; },
+    });
+    conn.connect();
+    FakeSocket.last.fireOpen();
+    FakeSocket.last.fireMessage({
+      type: 'pty-error',
+      message: 'Maximum instances (3) reached',
+      handshakeFailed: true,
+    });
+
+    expect(timers.filter(Boolean)).toHaveLength(0);   // connect timer cleared, none armed
+    expect(FakeSocket.instances).toHaveLength(1);
+
+    // The way back: the Reconnect button, tab selection, or an app foreground -
+    // all of which reach connect(). One socket per attempt, none on a timer.
+    conn.connect();
+    expect(FakeSocket.instances).toHaveLength(2);
+    expect(conn.state).toBe(CONNECTION_STATES.CONNECTING);
+  });
+
+  // A pty-error is only handshake-relevant while CONNECTING, so the ordinary
+  // mid-session one - a CLI that failed to spawn - must remain inert, even if
+  // it somehow carried the flag.
   it('leaves a mid-session pty-error alone', () => {
     const { conn } = make();
     conn.connect();
     FakeSocket.last.fireOpen();
     FakeSocket.last.fireMessage({ type: 'pty-status', running: true });
     FakeSocket.last.fireMessage({ type: 'pty-error', message: 'CLI failed to start' });
+    expect(conn.state).toBe(CONNECTION_STATES.CONNECTED);
+    FakeSocket.last.fireMessage({ type: 'pty-error', message: 'x', handshakeFailed: true });
     expect(conn.state).toBe(CONNECTION_STATES.CONNECTED);
   });
 

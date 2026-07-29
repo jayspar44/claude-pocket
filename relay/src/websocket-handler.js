@@ -185,108 +185,35 @@ class WebSocketHandler {
         this.send(ws, { type: 'pong' });
         break;
 
-      case 'set-instance': {
-        // Client wants to switch to a specific instance
-        const newInstanceId = message.instanceId || DEFAULT_INSTANCE_ID;
-        const workingDir = message.workingDir;
-        const cliType = message.cliType || 'claude';
-        const clientCols = message.cols || config.pty.cols;
-        const clientRows = message.rows || config.pty.rows;
-
-        logger.info({ clientId: ws.clientId, oldInstanceId: ws.instanceId, newInstanceId, workingDir, cliType, clientCols, clientRows }, 'Client switching instance');
-
-        ws.instanceId = newInstanceId;
-        ws.cliType = cliType;
-        ctx.setSkipReplay(true);
-
-        const ptyManager = ctx.setupPtyListener(newInstanceId, cliType);
-
-        // Decided here, reported after the replay below. sendReplay ends with
-        // a pty-status, and the client clears ptyError on any pty-status - so
-        // an error sent before it is wiped by the status that follows, and the
-        // user gets an idle terminal with no explanation.
-        const missingWorkingDir = !ptyManager.isBusy
-          && !workingDir
-          && !ptyManager.currentWorkingDir;
-
-        // userStart is set only by the app's Start button, never by an
-        // automatic (re)connect, so it is the one signal that may undo an
-        // explicit stop. Without it "stop means stopped" would also block the
-        // user's own Start; with it, reconnects still decline to auto-start.
-        if (message.userStart) {
-          ptyManager.stoppedByUser = false;
-          ptyRegistry.clearUserStop(newInstanceId);
-        }
-
-        // Auto-start PTY if not running but we have a working directory
-        // Defer start until first resize arrives with real xterm.js dimensions
-        // to prevent MCP tool calls rendering vertically with stale/fallback dimensions
-        if (!ptyManager.isBusy && !ptyManager.stoppedByUser && (workingDir || ptyManager.currentWorkingDir)) {
-          const dir = workingDir || ptyManager.currentWorkingDir;
-          logger.info({ clientId: ws.clientId, instanceId: newInstanceId, workingDir: dir, clientCols, clientRows }, 'PTY not running, deferring start until resize with real dimensions');
-          ptyManager.setDeferredStart(dir);
-          // Send status so client knows PTY is not yet running
-          this.send(ws, { type: 'pty-status', ...ptyManager.getStatus() });
-          // Fallback: start with set-instance dims if no resize arrives within 3s.
-          // Extracted to a method (rather than an inline async arrow) so the
-          // try/catch around pm.start() can be exercised directly in tests
-          // without waiting on a real 3s timer.
-          //
-          // Pass the frame's own dimensions, undefined included, rather than
-          // clientCols/clientRows: start() seeds lastCols/lastRows from
-          // whatever it is handed, so passing the config fallback (50x24) for
-          // a frame that carried no dimensions would overwrite known-good
-          // geometry.
-          if (ws._deferredStartTimer) clearTimeout(ws._deferredStartTimer);
-          ws._deferredStartTimer = setTimeout(() => {
-            this.runDeferredStartFallback(ws, newInstanceId, message.cols, message.rows, ctx);
-          }, 3000);
-        } else if (missingWorkingDir) {
-          // No working directory - can't start Claude. Checked ahead of
-          // stoppedByUser: an instance that is both stopped and misconfigured
-          // needs the actionable error, otherwise the client shows an idle
-          // terminal with no hint and a disabled Start button.
-          logger.warn({ clientId: ws.clientId, instanceId: newInstanceId }, 'Cannot start CLI: no working directory configured');
-        } else if (!ptyManager.isBusy && ptyManager.stoppedByUser) {
-          logger.info(
-            { clientId: ws.clientId, instanceId: newInstanceId },
-            'Not auto-starting: session was explicitly stopped'
+      case 'set-instance':
+        // Every set-instance must be answered, and the client's handshake
+        // completes on the pty-status this path sends and on nothing else. A
+        // throw that leaves the client with silence therefore costs it a 10s
+        // connect timeout and then the whole reconnect ladder, re-running a
+        // failure that repeats identically - the registry refusing the
+        // instance because its cap is reached and nothing is evictable.
+        //
+        // handshakeFailed means "this frame is the entire answer to your
+        // set-instance; no pty-status is coming". The client ends the attempt
+        // on it rather than waiting and retrying. It is set only here: a
+        // mid-session pty-error (a CLI that failed to spawn) must leave a
+        // working connection alone, and the client ignores the flag unless it
+        // is still mid-handshake.
+        try {
+          await this.handleSetInstance(ws, message, ctx);
+        } catch (error) {
+          logger.error(
+            { clientId: ws.clientId, instanceId: message.instanceId, error: error.message },
+            'set-instance failed; answering with a handshake-failed error'
           );
-          this.send(ws, { type: 'pty-status', ...ptyManager.getStatus() });
-        } else if (workingDir && ptyManager.currentWorkingDir !== workingDir) {
-          // Store pending working dir for next restart
-          ptyManager.pendingWorkingDir = workingDir;
-          logger.info({ instanceId: newInstanceId, pendingWorkingDir: workingDir }, 'Working directory change queued for next restart');
-        }
-
-        // Resize PTY to client dimensions before sending replay
-        if (ptyManager.isRunning) {
-          ptyManager.resize(clientCols, clientRows);
-        } else if (ptyManager.status === 'starting' && message.cols && message.rows) {
-          // No process to resize yet. Record the dimensions so the spawn uses
-          // them instead of whatever dimensions the in-flight start() call was
-          // given - otherwise a reconnecting client's real dimensions are lost
-          // and the CLI spawns at the fallback size. Only for a frame that
-          // actually carries dimensions: clientCols falls back to
-          // config.pty.cols (50), which would downgrade a correct in-flight
-          // 120x40 spawn whenever a client omits them.
-          ptyManager.lastCols = message.cols;
-          ptyManager.lastRows = message.rows;
-        }
-
-        // Send replay for this instance
-        ctx.sendReplay(ptyManager, newInstanceId);
-
-        // Last, so the pty-status sendReplay just sent cannot clear it.
-        if (missingWorkingDir) {
           this.send(ws, {
             type: 'pty-error',
-            message: 'No working directory configured. Set a project folder in instance settings.',
-            instanceId: newInstanceId,
+            message: error.message,
+            instanceId: message.instanceId || DEFAULT_INSTANCE_ID,
+            handshakeFailed: true,
           });
         }
         break;
-      }
 
       case 'input': {
         const ptyManager = ptyRegistry.get(instanceId);
@@ -397,6 +324,112 @@ class WebSocketHandler {
 
       default:
         logger.warn({ type, clientId: ws.clientId }, 'Unknown WebSocket message type');
+    }
+  }
+
+  // The whole of set-instance, in one place so handleMessage can wrap it in a
+  // single try/catch. Every exit from here has sent the client a pty-status;
+  // every throw out of it is answered by the handshakeFailed pty-error above,
+  // so the client is never left waiting on an answer that will not come.
+  async handleSetInstance(ws, message, ctx) {
+    // Client wants to switch to a specific instance
+    const newInstanceId = message.instanceId || DEFAULT_INSTANCE_ID;
+    const workingDir = message.workingDir;
+    const cliType = message.cliType || 'claude';
+    const clientCols = message.cols || config.pty.cols;
+    const clientRows = message.rows || config.pty.rows;
+
+    logger.info({ clientId: ws.clientId, oldInstanceId: ws.instanceId, newInstanceId, workingDir, cliType, clientCols, clientRows }, 'Client switching instance');
+
+    ws.instanceId = newInstanceId;
+    ws.cliType = cliType;
+    ctx.setSkipReplay(true);
+
+    const ptyManager = ctx.setupPtyListener(newInstanceId, cliType);
+
+    // Decided here, reported after the replay below. sendReplay ends with
+    // a pty-status, and the client clears ptyError on any pty-status - so
+    // an error sent before it is wiped by the status that follows, and the
+    // user gets an idle terminal with no explanation.
+    const missingWorkingDir = !ptyManager.isBusy
+      && !workingDir
+      && !ptyManager.currentWorkingDir;
+
+    // userStart is set only by the app's Start button, never by an
+    // automatic (re)connect, so it is the one signal that may undo an
+    // explicit stop. Without it "stop means stopped" would also block the
+    // user's own Start; with it, reconnects still decline to auto-start.
+    if (message.userStart) {
+      ptyManager.stoppedByUser = false;
+      ptyRegistry.clearUserStop(newInstanceId);
+    }
+
+    // Auto-start PTY if not running but we have a working directory
+    // Defer start until first resize arrives with real xterm.js dimensions
+    // to prevent MCP tool calls rendering vertically with stale/fallback dimensions
+    if (!ptyManager.isBusy && !ptyManager.stoppedByUser && (workingDir || ptyManager.currentWorkingDir)) {
+      const dir = workingDir || ptyManager.currentWorkingDir;
+      logger.info({ clientId: ws.clientId, instanceId: newInstanceId, workingDir: dir, clientCols, clientRows }, 'PTY not running, deferring start until resize with real dimensions');
+      ptyManager.setDeferredStart(dir);
+      // Send status so client knows PTY is not yet running
+      this.send(ws, { type: 'pty-status', ...ptyManager.getStatus() });
+      // Fallback: start with set-instance dims if no resize arrives within 3s.
+      // Extracted to a method (rather than an inline async arrow) so the
+      // try/catch around pm.start() can be exercised directly in tests
+      // without waiting on a real 3s timer.
+      //
+      // Pass the frame's own dimensions, undefined included, rather than
+      // clientCols/clientRows: start() seeds lastCols/lastRows from
+      // whatever it is handed, so passing the config fallback (50x24) for
+      // a frame that carried no dimensions would overwrite known-good
+      // geometry.
+      if (ws._deferredStartTimer) clearTimeout(ws._deferredStartTimer);
+      ws._deferredStartTimer = setTimeout(() => {
+        this.runDeferredStartFallback(ws, newInstanceId, message.cols, message.rows, ctx);
+      }, 3000);
+    } else if (missingWorkingDir) {
+      // No working directory - can't start Claude. Checked ahead of
+      // stoppedByUser: an instance that is both stopped and misconfigured
+      // needs the actionable error, otherwise the client shows an idle
+      // terminal with no hint and a disabled Start button.
+      logger.warn({ clientId: ws.clientId, instanceId: newInstanceId }, 'Cannot start CLI: no working directory configured');
+    } else if (!ptyManager.isBusy && ptyManager.stoppedByUser) {
+      logger.info(
+        { clientId: ws.clientId, instanceId: newInstanceId },
+        'Not auto-starting: session was explicitly stopped'
+      );
+      this.send(ws, { type: 'pty-status', ...ptyManager.getStatus() });
+    } else if (workingDir && ptyManager.currentWorkingDir !== workingDir) {
+      // Store pending working dir for next restart
+      ptyManager.pendingWorkingDir = workingDir;
+      logger.info({ instanceId: newInstanceId, pendingWorkingDir: workingDir }, 'Working directory change queued for next restart');
+    }
+
+    // Resize PTY to client dimensions before sending replay
+    if (ptyManager.isRunning) {
+      ptyManager.resize(clientCols, clientRows);
+    } else if (ptyManager.status === 'starting' && message.cols && message.rows) {
+      // No process to resize yet. Record the dimensions so the spawn uses
+      // them instead of whatever dimensions the in-flight start() call was
+      // given - otherwise a reconnecting client's real dimensions are lost
+      // and the CLI spawns at the fallback size. Only for a frame that
+      // actually carries dimensions: clientCols falls back to
+      // config.pty.cols (50), which would downgrade a correct in-flight
+      // 120x40 spawn whenever a client omits them.
+      ptyManager.lastCols = message.cols;
+      ptyManager.lastRows = message.rows;
+    }
+
+    // Send replay for this instance
+    ctx.sendReplay(ptyManager, newInstanceId);
+
+    // Last, so the pty-status sendReplay just sent cannot clear it.
+    if (missingWorkingDir) {
+      this.send(ws, {
+        type: 'pty-error',
+        message: 'No working directory configured. Set a project folder in instance settings.',
+        instanceId: newInstanceId,
+      });
     }
   }
 

@@ -169,6 +169,54 @@ test('a stopped instance with no working directory still gets the actionable err
   const error = ws.sent.find((m) => m.type === 'pty-error');
   assert.ok(error, 'the client must be told what to fix, not left with a bare pty-status');
   assert.match(error.message, /No working directory configured/);
+  assert.equal(
+    error.handshakeFailed,
+    undefined,
+    'this set-instance succeeded; flagging it would tear down a working connection'
+  );
+});
+
+// Fails set-instance the way the registry does at MAX_INSTANCES with nothing
+// evictable: ptyRegistry.get() throws from inside setupPtyListener, before any
+// manager is bound to the socket.
+function refusingCtx() {
+  return {
+    setupPtyListener: () => { throw new Error('Maximum instances (3) reached'); },
+    sendReplay: () => { throw new Error('sendReplay must not be reached'); },
+    skipUntilReplay: () => false,
+    setSkipReplay: () => {},
+  };
+}
+
+// Finding 1 (second wave): the client's handshake completes on a pty-status and
+// on nothing else. A set-instance that throws sends none, so the answer itself
+// has to say the handshake is over - otherwise the tab waits out a 10s connect
+// timeout and then the whole 1/2/4/8/16s ladder against a failure that repeats
+// identically, with the explanation already in hand from the first attempt.
+test('a refused set-instance is answered, and the answer ends the handshake', async () => {
+  const handler = Object.create(WebSocketHandler.prototype);
+  const ws = recordingWs();
+
+  await handler.handleMessage(ws, { type: 'set-instance', instanceId: 't17' }, refusingCtx());
+
+  assert.equal(
+    ws.sent.some((m) => m.type === 'pty-status'),
+    false,
+    'no manager was bound and skipUntilReplay was never cleared, so no status may claim otherwise'
+  );
+  const error = ws.sent.find((m) => m.type === 'pty-error');
+  assert.ok(error, 'the client must be answered, not left waiting on the connect timeout');
+  assert.equal(error.handshakeFailed, true, 'the client needs to know no pty-status is coming');
+  assert.match(error.message, /Maximum instances/, 'and why');
+  assert.equal(error.instanceId, 't17');
+});
+
+// The rejection must not escape either: handleMessage's caller answers every
+// message type with the same bare, non-fatal pty-error, which for a set-instance
+// leaves the client waiting exactly as it did before.
+test('a refused set-instance does not reject out of handleMessage', async () => {
+  const handler = Object.create(WebSocketHandler.prototype);
+  await handler.handleMessage(recordingWs(), { type: 'set-instance', instanceId: 't18' }, refusingCtx());
 });
 
 // Finding 4: the error was sent from inside the branch, and set-instance ends

@@ -152,8 +152,15 @@ function StatusBar({ connectionState, ptyStatus, workingDir, ptyError, onReconne
         </div>
       )}
 
-      {/* PTY Error (when present) */}
-      {ptyError && isConnected && (
+      {/* PTY Error (when present).
+          Not gated on isConnected. When the relay refuses a set-instance - its
+          instance cap is reached and nothing is evictable - the tab ends up
+          DISCONNECTED holding the only explanation the user will ever get
+          ("Maximum instances (3) reached"); hiding it there turns a
+          recoverable refusal into an unexplained Offline tab. Any pty-status
+          clears ptyError, so this is always the last thing that actually went
+          wrong, not a stale one. */}
+      {ptyError && (
         <div className="flex items-center gap-1.5 px-3 py-1.5 border-t border-red-900/50 bg-red-900/30">
           <AlertCircle className="w-3.5 h-3.5 text-red-400 shrink-0" />
           <span className="text-xs text-red-300 truncate">{ptyError}</span>
