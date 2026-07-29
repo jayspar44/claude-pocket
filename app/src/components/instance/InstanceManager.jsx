@@ -220,11 +220,16 @@ function InstanceManager({ isOpen, onClose, editInstanceId, startInAddMode }) {
       userStart: true,
     });
     if (!sent) {
-      // Not connected yet — switchInstance will connect and send set-instance
-      switchInstance(instance.id);
+      // The socket dropped between this row rendering and the tap. There is
+      // deliberately no fallback: switchInstance's handshake carries no
+      // userStart, so it would connect the tab, close the modal and start
+      // nothing - a silent no-op dressed up as a Start. Say so instead and
+      // leave the modal open; the row reappears when the tab reconnects.
+      alert('Not connected to the relay — wait for the tab to reconnect, then tap Start.');
+      return;
     }
     onClose();
-  }, [switchInstance, sendToInstance, onClose]);
+  }, [sendToInstance, onClose]);
 
   const handleStopPty = useCallback(async (instanceId) => {
     setPtyLoading(true);
@@ -236,10 +241,17 @@ function InstanceManager({ isOpen, onClose, editInstanceId, startInAddMode }) {
       await healthApi.stopPty(instanceId);
     } catch (error) {
       console.error('Failed to stop PTY:', error);
-      // The CLI is still running, so undo the intent - otherwise the sticky
-      // 'user' reason keeps the tab offline until it is tapped.
-      connectInstance(instanceId);
     }
+    // Either way the socket comes straight back, and for the same reason: the
+    // sticky 'user' reason means nothing else will bring it. On success the
+    // stop is already recorded on the relay (POST /api/pty/stop sets
+    // stoppedByUser and calls recordUserStop), and this reconnect's
+    // set-instance carries no userStart, so the relay declines to auto-start -
+    // the CLI stays stopped, which is the point, while the row's
+    // Start/Stop/Restart block, which only renders while connected, comes back
+    // with it. On failure the CLI is still running and the tab must not be
+    // stranded offline.
+    connectInstance(instanceId);
     setPtyLoading(false);
   }, [disconnectInstance, connectInstance]);
 

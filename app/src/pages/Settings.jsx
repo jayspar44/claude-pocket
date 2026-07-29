@@ -228,6 +228,13 @@ export default function Settings() {
       // bring back every CLI the user just stopped.
       disconnectAllInstances('user');
       const response = await instancesApi.deleteAll();
+      // Put the sockets back before saying so. The stops are recorded on the
+      // relay (DELETE /api/instances removes each manager as userInitiated),
+      // and a reconnect's set-instance carries no userStart, so no CLI comes
+      // back with them - but the confirm above promises the user can "tap
+      // Start on each instance you want back", and that control only renders
+      // while the tab is connected.
+      wasLive.forEach((id) => connectInstance(id));
       alert(`Stopped ${response.data.count} instance(s)`);
     } catch (error) {
       console.error('Failed to stop instances:', error);
@@ -251,7 +258,13 @@ export default function Settings() {
     try {
       disconnectInstance(instanceId);
       await instancesApi.delete(instanceId);
-      // Re-fetch will happen via the interval
+      // Re-fetch will happen via the interval.
+      // A tab that was live comes back online, exactly as on the failure path
+      // below and for the same reason - the sticky 'user' reason means nothing
+      // else will reconnect it, and the Start control needs a connection. The
+      // stop itself survives: the removal was userInitiated, so the manager
+      // the next set-instance creates starts out declining to auto-start.
+      if (wasLive) connectInstance(instanceId);
     } catch (error) {
       console.error('Failed to stop instance:', error);
       // The CLI survived the failed stop, so a tab that WAS live must not be
