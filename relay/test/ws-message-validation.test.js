@@ -61,6 +61,18 @@ function fakeCtx(ptyManager) {
   };
 }
 
+// Same, but sendReplay emits the pty-status the production one ends with.
+// That trailing status is the entire reason set-instance's ordering matters:
+// the client clears ptyError on any pty-status.
+function replayingCtx(ptyManager, ws) {
+  return {
+    ...fakeCtx(ptyManager),
+    sendReplay: () => {
+      ws.send(JSON.stringify({ type: 'pty-status', ...ptyManager.getStatus() }));
+    },
+  };
+}
+
 test('set-instance during the start window records client dimensions instead of dropping them', async () => {
   const pm = new PtyManager('t7', 'claude');
   // Only the CLI self-update and the actual pty.spawn call are stubbed, so
@@ -157,6 +169,35 @@ test('a stopped instance with no working directory still gets the actionable err
   const error = ws.sent.find((m) => m.type === 'pty-error');
   assert.ok(error, 'the client must be told what to fix, not left with a bare pty-status');
   assert.match(error.message, /No working directory configured/);
+});
+
+// Finding 4: the error was sent from inside the branch, and set-instance ends
+// by calling sendReplay - which sends a pty-status. The client clears ptyError
+// on any pty-status, so the explanation was wiped microseconds after it
+// arrived, leaving an idle terminal with no hint and a disabled Start button.
+test('the no-working-directory error is sent after the replay status, not before', async () => {
+  const pm = new PtyManager('t16', 'claude');
+  assert.equal(pm.currentWorkingDir, null);
+
+  const handler = Object.create(WebSocketHandler.prototype);
+  const ws = recordingWs();
+
+  await handler.handleMessage(
+    ws,
+    { type: 'set-instance', instanceId: 't16' },  // no workingDir
+    replayingCtx(pm, ws)
+  );
+
+  const types = ws.sent.map((m) => m.type);
+  const errorAt = types.indexOf('pty-error');
+  const lastStatusAt = types.lastIndexOf('pty-status');
+
+  assert.ok(errorAt >= 0, 'the client must still be told what to fix');
+  assert.ok(lastStatusAt >= 0, 'the replay status is what makes the ordering matter');
+  assert.ok(
+    errorAt > lastStatusAt,
+    `a pty-status after the error clears it on the client (sent: ${types.join(', ')})`
+  );
 });
 
 test('a stopped instance that IS configured still gets the quiet pty-status', async () => {

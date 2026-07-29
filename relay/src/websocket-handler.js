@@ -201,6 +201,14 @@ class WebSocketHandler {
 
         const ptyManager = ctx.setupPtyListener(newInstanceId, cliType);
 
+        // Decided here, reported after the replay below. sendReplay ends with
+        // a pty-status, and the client clears ptyError on any pty-status - so
+        // an error sent before it is wiped by the status that follows, and the
+        // user gets an idle terminal with no explanation.
+        const missingWorkingDir = !ptyManager.isBusy
+          && !workingDir
+          && !ptyManager.currentWorkingDir;
+
         // userStart is set only by the app's Start button, never by an
         // automatic (re)connect, so it is the one signal that may undo an
         // explicit stop. Without it "stop means stopped" would also block the
@@ -233,17 +241,12 @@ class WebSocketHandler {
           ws._deferredStartTimer = setTimeout(() => {
             this.runDeferredStartFallback(ws, newInstanceId, message.cols, message.rows, ctx);
           }, 3000);
-        } else if (!ptyManager.isBusy && !workingDir && !ptyManager.currentWorkingDir) {
-          // No working directory - can't start Claude, send error to client.
-          // Checked ahead of stoppedByUser: an instance that is both stopped
-          // and misconfigured needs the actionable error, otherwise the client
-          // shows an idle terminal with no hint and a disabled Start button.
+        } else if (missingWorkingDir) {
+          // No working directory - can't start Claude. Checked ahead of
+          // stoppedByUser: an instance that is both stopped and misconfigured
+          // needs the actionable error, otherwise the client shows an idle
+          // terminal with no hint and a disabled Start button.
           logger.warn({ clientId: ws.clientId, instanceId: newInstanceId }, 'Cannot start CLI: no working directory configured');
-          this.send(ws, {
-            type: 'pty-error',
-            message: 'No working directory configured. Set a project folder in instance settings.',
-            instanceId: newInstanceId,
-          });
         } else if (!ptyManager.isBusy && ptyManager.stoppedByUser) {
           logger.info(
             { clientId: ws.clientId, instanceId: newInstanceId },
@@ -273,6 +276,15 @@ class WebSocketHandler {
 
         // Send replay for this instance
         ctx.sendReplay(ptyManager, newInstanceId);
+
+        // Last, so the pty-status sendReplay just sent cannot clear it.
+        if (missingWorkingDir) {
+          this.send(ws, {
+            type: 'pty-error',
+            message: 'No working directory configured. Set a project folder in instance settings.',
+            instanceId: newInstanceId,
+          });
+        }
         break;
       }
 
