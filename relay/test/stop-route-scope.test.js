@@ -6,20 +6,23 @@ const { spawn } = require('node:child_process');
 
 // POST /api/pty/stop is only reachable over HTTP - the express app is not
 // exported and importing src/index.js would start listening - so this drives a
-// real relay process. It is the only way to prove the ROUTE records the user's
-// intent in the registry; a unit test on recordUserStop() alone would still
-// pass with the route left unfixed.
+// real relay process. No PTY is ever started, so no CLI binary is needed.
 //
-// The scenario is the one from the review, compressed with MAX_INSTANCES=2 so
-// no 30-minute idle timer is involved:
-//   1. instance A is created and the user stops it
-//   2. the app is closed (no ws clients, so A has no listeners)
-//   3. housekeeping evicts A - here via the instance cap rather than the idle
-//      sweep, which is the same non-user-initiated remove()
-//   4. the user comes back: get() builds a brand-new manager for A, which must
-//      still report stoppedByUser, or set-instance restarts the session the
-//      user deliberately ended.
-// No PTY is ever started, so no CLI binary is needed.
+// This pins the SCOPE of a stop, which is deliberately bounded: "the user
+// stopped this" lives on the PtyManager object and nowhere else, so it lasts
+// exactly as long as that manager does. Both halves are asserted here, because
+// the second one is a tradeoff someone will otherwise mistake for a bug:
+//
+//   1. while the manager is alive, the stop holds - a later status read still
+//      reports stoppedByUser, so set-instance declines to auto-start.
+//   2. once housekeeping evicts the manager (here via the MAX_INSTANCES=2 cap,
+//      the same remove() the 30-minute idle sweep makes), the stop is gone and
+//      the id is free to auto-start again.
+//
+// An earlier revision tried to make (2) untrue with a registry-level map of
+// stopped ids. It was rewritten four times and each bound on it broke
+// something else, so it was removed; the app compensates by not reconnecting a
+// tab whose manager it just deleted.
 
 const RELAY_DIR = path.join(__dirname, '..');
 
@@ -71,7 +74,7 @@ async function startRelay(port) {
   }
 }
 
-test('POST /api/pty/stop survives eviction of the instance it stopped', async () => {
+test('a stop holds while its manager lives, and is forgotten when it is evicted', async () => {
   const port = await freePort();
   const base = `http://127.0.0.1:${port}`;
   const relay = await startRelay(port);
@@ -79,11 +82,12 @@ test('POST /api/pty/stop survives eviction of the instance it stopped', async ()
   try {
     const status = (id) => fetch(`${base}/api/pty/status?instanceId=${id}`).then((r) => r.json());
 
-    // 1. The instance exists and has not been stopped by anyone.
+    // The instance exists and has not been stopped by anyone.
     const before = await status('route-a');
     assert.equal(before.stoppedByUser, false);
 
-    // 2. The user taps Stop.
+    // The user taps Stop. The route does not remove the instance, so the
+    // manager - and the flag on it - survives.
     const stopped = await fetch(`${base}/api/pty/stop`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -92,20 +96,26 @@ test('POST /api/pty/stop survives eviction of the instance it stopped', async ()
     assert.equal(stopped.success, true);
     assert.equal(stopped.status.stoppedByUser, true, 'the live manager records the stop');
 
-    // 3. Housekeeping evicts route-a: creating two more instances trips the
-    //    MAX_INSTANCES=2 cap, and route-a is the least recently used stopped
-    //    instance with no listeners. This is remove() WITHOUT userInitiated -
-    //    the same call cleanupIdleInstances() makes after 30 idle minutes.
+    // Re-reading it does not clear it: this is what makes a reconnect's
+    // set-instance decline to auto-start.
+    const stillStopped = await status('route-a');
+    assert.equal(stillStopped.stoppedByUser, true, 'the stop holds while the manager lives');
+
+    // Housekeeping evicts route-a: creating two more instances trips the
+    // MAX_INSTANCES=2 cap, and route-a is the least recently used stopped
+    // instance with no listeners - the same remove() cleanupIdleInstances()
+    // makes after 30 idle minutes.
     await status('route-b');
     await status('route-c');
 
-    // 4. The user comes back to route-a. get() builds a fresh manager, which
-    //    must still decline to auto-start.
-    const after = await status('route-a');
+    // The manager is gone, so the stop is gone with it. This is the accepted
+    // bound, not an oversight: the app does not reconnect a tab whose manager
+    // it deleted, so nothing re-sends set-instance to exploit it.
+    const afterEviction = await status('route-a');
     assert.equal(
-      after.stoppedByUser,
-      true,
-      'a fresh manager for a stopped id must still decline to auto-start'
+      afterEviction.stoppedByUser,
+      false,
+      'evicting the manager forgets the stop - the bound this test exists to pin'
     );
   } finally {
     relay.kill('SIGKILL');

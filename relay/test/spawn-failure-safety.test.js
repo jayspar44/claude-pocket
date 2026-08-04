@@ -118,3 +118,39 @@ test('runDeferredStartFallback() does nothing if the manager is no longer idle+d
   assert.equal(pm.status, 'stopped');
   ptyRegistry.remove(id);
 });
+
+// The same hazard one line earlier. runDeferredStartFallback() begins by
+// resolving the manager, and ptyRegistry.get() throws when the instance cap is
+// reached and no idle instance can be evicted - a state a busy relay reaches
+// on its own, and one the 3s timer is especially likely to meet, because in
+// the interval since set-instance other clients have had time to fill the
+// registry. A throw from that call is just as unhandled as one from start():
+// same bare setTimeout, same dead relay. It has to be inside the try.
+test('runDeferredStartFallback() contains a throw from ptyRegistry.get(), not just from start()', async () => {
+  const id = 'spawn-fail-ws-3';
+  const original = ptyRegistry.get;
+  ptyRegistry.get = () => { throw new Error('Maximum instances (10) reached'); };
+
+  let unhandled = null;
+  const onUnhandled = (err) => { unhandled = err; };
+  process.on('unhandledRejection', onUnhandled);
+
+  const ws = fakeWs();
+  try {
+    // No assert.rejects: the method must resolve, because the real caller is a
+    // setTimeout with nothing to catch what it returns.
+    await handler_runFallback(ws, id);
+    await new Promise((r) => setImmediate(r));
+  } finally {
+    ptyRegistry.get = original;
+    process.off('unhandledRejection', onUnhandled);
+  }
+
+  assert.equal(unhandled, null, 'a cap rejection must not escape the fallback');
+  assert.equal(ws._deferredStartTimer, null, 'the timer handle must still be cleared');
+});
+
+function handler_runFallback(ws, id) {
+  const handler = Object.create(WebSocketHandler.prototype);
+  return handler.runDeferredStartFallback(ws, id, 80, 24, fakeCtx());
+}

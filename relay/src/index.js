@@ -104,10 +104,6 @@ app.post('/api/instances', async (req, res) => {
     // throws 'PTY start already in progress' - a 500 for what is really
     // "already on its way".
     if (autoStart && !ptyManager.isBusy && workingDir) {
-      // Deliberate start requested by the caller: forget any earlier
-      // user-initiated stop so it doesn't re-seed stoppedByUser on a future
-      // remove()+get() cycle.
-      ptyRegistry.clearUserStop(instanceId);
       await ptyManager.start(workingDir);
     }
 
@@ -124,10 +120,11 @@ app.post('/api/instances', async (req, res) => {
 app.delete('/api/instances/:instanceId', (req, res) => {
   try {
     const { instanceId } = req.params;
-    // userInitiated: this route only exists as a direct user action, so the
-    // registry must remember it - otherwise the next set-instance for this
-    // id silently restarts the session the user just stopped.
-    const removed = ptyRegistry.remove(instanceId, { userInitiated: true });
+    // Destroys the manager, so the stop does NOT survive: the next
+    // set-instance for this id builds a fresh manager willing to auto-start.
+    // The app therefore leaves a tab offline after this call rather than
+    // reconnecting it (see Settings.jsx).
+    const removed = ptyRegistry.remove(instanceId);
 
     if (!removed) {
       return res.status(404).json({ error: 'Instance not found' });
@@ -146,8 +143,9 @@ app.delete('/api/instances', (req, res) => {
     const removed = [];
 
     for (const instance of instances) {
-      // userInitiated: same reasoning as DELETE /api/instances/:instanceId.
-      if (ptyRegistry.remove(instance.instanceId, { userInitiated: true })) {
+      // Same as DELETE /api/instances/:instanceId: the removal destroys the
+      // manager, so nothing here makes a stop outlive it.
+      if (ptyRegistry.remove(instance.instanceId)) {
         removed.push(instance.instanceId);
       }
     }
@@ -213,8 +211,6 @@ app.post('/api/pty/restart', async (req, res) => {
 
     ptyManager.stop();
     ptyManager.clearBuffer();
-    // Deliberate restart: forget any earlier user-initiated stop.
-    ptyRegistry.clearUserStop(instanceId);
     await ptyManager.start(restartDir);
     res.json({ success: true, status: ptyManager.getStatus() });
   } catch (error) {
@@ -231,10 +227,8 @@ app.post('/api/pty/start', async (req, res) => {
     // 'starting' is busy but not yet running: a second Start tapped during
     // the CLI self-update window would otherwise reach start() and hit
     // 'PTY start already in progress' as an HTTP 500. Report the in-flight
-    // start as success so a double tap is a no-op for the user, and still
-    // clear the remembered stop - this is a deliberate start either way.
+    // start as success so a double tap is a no-op for the user.
     if (ptyManager.status === 'starting') {
-      ptyRegistry.clearUserStop(instanceId);
       return res.json({ success: true, status: ptyManager.getStatus(), workingDir: ptyManager.currentWorkingDir });
     }
 
@@ -246,8 +240,6 @@ app.post('/api/pty/start', async (req, res) => {
       return res.status(400).json({ error: 'workingDir required for new instance' });
     }
 
-    // Deliberate start: forget any earlier user-initiated stop.
-    ptyRegistry.clearUserStop(instanceId);
     await ptyManager.start(workingDir || ptyManager.currentWorkingDir);
     res.json({ success: true, status: ptyManager.getStatus(), workingDir: ptyManager.currentWorkingDir });
   } catch (error) {
@@ -261,12 +253,12 @@ app.post('/api/pty/stop', (req, res) => {
     const { instanceId = DEFAULT_INSTANCE_ID, clearBuffer = true } = req.body || {};
     const ptyManager = ptyRegistry.get(instanceId);
 
+    // stop() sets stoppedByUser on the manager, and the manager survives this
+    // route - that flag is the whole mechanism. It lasts as long as the object
+    // does: idle cleanup evicts a stopped, listener-less instance after 30
+    // minutes, and a relay restart clears everything, after which this id is
+    // free to auto-start again.
     ptyManager.stop();
-    // stop() marks the manager object, but that flag dies with it: idle
-    // cleanup evicts a stopped, listener-less instance after 30 minutes, and
-    // the next get() would build a manager willing to auto-start again.
-    // Record the intent in the registry so the stop outlives the object.
-    ptyRegistry.recordUserStop(instanceId);
     if (clearBuffer) {
       ptyManager.clearBuffer();
     }

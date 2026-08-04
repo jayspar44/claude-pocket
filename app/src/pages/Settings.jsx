@@ -4,8 +4,6 @@ import { ChevronLeft, Server, Type, Trash2, Info, Check, FileX, Bell, RotateCcw,
 import { useRelay } from '../hooks/useRelay';
 import { useInstance, normalizeCliType } from '../contexts/InstanceContext';
 import { isLiveConnectionState } from '../services/InstanceConnection';
-import { instancesToReconnectAfterStopAll } from '../services/stopAll';
-import { shouldReconnectAfterStopInstance } from '../services/stopInstance';
 import { healthApi, filesApi, instancesApi } from '../api/relay-api';
 import { version } from '../../../version.json';
 import { versionCode } from '../../android-version.json';
@@ -215,7 +213,7 @@ export default function Settings() {
   }, []);
 
   const handleStopAllInstances = useCallback(async () => {
-    if (!confirm('Stop all CLI instances on the relay?\n\nThis terminates every running session and marks them stopped, so no tab will restart automatically when you next open it — tap Start on each instance you want back.')) {
+    if (!confirm('Stop all CLI instances on the relay?\n\nThis terminates every running session and leaves your tabs offline. Selecting a tab reconnects it and starts its session again.')) {
       return;
     }
     setStoppingAll(true);
@@ -230,23 +228,21 @@ export default function Settings() {
       // bring back every CLI the user just stopped.
       disconnectAllInstances('user');
       const response = await instancesApi.deleteAll();
-      // Put the sockets back before saying so: the confirm above promises the
-      // user can "tap Start on each instance you want back", and that control
-      // only renders while the tab is connected.
-      //
-      // Only the tabs the relay actually stopped, though. Those ids carry a
-      // stop record, so their reconnect's set-instance declines to auto-start;
-      // an id the relay never held has no record, and reconnecting it arms a
-      // deferred start - spawning a CLI as a direct consequence of the dialog
-      // that promised nothing would restart. See instancesToReconnectAfterStopAll.
-      instancesToReconnectAfterStopAll(wasLive, response.data?.removed)
-        .forEach((id) => connectInstance(id));
+      // Deliberately no reconnect on success. DELETE /api/instances destroys
+      // each PtyManager, and "the user stopped this" lives on that object -
+      // so for these ids the relay now holds nothing that would decline a
+      // start. Any socket we reopened would re-send set-instance, arm a
+      // deferred start, and spawn the CLI the dialog just promised to stop.
+      // The tabs stay offline until the user selects one, which is explicit
+      // intent and the state the dialog describes.
       alert(`Stopped ${response.data.count} instance(s)`);
     } catch (error) {
       console.error('Failed to stop instances:', error);
       // The CLIs are still running, so undo the intent. Leaving it in place
       // strands them: 'user' is sticky, so neither the foreground handler nor
-      // the mount effect reconnects, and the tabs sit Offline for good.
+      // the mount effect reconnects, and the tabs sit Offline for good. The
+      // reconnect is safe here precisely because nothing was removed: each
+      // set-instance finds its existing manager and starts nothing.
       wasLive.forEach((id) => connectInstance(id));
       alert(error.response?.data?.error || 'Failed to stop instances');
     }
@@ -255,33 +251,29 @@ export default function Settings() {
 
   const handleStopInstance = useCallback(async (instanceId) => {
     setStoppingInstance(instanceId);
-    // Same snapshot as above, and for a sharper reason: this button renders for
-    // every SERVER instance, including ones whose tab is offline or orphaned.
-    // Restoring unconditionally would open a socket the user did not have, and
-    // that socket re-sends set-instance - which arms a deferred start and
-    // respawns the very CLI the user had stopped.
+    // Captured before disconnecting, because afterwards the tab reads as
+    // offline. Only used on the failure path: this button renders for every
+    // SERVER instance, including ones whose tab is offline or orphaned, so
+    // reconnecting unconditionally would open a socket the user did not have.
     const wasLive = isLiveConnectionState(getInstanceState(instanceId).connectionState);
     try {
       disconnectInstance(instanceId);
-      const response = await instancesApi.delete(instanceId);
+      await instancesApi.delete(instanceId);
       // Re-fetch will happen via the interval.
-      // A tab that was live comes back online, exactly as on the failure path
-      // below and for the same reason - the sticky 'user' reason means nothing
-      // else will reconnect it, and the Start control needs a connection. The
-      // stop itself survives: the removal was userInitiated, so the manager
-      // the next set-instance creates starts out declining to auto-start.
-      if (shouldReconnectAfterStopInstance(wasLive, response?.status)) {
-        connectInstance(instanceId);
-      }
+      // Deliberately no reconnect on success, for the same reason as Stop All:
+      // the delete destroyed the PtyManager, and the stop lived on it. A
+      // reconnect would re-send set-instance for an id the relay now holds
+      // nothing for, arm a deferred start, and respawn the CLI just stopped.
+      // The tab stays offline until the user selects it.
     } catch (error) {
       console.error('Failed to stop instance:', error);
       // The CLI survived the failed stop, so a tab that WAS live must not be
-      // left holding a sticky 'user' disconnect it can never recover from -
-      // unless the relay answered 404, which means it held no manager for this
-      // id and recorded no stop, and reconnecting would arm a deferred start
-      // and spawn the CLI the user asked to be rid of. See
-      // shouldReconnectAfterStopInstance.
-      if (shouldReconnectAfterStopInstance(wasLive, error.response?.status)) {
+      // left holding a sticky 'user' disconnect it can never recover from.
+      // Safe here because nothing was removed: set-instance finds the existing
+      // manager and starts nothing. A 404 needs no special case - it means the
+      // relay held no manager, so there was no CLI to leave running and
+      // wasLive is the only question that matters.
+      if (wasLive) {
         connectInstance(instanceId);
       }
       alert(error.response?.data?.error || 'Failed to stop instance');
@@ -723,8 +715,8 @@ export default function Settings() {
             <span>{stoppingAll ? 'Stopping...' : 'Stop All Server Instances'}</span>
           </button>
           <p className="text-xs text-gray-500">
-            Stops all CLI PTY processes on the relay server. Stopped sessions do not
-            auto-restart — tap Start on an instance to bring it back.
+            Stops all CLI PTY processes on the relay server and takes your tabs
+            offline. Selecting a tab reconnects it and starts its session again.
           </p>
 
           <button

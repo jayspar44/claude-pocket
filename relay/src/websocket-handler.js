@@ -266,10 +266,6 @@ class WebSocketHandler {
         ptyManager.stop();
         ptyManager.clearBuffer();
         ptyManager.resetRestartCounter();
-        // Deliberate restart: forget any earlier user-initiated stop so a
-        // later remove()+get() cycle for this id doesn't re-seed
-        // stoppedByUser from a decision the user has since reversed.
-        ptyRegistry.clearUserStop(instanceId);
         await ptyManager.start(workingDir, restartCols, restartRows);
         this.send(ws, { type: 'pty-status', ...ptyManager.getStatus() });
         break;
@@ -356,13 +352,12 @@ class WebSocketHandler {
       && !ptyManager.currentWorkingDir;
 
     // Set by the stoppedByUser branch below, reported in the same place and
-    // for the same reason. A remembered stop is honoured indefinitely and is
-    // keyed on the instance id alone, and 'default' is the one id every
-    // install shares - so the client meeting this decline is not necessarily
-    // the one that made the stop. A reinstall, a Reset App Data, or the app
-    // on a second phone all bootstrap a fresh 'default' tab, and without this
-    // they get an idle terminal, no explanation, and no hint that the one
-    // control that fixes it (Start, which clears the record) is a menu away.
+    // for the same reason. The flag lives on this manager and is keyed on the
+    // instance id alone, and 'default' is the one id every install shares - so
+    // the client meeting this decline is not necessarily the one that made the
+    // stop. A second phone's app points at the same 'default' manager, and
+    // without this it gets an idle terminal, no explanation, and no hint that
+    // the one control that fixes it (Start) is a menu away.
     let declinedForUserStop = false;
 
     // userStart is set only by the app's Start button, never by an
@@ -371,7 +366,6 @@ class WebSocketHandler {
     // user's own Start; with it, reconnects still decline to auto-start.
     if (message.userStart) {
       ptyManager.stoppedByUser = false;
-      ptyRegistry.clearUserStop(newInstanceId);
     }
 
     // Auto-start PTY if not running but we have a working directory
@@ -408,8 +402,11 @@ class WebSocketHandler {
         { clientId: ws.clientId, instanceId: newInstanceId },
         'Not auto-starting: session was explicitly stopped'
       );
+      // No pty-status here: sendReplay() below ends with one, and nothing
+      // between the two changes the status (the instance is stopped, so
+      // neither the isRunning resize nor the 'starting' dimension write
+      // applies). Sending it twice is two identical frames for one event.
       declinedForUserStop = true;
-      this.send(ws, { type: 'pty-status', ...ptyManager.getStatus() });
     } else if (workingDir && ptyManager.currentWorkingDir !== workingDir) {
       // Store pending working dir for next restart
       ptyManager.pendingWorkingDir = workingDir;
@@ -463,20 +460,24 @@ class WebSocketHandler {
   // killing every other instance's session along with it.
   async runDeferredStartFallback(ws, newInstanceId, clientCols, clientRows, ctx) {
     ws._deferredStartTimer = null;
-    const pm = ptyRegistry.get(newInstanceId);
-    // stoppedByUser guard: same reasoning as the resize handler above - an
-    // explicit stop between set-instance and this timer must win.
-    if (!pm.isBusy && !pm.stoppedByUser && pm.deferredStartDir) {
-      logger.info({ instanceId: newInstanceId, clientCols, clientRows }, 'Deferred start fallback: no resize received, starting with set-instance dimensions');
-      try {
+    // The whole body is inside the try, ptyRegistry.get() included: get()
+    // throws when the instance cap is reached and no idle instance can be
+    // evicted, and a throw out here is just as unhandled as one from
+    // pm.start() - same bare setTimeout, same dead relay.
+    try {
+      const pm = ptyRegistry.get(newInstanceId);
+      // stoppedByUser guard: same reasoning as the resize handler above - an
+      // explicit stop between set-instance and this timer must win.
+      if (!pm.isBusy && !pm.stoppedByUser && pm.deferredStartDir) {
+        logger.info({ instanceId: newInstanceId, clientCols, clientRows }, 'Deferred start fallback: no resize received, starting with set-instance dimensions');
         await pm.start(pm.deferredStartDir, clientCols, clientRows);
         ctx.sendReplay(pm, newInstanceId);
-      } catch (error) {
-        // pm.start() already logs the failure and broadcasts a pty-error to
-        // any connected listeners; this catch exists only to stop the
-        // rejection from propagating unhandled.
-        logger.error({ instanceId: newInstanceId, error: error.message }, 'Deferred start fallback failed');
       }
+    } catch (error) {
+      // pm.start() already logs its own failures and broadcasts a pty-error
+      // to any connected listeners; this catch exists only to stop the
+      // rejection from propagating unhandled.
+      logger.error({ instanceId: newInstanceId, error: error.message }, 'Deferred start fallback failed');
     }
   }
 

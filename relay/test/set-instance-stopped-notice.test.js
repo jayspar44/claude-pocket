@@ -3,16 +3,15 @@ const assert = require('node:assert/strict');
 const ptyRegistry = require('../src/pty-registry');
 const WebSocketHandler = require('../src/websocket-handler');
 
-// A remembered stop is honoured indefinitely and keyed on the instance id
-// alone. Every generated id is unique per tab, but the bootstrap tab uses the
-// literal 'default', which every install pointed at this relay shares. So the
-// client that meets the decline need not be the one that made the stop: a
-// reinstall, Settings -> Reset App Data, or the app on a second phone all
-// bootstrap a fresh 'default' tab and meet a record they know nothing about.
-// The relay keeps declining - that is the decision working as intended - but it
-// must say so, because an idle terminal with no explanation reads as a broken
-// relay, and the control that fixes it (Start, which clears the record) is
-// behind a menu.
+// A stop is honoured for as long as its PtyManager lives, and is keyed on the
+// instance id alone. Every generated id is unique per tab, but the bootstrap
+// tab uses the literal 'default', which every install pointed at this relay
+// shares. So the client that meets the decline need not be the one that made
+// the stop: the app on a second phone bootstraps a fresh 'default' tab and
+// meets a manager it knows nothing about. The relay keeps declining - that is
+// the decision working as intended - but it must say so, because an idle
+// terminal with no explanation reads as a broken relay, and the control that
+// fixes it (Start, which clears the flag) is behind a menu.
 //
 // The ordering matters as much as the message: the client clears ptyError on
 // any pty-status, and sendReplay ends with one, so a notice sent before the
@@ -37,13 +36,13 @@ function recorder() {
   return { sent, ws, ctx };
 }
 
-test('a set-instance declined by a remembered stop tells the client why, after the replay', async () => {
+test('a set-instance declined by a user stop tells the client why, after the replay', async () => {
   const id = 'default';
-  // The exact production sequence: the user stops the default session, the
-  // manager is gone, and much later a client - not necessarily the same one -
-  // connects a fresh 'default' tab.
-  ptyRegistry.get(id, '/tmp', 'claude');
-  ptyRegistry.remove(id, { userInitiated: true });
+  // The exact production sequence: the user stops the default session via
+  // POST /api/pty/stop, which leaves the manager in place carrying the flag,
+  // and later a client - not necessarily the same one - connects a 'default'
+  // tab and meets it.
+  ptyRegistry.get(id, '/tmp', 'claude').stop();
 
   const { sent, ws, ctx } = recorder();
   const handler = Object.create(WebSocketHandler.prototype);
@@ -62,8 +61,12 @@ test('a set-instance declined by a remembered stop tells the client why, after t
   assert.equal(sent[sent.length - 1].type, 'pty-error',
     'a pty-status after the notice would clear it on the client');
 
+  // One decline is one pty-status. The branch used to send its own on top of
+  // the one sendReplay ends with: two identical frames for a single event.
+  assert.equal(sent.filter((m) => m.type === 'pty-status').length, 1,
+    'the declined handshake must send exactly one pty-status');
+
   ptyRegistry.remove(id);
-  ptyRegistry.clearUserStop(id);
 });
 
 test('an ordinary set-instance that arms a start sends no such notice', async () => {

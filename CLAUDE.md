@@ -255,6 +255,15 @@ npm run build          # Production build
 thing that clears a stopped session's `stoppedByUser` on the relay. An auto-reconnect handshake must
 never carry it, or "stop means stopped" breaks and stopped CLIs resurrect on the next network blip.
 
+**A stop lives on the `PtyManager` object and lasts exactly as long as it does.** There is no
+registry-level memory of stopped ids — an earlier attempt at one was rewritten four times and
+removed. Two consequences the code depends on:
+
+| Stop path | Manager | Stop survives? | App behaviour after |
+|-----------|---------|----------------|---------------------|
+| `POST /api/pty/stop` (InstanceManager) | kept | yes, until relay restart or 30-min idle eviction | reconnects the tab — set-instance finds the manager and declines to auto-start |
+| `DELETE /api/instances[/:id]` (Settings) | destroyed | no | must **not** reconnect — a reconnect arms a deferred start and respawns the CLI |
+
 **The client completes its handshake on the relay's `pty-status` reply, not on socket open.** A
 socket that opens but whose `set-instance` fails is not connected. Every `set-instance` path must
 therefore answer: a `pty-status` when accepted, or a `pty-error` carrying `handshakeFailed: true`
