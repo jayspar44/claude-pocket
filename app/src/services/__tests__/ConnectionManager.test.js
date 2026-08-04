@@ -7,6 +7,7 @@ function fakeConn(instanceId) {
     state: 'connected',
     disconnectReason: null,
     connect: vi.fn(),
+    resume: vi.fn(),
     disconnect: vi.fn(function (r) { this.state = 'disconnected'; this.disconnectReason = r; }),
     send: vi.fn(() => true),
     ping: vi.fn(),
@@ -268,14 +269,14 @@ describe('ConnectionManager', () => {
       expect(h.clearedIds).toEqual([h.intervals[0].id]);
     });
 
-    it('arms a fresh interval when a connection comes back after reconnectAll', () => {
+    it('arms a fresh interval when a connection comes back after resumeAll', () => {
       const h = makeHeartbeatHarness();
       h.mgr.connect('i1', 'ws://r/ws');
       h.mgr.disconnect('i1', 'user');
       const c = h.mgr.get('i1');
       c.disconnectReason = 'dropped';           // an involuntary loss, not the user
-      c.connect.mockImplementation(function () { this.state = 'connecting'; });
-      h.mgr.reconnectAll();
+      c.resume.mockImplementation(function () { this.state = 'connecting'; });
+      h.mgr.resumeAll();
       expect(liveIntervals(h)).toHaveLength(1);
     });
 
@@ -289,12 +290,17 @@ describe('ConnectionManager', () => {
       expect(liveIntervals(h)).toHaveLength(1);
     });
   });
-  // A resume must revive every connection, not just the active tab's. Two tabs
+  // A resume must reach every connection, not just the active tab's. Two tabs
   // backgrounded through a 40s outage both drain their ladders; reviving only the
   // active one leaves the other with no output and no task-complete notification
   // until the user happens to tap it.
-  describe('reconnectAll', () => {
-    it('revives every connection shouldConnect allows, and only those', () => {
+  //
+  // What to DO per connection is InstanceConnection.resume()'s decision, not the
+  // manager's - the manager used to gate on shouldConnect here, which meant a
+  // CONNECTED-but-dead socket was skipped entirely. These tests pin the fan-out;
+  // the per-state rules are tested on the connection.
+  describe('resumeAll', () => {
+    it('resumes every connection, including ones that look healthy', () => {
       const h = makeHeartbeatHarness();
       const dropped = h.mgr.ensure('i1', 'ws://r/ws');
       dropped.state = 'disconnected';
@@ -307,26 +313,19 @@ describe('ConnectionManager', () => {
       backingOff.disconnectReason = 'dropped';
       const healthy = h.mgr.ensure('i4', 'ws://r/ws');   // fakeConn starts connected
 
-      h.mgr.reconnectAll();
+      h.mgr.resumeAll();
 
-      expect(dropped.connect).toHaveBeenCalledTimes(1);
-      expect(backingOff.connect).toHaveBeenCalledTimes(1);
-      expect(stopped.connect).not.toHaveBeenCalled();
-      expect(healthy.connect).not.toHaveBeenCalled();
-    });
-
-    it('carries no user intent, so an idle-swept session stays down', () => {
-      const h = makeHeartbeatHarness();
-      const swept = h.mgr.ensure('i1', 'ws://r/ws');
-      swept.state = 'disconnected';
-      swept.disconnectReason = 'idle';
-      h.mgr.reconnectAll();
-      expect(swept.connect).not.toHaveBeenCalled();
+      // Including the stopped one: resume() itself declines to reconnect a
+      // sticky disconnect, and including the healthy one, whose socket may be
+      // dead without having said so.
+      [dropped, stopped, backingOff, healthy].forEach((c) => {
+        expect(c.resume).toHaveBeenCalledTimes(1);
+      });
     });
 
     it('is a no-op with no connections', () => {
       const h = makeHeartbeatHarness();
-      expect(() => h.mgr.reconnectAll()).not.toThrow();
+      expect(() => h.mgr.resumeAll()).not.toThrow();
       expect(h.intervals).toHaveLength(0);
     });
   });

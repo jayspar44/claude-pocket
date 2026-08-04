@@ -495,7 +495,7 @@ export function InstanceProvider({ children }) {
     // drained its ladder during the outage stays dark otherwise - no output and
     // no task-complete notification - until the user happens to tap it.
     const reconnectIfNeeded = () => {
-      managerRef.current?.reconnectAll();
+      managerRef.current?.resumeAll();
       // The active tab may have no connection object at all yet, which the
       // manager's map cannot know about.
       const instanceId = activeInstanceIdRef.current;

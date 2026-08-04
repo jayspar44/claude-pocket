@@ -74,6 +74,29 @@ export const CONNECTION_TIMEOUT = 10000;
 export const HEARTBEAT_TIMEOUT = 5000;
 
 /**
+ * How long a resume probe waits for a pong before declaring the socket dead.
+ *
+ * Much shorter than HEARTBEAT_TIMEOUT because the situation is different: the
+ * heartbeat is a background health check on a connection with no reason to be
+ * suspect, while a resume follows a period where the socket was frozen and may
+ * have been killed without a close event ever being delivered. The user is
+ * looking at the screen waiting for it, so the cost of waiting is visible and
+ * the cost of being wrong is one extra reconnect.
+ */
+export const RESUME_PROBE_TIMEOUT = 2000;
+
+/**
+ * A connect younger than this when the page resumes is left alone.
+ *
+ * Without it, two visibilitychange events in quick succession (or a resume that
+ * lands moments after a legitimate connect started) would tear down an in-flight
+ * socket and reopen it every time, so a connect might never get the ~100-300ms
+ * it needs to finish. Anything older than this has been pending across the
+ * background and is the stalled case worth replacing.
+ */
+export const RESUME_STALE_CONNECT_MS = 1000;
+
+/**
  * Owns exactly one WebSocket for one instance, plus every timer belonging to it.
  *
  * The object IS the reference to its socket. Nothing keys off a map entry that
@@ -119,6 +142,10 @@ export class InstanceConnection {
     this.lastActivityAt = clock();
     this.ptyProcessing = false;
     this.attempts = 0;
+    // When the current socket was opened, read only by resume() and only while
+    // CONNECTING. 0 means no connect has ever started, which is not a state
+    // resume() reads this in.
+    this._openedAt = 0;
     this._connectTimer = null;
     this._reconnectTimer = null;
     this._pongTimer = null;
@@ -176,6 +203,7 @@ export class InstanceConnection {
     this.disconnectReason = null;
 
     this._setState(S.CONNECTING);
+    this._openedAt = this.clock();
 
     let ws;
     try {
@@ -272,7 +300,9 @@ export class InstanceConnection {
     }
   }
 
-  ping() {
+  // timeoutMs is the pong deadline. The default is the background health check;
+  // resume() passes a much shorter one - see RESUME_PROBE_TIMEOUT.
+  ping(timeoutMs = HEARTBEAT_TIMEOUT) {
     if (this.state !== S.CONNECTED) return;
     // A ping that cannot be sent is evidence the socket is gone. Returning here
     // arms no pong timer, so nothing else would ever notice: shouldConnect
@@ -285,7 +315,53 @@ export class InstanceConnection {
     this._pongTimer = this.setTimer(() => {
       this._pongTimer = null;
       this._drop('Heartbeat timeout');
-    }, HEARTBEAT_TIMEOUT);
+    }, timeoutMs);
+  }
+
+  /**
+   * The page has just come back to the foreground.
+   *
+   * This exists because readyState lies exactly when it matters. A socket
+   * killed while the page was frozen often never delivers a close event, so it
+   * still reports OPEN or CONNECTING - which means isSocketGone() is false,
+   * shouldConnect() says "leave it alone", and nothing touches the connection.
+   * Observed cost of relying on the ordinary machinery to notice: the relay saw
+   * no attempt at all for 11 seconds after a resume, because the only thing
+   * that could rescue a stalled CONNECTING socket was its 10s connect timeout.
+   * The user sees "Reconnecting" doing nothing and taps the tab to force it.
+   *
+   * So resume() does not ask the socket whether it is alive; it uses what the
+   * lifecycle event already tells us, per state:
+   *
+   * - CONNECTED: probe. The socket may well be fine, and recycling every
+   *   healthy connection on every glance at another browser tab would cost a
+   *   reconnect and a full replay each time. A ping with a 2s deadline settles
+   *   it without disturbing a live one.
+   * - CONNECTING: a connect that has been pending across a background is not
+   *   going to complete - it is the stalled case above. Replace it outright
+   *   rather than waiting out the connect timeout. Fresh connects are exempt
+   *   (RESUME_STALE_CONNECT_MS) so repeated resumes cannot starve one.
+   * - anything else: defer to shouldConnect, which cancels a pending ladder
+   *   rung and reopens at once, and still leaves a user-stopped session alone.
+   */
+  resume() {
+    if (this.state === S.DESTROYED) return;
+
+    if (this.state === S.CONNECTED) {
+      this.ping(RESUME_PROBE_TIMEOUT);
+      return;
+    }
+
+    if (this.state === S.CONNECTING) {
+      if (this.clock() - this._openedAt < RESUME_STALE_CONNECT_MS) return;
+      this._clearAllTimers();
+      this._teardownSocket();
+      this.attempts = 0;
+      this._open();
+      return;
+    }
+
+    if (shouldConnect(this)) this.connect();
   }
 
   // Pure over what this connection itself observes. The two view-related idle

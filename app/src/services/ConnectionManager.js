@@ -1,4 +1,4 @@
-import { InstanceConnection, isLiveConnectionState, shouldConnect } from './InstanceConnection';
+import { InstanceConnection, isLiveConnectionState } from './InstanceConnection';
 
 export const HEARTBEAT_INTERVAL = 25000;
 export const IDLE_DISCONNECT_MS = 3600000;   // 1 hour
@@ -48,15 +48,20 @@ export class ConnectionManager {
     this._syncHeartbeat();
   }
 
+  // The page has come back to the foreground.
+  //
   // Every connection the app has opened gets its own decision, not just the
   // active one. Two tabs backgrounded through a network outage both drain their
   // ladders; reviving only the active tab leaves the other silent - no output and
   // no task-complete notification - until the user happens to tap it. Carries no
   // user intent, so a session the user stopped stays stopped.
-  reconnectAll() {
-    this.connections.forEach((conn) => {
-      if (shouldConnect(conn)) conn.connect();
-    });
+  //
+  // Per-connection handling lives in InstanceConnection.resume(), which does not
+  // trust readyState: a socket killed while the page was frozen usually never
+  // delivers a close event, so asking it whether it is alive is how a resume
+  // ends up stalling for the length of a connect timeout.
+  resumeAll() {
+    this.connections.forEach((conn) => conn.resume());
     this._syncHeartbeat();
   }
 
