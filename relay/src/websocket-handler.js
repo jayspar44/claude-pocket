@@ -335,7 +335,25 @@ class WebSocketHandler {
     const clientCols = message.cols || config.pty.cols;
     const clientRows = message.rows || config.pty.rows;
 
-    logger.info({ clientId: ws.clientId, oldInstanceId: ws.instanceId, newInstanceId, workingDir, cliType, clientCols, clientRows }, 'Client switching instance');
+    // recoveryMs/recoveryAttempts are client diagnostics carried on the
+    // handshake. Nothing branches on them - they exist because recovery
+    // latency is otherwise invisible here: the relay only learns a client
+    // exists once a socket completes, so every attempt that fails before the
+    // upgrade leaves no trace on either side. Together they separate "the
+    // client spent that time retrying" (attempts > 0) from "the client only
+    // started trying just now" (recoveryMs ~ 0), which is the difference
+    // between a backoff problem and a resume-handler problem.
+    logger.info({
+      clientId: ws.clientId,
+      oldInstanceId: ws.instanceId,
+      newInstanceId,
+      workingDir,
+      cliType,
+      clientCols,
+      clientRows,
+      recoveryMs: message.recoveryMs,
+      recoveryAttempts: message.recoveryAttempts,
+    }, 'Client switching instance');
 
     ws.instanceId = newInstanceId;
     ws.cliType = cliType;

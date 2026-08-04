@@ -146,6 +146,14 @@ export class InstanceConnection {
     // CONNECTING. 0 means no connect has ever started, which is not a state
     // resume() reads this in.
     this._openedAt = 0;
+    // When the current recovery began: the first attempt after the connection
+    // was last live. Reported to the relay on the handshake alongside the
+    // attempt count, so "how long did this tab take to come back, and was the
+    // time spent trying or waiting?" is answerable from the relay log alone.
+    // Recovery latency is otherwise invisible server-side - the relay only
+    // learns a client exists once a socket completes, so every attempt that
+    // fails before the upgrade leaves no trace anywhere.
+    this._recoveryStartedAt = 0;
     this._connectTimer = null;
     this._reconnectTimer = null;
     this._pongTimer = null;
@@ -204,6 +212,7 @@ export class InstanceConnection {
 
     this._setState(S.CONNECTING);
     this._openedAt = this.clock();
+    if (this._recoveryStartedAt === 0) this._recoveryStartedAt = this._openedAt;
 
     let ws;
     try {
@@ -227,6 +236,9 @@ export class InstanceConnection {
         ...this.getHandshakePayload(),
         type: 'set-instance',
         instanceId: this.instanceId,
+        // Diagnostics, not protocol: the relay logs these and ignores them.
+        recoveryMs: this._recoveryStartedAt ? this.clock() - this._recoveryStartedAt : 0,
+        recoveryAttempts: this.attempts,
       }));
     };
 
@@ -279,6 +291,8 @@ export class InstanceConnection {
     if (message.type === 'pty-status' && this.state === S.CONNECTING) {
       this._clearConnectTimer();
       this.attempts = 0;   // reset on handshake, never on open
+      // This recovery is over; the next one measures from its own first attempt.
+      this._recoveryStartedAt = 0;
       this._setState(S.CONNECTED);
     }
     if (message.type === 'output' || message.type === 'replay') {

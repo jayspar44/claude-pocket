@@ -53,7 +53,46 @@ describe('InstanceConnection: connect and handshake', () => {
       cliType: 'claude',
       cols: 80,
       rows: 24,
+      // Diagnostics the relay logs and ignores. A first attempt, so no time
+      // has been spent recovering yet.
+      recoveryMs: 0,
+      recoveryAttempts: 0,
     });
+  });
+
+  // The relay uses these to tell "the client spent 15s retrying" apart from
+  // "the client only started trying just now" - the difference between a
+  // backoff problem and a resume-handler problem, which is otherwise invisible
+  // because attempts that fail before the WebSocket upgrade reach no log.
+  it('reports the ladder rungs burned before a handshake finally lands', () => {
+    const { conn } = make();
+    conn.connect();
+    conn._drop('network');          // attempt 1 fails
+    conn._open();
+    conn._drop('network');          // attempt 2 fails
+    conn._open();
+    FakeSocket.last.fireOpen();
+
+    expect(FakeSocket.last.lastSent.recoveryAttempts).toBe(2);
+  });
+
+  it('starts a fresh recovery count after a completed handshake', () => {
+    const { conn } = make();
+    conn.connect();
+    conn._drop('network');          // a costly first recovery: two rungs
+    conn._open();
+    conn._drop('network');
+    conn._open();
+    FakeSocket.last.fireOpen();
+    FakeSocket.last.fireMessage({ type: 'pty-status' });
+    expect(FakeSocket.last.lastSent.recoveryAttempts).toBe(2);
+
+    conn._drop('network');          // a later, cheap one
+    conn._open();                   // _drop only schedules; this is the retry
+    FakeSocket.last.fireOpen();
+
+    // 1, not 3: the count measures this recovery, not the tab's whole history.
+    expect(FakeSocket.last.lastSent.recoveryAttempts).toBe(1);
   });
 
   it('does not let a handshake payload override type or instanceId', () => {
@@ -70,6 +109,8 @@ describe('InstanceConnection: connect and handshake', () => {
       type: 'set-instance',
       instanceId: 'inst-1',
       workingDir: '/tmp',
+      recoveryMs: 0,
+      recoveryAttempts: 0,
     });
   });
 
