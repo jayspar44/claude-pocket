@@ -248,8 +248,16 @@ test('the no-working-directory error is sent after the replay status, not before
   );
 });
 
-test('a stopped instance that IS configured still gets the quiet pty-status', async () => {
-  // The reorder must not turn an ordinary user-stopped session into an error.
+// This test used to assert that a configured, user-stopped session produced no
+// pty-error at all - "a configured stopped session is not an error". Finding 2
+// changes that deliberately: the stop record is keyed on instance id alone and
+// 'default' is shared by every install, so the client meeting the decline is
+// not necessarily the one that made the stop, and silence there is a dead
+// terminal with no explanation. It now gets a notice. What the old assertion
+// was really protecting - the reorder must not misreport a stopped session as
+// the misconfiguration it is not, nor fail the handshake over it - is kept, and
+// pinned harder: exactly one notice, the right one, non-fatal, and last.
+test('a stopped instance that IS configured is told so, without being failed', async () => {
   const pm = new PtyManager('t15', 'claude');
   pm.currentWorkingDir = '/tmp';
   pm.stoppedByUser = true;
@@ -257,8 +265,21 @@ test('a stopped instance that IS configured still gets the quiet pty-status', as
   const handler = Object.create(WebSocketHandler.prototype);
   const ws = recordingWs();
 
-  await handler.handleMessage(ws, { type: 'set-instance', instanceId: 't15' }, fakeCtx(pm));
+  await handler.handleMessage(ws, { type: 'set-instance', instanceId: 't15' }, replayingCtx(pm, ws));
 
-  assert.equal(ws.sent.some((m) => m.type === 'pty-error'), false, 'a configured stopped session is not an error');
   assert.ok(ws.sent.some((m) => m.type === 'pty-status'), 'it still reports status');
+
+  const errors = ws.sent.filter((m) => m.type === 'pty-error');
+  assert.equal(errors.length, 1, 'one explanation, not a stream of them');
+  assert.doesNotMatch(errors[0].message, /working directory/i,
+    'a configured session must never be told to fix its working directory');
+  assert.match(errors[0].message, /Start/, 'the notice must name the control that recovers');
+  assert.equal(errors[0].handshakeFailed, undefined,
+    'the instance is bound and usable - this must not refuse the connection');
+
+  const types = ws.sent.map((m) => m.type);
+  assert.ok(
+    types.indexOf('pty-error') > types.lastIndexOf('pty-status'),
+    `a pty-status after the notice clears it on the client (sent: ${types.join(', ')})`
+  );
 });

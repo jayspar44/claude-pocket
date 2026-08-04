@@ -355,6 +355,16 @@ class WebSocketHandler {
       && !workingDir
       && !ptyManager.currentWorkingDir;
 
+    // Set by the stoppedByUser branch below, reported in the same place and
+    // for the same reason. A remembered stop is honoured indefinitely and is
+    // keyed on the instance id alone, and 'default' is the one id every
+    // install shares - so the client meeting this decline is not necessarily
+    // the one that made the stop. A reinstall, a Reset App Data, or the app
+    // on a second phone all bootstrap a fresh 'default' tab, and without this
+    // they get an idle terminal, no explanation, and no hint that the one
+    // control that fixes it (Start, which clears the record) is a menu away.
+    let declinedForUserStop = false;
+
     // userStart is set only by the app's Start button, never by an
     // automatic (re)connect, so it is the one signal that may undo an
     // explicit stop. Without it "stop means stopped" would also block the
@@ -398,6 +408,7 @@ class WebSocketHandler {
         { clientId: ws.clientId, instanceId: newInstanceId },
         'Not auto-starting: session was explicitly stopped'
       );
+      declinedForUserStop = true;
       this.send(ws, { type: 'pty-status', ...ptyManager.getStatus() });
     } else if (workingDir && ptyManager.currentWorkingDir !== workingDir) {
       // Store pending working dir for next restart
@@ -423,11 +434,21 @@ class WebSocketHandler {
     // Send replay for this instance
     ctx.sendReplay(ptyManager, newInstanceId);
 
-    // Last, so the pty-status sendReplay just sent cannot clear it.
+    // Last, so the pty-status sendReplay just sent cannot clear it. The two
+    // are mutually exclusive by the if/else chain above; the else-if says so.
     if (missingWorkingDir) {
       this.send(ws, {
         type: 'pty-error',
         message: 'No working directory configured. Set a project folder in instance settings.',
+        instanceId: newInstanceId,
+      });
+    } else if (declinedForUserStop) {
+      // No handshakeFailed flag: the instance is bound and usable, this is an
+      // explanation of an idle terminal, not a refusal. The client shows it in
+      // the status bar and leaves the connection alone.
+      this.send(ws, {
+        type: 'pty-error',
+        message: 'Session stopped. Open the instance list and tap Start to run it again.',
         instanceId: newInstanceId,
       });
     }
