@@ -1,6 +1,7 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const ptyRegistry = require('../src/pty-registry');
+const { MAX_USER_STOP_RECORDS } = require('../src/pty-registry');
 
 // DELETE /api/instances[/:id] calls remove() with userInitiated: true, which
 // stop()s and deletes the PtyManager entirely. The manager's own
@@ -101,4 +102,63 @@ test('a user stop is still honoured long after the idle timeout', () => {
 
 test('clearUserStop() is a no-op for an id that was never recorded', () => {
   assert.doesNotThrow(() => ptyRegistry.clearUserStop('never-stopped-id'));
+});
+
+// Finding 1: the records must outlive elapsed time (the test above) without
+// growing forever. Ids are minted per tab (`inst-<Date.now()>-<random>`) and
+// never reused, so every Stop of a since-deleted tab would otherwise sit in
+// this map for the life of the relay process - months, on a PM2 host.
+
+test('the remembered-stop map stays bounded no matter how many tabs are stopped', () => {
+  ptyRegistry.stoppedByUserAt.clear();
+
+  const churn = MAX_USER_STOP_RECORDS + 50;
+  for (let i = 0; i < churn; i++) {
+    ptyRegistry.recordUserStop(`churn-${i}`);
+  }
+
+  assert.ok(
+    ptyRegistry.stoppedByUserAt.size <= MAX_USER_STOP_RECORDS,
+    `records must be capped at ${MAX_USER_STOP_RECORDS}, saw ${ptyRegistry.stoppedByUserAt.size}`
+  );
+  assert.equal(ptyRegistry.stoppedByUserAt.has(`churn-${churn - 1}`), true,
+    'the most recent stop must always survive');
+
+  ptyRegistry.stoppedByUserAt.clear();
+});
+
+test('capacity eviction takes the least recently consulted id, not a live tab', () => {
+  ptyRegistry.stoppedByUserAt.clear();
+
+  // A tab the user stopped long ago and still has: its id is the oldest
+  // record, but every reconnect since has sent set-instance for it, and
+  // set-instance reaches the registry through get().
+  const liveTab = 'live-tab-stop';
+  ptyRegistry.recordUserStop(liveTab);
+  for (let i = 0; i < MAX_USER_STOP_RECORDS - 1; i++) {
+    ptyRegistry.recordUserStop(`dead-tab-${i}`);
+  }
+
+  // The live tab reconnects. Drop the manager get() builds straight afterwards
+  // so this test exercises the record, not the instance cap.
+  ptyRegistry.get(liveTab);
+  ptyRegistry.instances.delete(liveTab);
+  ptyRegistry.lastAccessTime.delete(liveTab);
+
+  // One more stop, of an id this client has never mentioned, pushing the map
+  // over the cap.
+  ptyRegistry.recordUserStop('one-more-stop');
+
+  assert.equal(ptyRegistry.stoppedByUserAt.has(liveTab), true,
+    'a record refreshed by a live tab must not be the one evicted');
+  assert.equal(ptyRegistry.stoppedByUserAt.has('dead-tab-0'), false,
+    'the id nothing has asked about in longest is the one that goes');
+  assert.equal(ptyRegistry.stoppedByUserAt.size, MAX_USER_STOP_RECORDS);
+
+  // And the surviving record still does its job.
+  const fresh = ptyRegistry.get(liveTab);
+  assert.equal(fresh.stoppedByUser, true, 'the refreshed record must still decline auto-start');
+
+  ptyRegistry.remove(liveTab);
+  ptyRegistry.stoppedByUserAt.clear();
 });

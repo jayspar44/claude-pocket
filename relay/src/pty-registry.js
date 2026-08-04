@@ -11,22 +11,36 @@ const IDLE_TIMEOUT_MS = 30 * 60 * 1000;
 // Default instance ID for backward compatibility
 const DEFAULT_INSTANCE_ID = 'default';
 
+// Hard cap on remembered user stops (see stoppedByUserAt). A record only ever
+// matters while a client can still send set-instance for that id, i.e. while a
+// tab with that id exists; the client's tab count is itself capped at
+// MAX_INSTANCES (the relay reports the cap and the app enforces it), so the
+// live set is at most MAX_INSTANCES ids per client. The multiplier leaves room
+// for several clients pointed at one relay plus their in-flight churn, and
+// eviction takes the least recently consulted entry - an id nothing has asked
+// about since, which is what a deleted tab looks like from here.
+const MAX_USER_STOP_RECORDS = MAX_INSTANCES * 8;
+
 class PtyRegistry {
   constructor() {
     this.instances = new Map(); // instanceId -> PtyManager
     this.lastAccessTime = new Map(); // instanceId -> timestamp
 
-    // instanceId -> timestamp of a user-initiated remove(). PtyManager.stop()
-    // sets stoppedByUser on the manager object itself, but remove() deletes
-    // that object entirely - without this, a later get() would construct a
-    // brand-new manager with stoppedByUser defaulting back to false, and
-    // set-instance would silently restart a session the user just stopped.
+    // instanceId -> timestamp the stop was recorded or last consulted.
+    // PtyManager.stop() sets stoppedByUser on the manager object itself, but
+    // remove() deletes that object entirely - without this, a later get()
+    // would construct a brand-new manager with stoppedByUser defaulting back
+    // to false, and set-instance would silently restart a session the user
+    // just stopped.
     // Written by remove({ userInitiated: true }) and recordUserStop() only -
     // housekeeping eviction (cleanupIdleInstances, removeOldestIdle) must
     // NOT record, or an idle-evicted instance would stop being able to
     // auto-start.
-    // Entries are removed by clearUserStop() on any deliberate start, and
-    // never by elapsed time - see cleanupIdleInstances().
+    // Entries leave in one of two ways, neither of them elapsed time (see
+    // cleanupIdleInstances): clearUserStop() on any deliberate start, and
+    // capacity eviction at MAX_USER_STOP_RECORDS. Insertion order is kept
+    // equal to consultation order by _rememberUserStop(), so the entry
+    // evicted is always the one no client has asked about in longest.
     this.stoppedByUserAt = new Map();
 
     // Start idle cleanup interval. This is a background maintenance timer,
@@ -49,6 +63,16 @@ class PtyRegistry {
 
     // Update access time
     this.lastAccessTime.set(id, Date.now());
+
+    // A get() is proof that something can still reach this id - a client sent
+    // set-instance for it, or a route was called with it - so any remembered
+    // stop for it is still live and must not be the one capacity eviction
+    // takes. This is what makes the bound safe: every tab the user still has
+    // refreshes its own record on connect, while an id whose tab is gone is
+    // never touched again and drifts to the front of the queue.
+    if (this.stoppedByUserAt.has(id)) {
+      this._rememberUserStop(id);
+    }
 
     // Return existing instance if available
     if (this.instances.has(id)) {
@@ -127,7 +151,7 @@ class PtyRegistry {
       this.instances.delete(id);
       this.lastAccessTime.delete(id);
       if (userInitiated) {
-        this.stoppedByUserAt.set(id, Date.now());
+        this._rememberUserStop(id);
       }
       return true;
     }
@@ -147,7 +171,44 @@ class PtyRegistry {
    */
   recordUserStop(instanceId) {
     const id = instanceId || DEFAULT_INSTANCE_ID;
+    this._rememberUserStop(id);
+  }
+
+  /**
+   * Record (or refresh) the remembered stop for an id, keeping the map bounded.
+   *
+   * Two things happen here, and both are load-bearing:
+   *
+   * 1. delete-then-set, never a bare set. A Map iterates in insertion order,
+   *    so re-inserting moves the id to the back of the queue and leaves the
+   *    map ordered least- to most-recently-touched. The timestamp is the same
+   *    fact in readable form (logs, /api debugging) - nothing branches on it,
+   *    which is the point: elapsed time must never expire a stop.
+   * 2. Capacity eviction from the front. Ids are minted per tab
+   *    (`inst-<Date.now()>-<random>`) and never reused, so without a bound
+   *    every stop of a since-deleted tab would sit in this map for the life of
+   *    the relay process - months, on a PM2 host. Evicting the least recently
+   *    consulted entry drops exactly those: a record for a tab the user still
+   *    has is refreshed by that tab's next set-instance (see get()).
+   *
+   * The cost of a wrong eviction is bounded and recoverable - the id auto-
+   * starts again on its next set-instance, i.e. the same behaviour as before
+   * the user stopped it - and it takes MAX_USER_STOP_RECORDS stops of *other*
+   * ids, with no intervening connect from the affected tab, to get there.
+   * @param {string} id - The resolved instance identifier
+   */
+  _rememberUserStop(id) {
+    this.stoppedByUserAt.delete(id);
     this.stoppedByUserAt.set(id, Date.now());
+
+    while (this.stoppedByUserAt.size > MAX_USER_STOP_RECORDS) {
+      const oldest = this.stoppedByUserAt.keys().next().value;
+      this.stoppedByUserAt.delete(oldest);
+      logger.info(
+        { instanceId: oldest, limit: MAX_USER_STOP_RECORDS },
+        'Evicting least recently consulted user-stop record'
+      );
+    }
   }
 
   /**
@@ -222,10 +283,16 @@ class PtyRegistry {
     // stoppedByUserAt is deliberately NOT pruned here. A stop is a decision,
     // not a cache entry: expiring it after 30 minutes means the next app
     // launch silently restarts every CLI the user stopped, which is exactly
-    // what the record exists to prevent. Growth is bounded by the number of
-    // distinct instance ids the user has stopped - at most MAX_INSTANCES
-    // worth of short strings on a phone client - and clearUserStop() removes
-    // an entry as soon as the user starts that session again.
+    // what the record exists to prevent. Elapsed time is the wrong key, and
+    // this sweep has nothing else to offer - an id is absent from
+    // this.instances both when its tab is gone for good and when the tab is
+    // merely closed or the phone is asleep, and only the first of those may
+    // forget.
+    //
+    // Growth is bounded elsewhere, on the write path: _rememberUserStop()
+    // caps the map at MAX_USER_STOP_RECORDS and evicts by least-recently-
+    // consulted, and clearUserStop() removes an entry as soon as the user
+    // starts that session again.
   }
 
   /**
@@ -289,3 +356,4 @@ const ptyRegistry = new PtyRegistry();
 
 module.exports = ptyRegistry;
 module.exports.DEFAULT_INSTANCE_ID = DEFAULT_INSTANCE_ID;
+module.exports.MAX_USER_STOP_RECORDS = MAX_USER_STOP_RECORDS;
