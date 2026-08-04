@@ -47,11 +47,23 @@
  * either: a container measured at zero while hidden should not discard the
  * last real geometry we were about to send.
  *
+ * A BURST THAT NEVER SETTLES STILL DELIVERS. Trailing-edge debouncing on its
+ * own has no upper bound: while sizes keep arriving closer together than the
+ * delay, the timer is rearmed every time and nothing is ever sent. A drag-
+ * resize, a slow orientation change, or a viewport that jitters indefinitely
+ * would leave the PTY on stale dimensions for as long as it lasts, and if a
+ * reconnect's set-instance armed a deferred start in the meantime, past the
+ * relay's 3s fallback - spawning at handshake dimensions, the regression this
+ * branch already fixed once. So a size waits at most RESIZE_MAX_WAIT_MS from
+ * the moment it first had something pending, whatever the burst does.
+ *
  * @param {Object} deps
  * @param {Function} deps.notify - called with (cols, rows) when a size settles
  * @param {number} [deps.delay] - debounce interval in ms
+ * @param {number} [deps.maxWait] - hard upper bound on time spent pending
  * @param {Function} [deps.setTimer] - injected for tests
  * @param {Function} [deps.clearTimer] - injected for tests
+ * @param {Function} [deps.now] - injected for tests
  */
 
 /**
@@ -66,14 +78,29 @@
  */
 export const RESIZE_DEBOUNCE_MS = 200;
 
+/**
+ * 1s. Comfortably longer than any settling burst worth coalescing (a keyboard
+ * animation is ~300ms), so in normal use the debounce always wins and this
+ * never fires. It exists for the pathological case only: it has to stay well
+ * inside the relay's 3s deferred-start fallback, which is the deadline that
+ * makes an unbounded wait a correctness problem rather than a latency one.
+ */
+export const RESIZE_MAX_WAIT_MS = 1000;
+
 export function createResizeNotifier({
   notify,
   delay = RESIZE_DEBOUNCE_MS,
+  maxWait = RESIZE_MAX_WAIT_MS,
   setTimer = (fn, ms) => setTimeout(fn, ms),
   clearTimer = (id) => clearTimeout(id),
+  now = () => Date.now(),
 }) {
   let timer = null;
   let pending = null;
+  // When the current run of pending sizes started. Null whenever nothing is
+  // pending, which is what restarts the budget for the next burst rather than
+  // carrying it over from the last one.
+  let pendingSince = null;
   // Doubles as "nothing has been sent yet", which is what makes the first size
   // synchronous. One piece of state, both jobs.
   let lastSent = null;
@@ -90,6 +117,15 @@ export function createResizeNotifier({
       timer = null;
     }
     pending = null;
+    pendingSince = null;
+  };
+
+  const flush = () => {
+    timer = null;
+    const settled = pending;
+    pending = null;
+    pendingSince = null;
+    if (settled) deliver(settled.cols, settled.rows);
   };
 
   return {
@@ -109,13 +145,14 @@ export function createResizeNotifier({
       }
 
       pending = { cols, rows };
+      if (pendingSince === null) pendingSince = now();
+
+      // Whichever comes first: `delay` from this size, or maxWait from the
+      // start of the run. Clamped at 0 so an already-overspent budget fires on
+      // the next tick rather than being handed a negative delay.
+      const remaining = Math.max(0, (pendingSince + maxWait) - now());
       if (timer !== null) clearTimer(timer);
-      timer = setTimer(() => {
-        timer = null;
-        const settled = pending;
-        pending = null;
-        if (settled) deliver(settled.cols, settled.rows);
-      }, delay);
+      timer = setTimer(flush, Math.min(delay, remaining));
     },
 
     /**

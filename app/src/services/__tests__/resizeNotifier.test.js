@@ -1,5 +1,11 @@
 import { describe, it, expect } from 'vitest';
-import { createResizeNotifier, RESIZE_DEBOUNCE_MS } from '../resizeNotifier';
+import { createResizeNotifier, RESIZE_DEBOUNCE_MS, RESIZE_MAX_WAIT_MS } from '../resizeNotifier';
+
+// A controllable clock, so the max-wait tests never depend on real time.
+function makeClock() {
+  let t = 0;
+  return { now: () => t, advance: (ms) => { t += ms; } };
+}
 
 // Collects scheduled timers so tests can fire them deterministically, the same
 // shape the connection-layer tests use.
@@ -141,5 +147,49 @@ describe('createResizeNotifier', () => {
 
     expect(timers.live()).toHaveLength(0);
     expect(sent).toEqual([{ cols: 57, rows: 44 }]);
+  });
+
+  // Trailing-edge debouncing alone has no upper bound: sizes arriving closer
+  // together than the delay re-arm the timer forever and nothing is ever sent.
+  // The relay's deferred start gives up after 3s and spawns at handshake
+  // dimensions, so an unbounded wait is a correctness problem, not just
+  // latency. The budget runs from the start of the burst, so the timer the
+  // last observation arms is shorter than the plain debounce.
+  it('caps how long a never-settling burst can withhold a size', () => {
+    const clock = makeClock();
+    const { notifier, timers, sent } = make({ now: clock.now });
+    notifier.resize(57, 44);
+
+    // A size every 50ms - always inside the 200ms debounce, so a plain
+    // trailing debounce would never fire.
+    for (let i = 0; i < 40; i++) {
+      clock.advance(50);
+      notifier.resize(57, 30 + i);
+    }
+
+    const last = timers.scheduled[timers.scheduled.length - 1];
+    expect(last.ms).toBeLessThan(RESIZE_DEBOUNCE_MS);
+    expect(last.ms).toBe(0);
+
+    timers.fireLast();
+    expect(sent).toHaveLength(2);
+    expect(sent[1]).toEqual({ cols: 57, rows: 69 });
+  });
+
+  // The budget is per burst, not for the life of the notifier: a later resize
+  // after a quiet period gets the full debounce again, not a starved one.
+  it('restarts the max-wait budget for each new burst', () => {
+    const clock = makeClock();
+    const { notifier, timers } = make({ now: clock.now });
+    notifier.resize(57, 44);
+
+    notifier.resize(57, 30);
+    timers.fireLast();
+
+    clock.advance(RESIZE_MAX_WAIT_MS * 5);
+    notifier.resize(57, 20);
+
+    const last = timers.scheduled[timers.scheduled.length - 1];
+    expect(last.ms).toBe(RESIZE_DEBOUNCE_MS);
   });
 });
