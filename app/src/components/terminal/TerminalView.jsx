@@ -2,6 +2,7 @@ import { useEffect, useRef, useImperativeHandle, forwardRef, useState, useCallba
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { ChevronDown } from 'lucide-react';
+import { createResizeNotifier } from '../../services/resizeNotifier';
 import '@xterm/xterm/css/xterm.css';
 
 const defaultTheme = {
@@ -591,10 +592,20 @@ const TerminalView = forwardRef(function TerminalView(
       setShowScrollButton(!isAtBottom);
     });
 
-    // Notify parent of initial size
-    if (onResize) {
-      onResize(terminal.cols, terminal.rows);
-    }
+    // Every size that reaches the PTY goes through here. fit() is deliberately
+    // left on the animation frame: the visible terminal must keep up with the
+    // container, and holding it back would only make xterm's grid disagree with
+    // its own DOM box for the length of a keyboard animation without telling
+    // the PTY anything sooner. Debouncing the notification alone means that at
+    // the moment the PTY is told a size, xterm is already at that size and the
+    // burst that produced it is over.
+    const resizeNotifier = createResizeNotifier({
+      notify: (cols, rows) => onResize?.(cols, rows),
+    });
+
+    // Notify parent of initial size - delivered synchronously, because the
+    // relay's deferred PTY start is waiting on it.
+    resizeNotifier.resize(terminal.cols, terminal.rows);
 
     // Handle resize
     const resizeObserver = new ResizeObserver(() => {
@@ -603,8 +614,8 @@ const TerminalView = forwardRef(function TerminalView(
           fitAddonRef.current.fit();
           // Update cell height after resize
           scrollHandlerRef.current?.updateCellHeight();
-          if (onResize && terminalRef.current) {
-            onResize(terminalRef.current.cols, terminalRef.current.rows);
+          if (terminalRef.current) {
+            resizeNotifier.resize(terminalRef.current.cols, terminalRef.current.rows);
           }
         }
       });
@@ -616,6 +627,9 @@ const TerminalView = forwardRef(function TerminalView(
       scrollHandlerRef.current?.destroy();
       scrollHandlerRef.current = null;
       resizeObserver.disconnect();
+      // Before dispose: a pending resize must not fire into a dead terminal or
+      // at a superseded onResize.
+      resizeNotifier.cancel();
       terminal.dispose();
       terminalRef.current = null;
       fitAddonRef.current = null;
