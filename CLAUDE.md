@@ -263,7 +263,7 @@ the error shown — it does not retry, and it is not sticky, so selecting the ta
 
 ## Android Builds
 
-**Prerequisites:** Java JDK 17+, Android SDK (ANDROID_HOME set)
+**Prerequisites:** Java JDK 21+ (Capacitor 8 generates `sourceCompatibility`/`targetCompatibility` 21 into `app/android/app/capacitor.build.gradle`), Android SDK 36 (`sdk.dir` in `app/android/local.properties`, or `ANDROID_HOME`)
 
 **Build commands:**
 | Command | Output | Description |
@@ -273,9 +273,9 @@ the error shown — it does not retry, and it is not sticky, so selecting the ta
 | `npm run aab:dev` | AAB | Dev release for Play Store |
 | `npm run aab:prod` | AAB | Prod release for Play Store |
 
-**Output location:** `~/aabs/` (served via `/api/builds`)
+**Output location:** `../claude-pocket-aabs/` (sibling of the repo), split by flavor — `prod` builds land in `prod/`, `dev` **and** `local` builds in `dev/`. Override with `AAB_OUTPUT_PATH` / `APK_OUTPUT_PATH`.
 
-**Download builds:** `http://minibox...:4501/api/builds/` lists all builds with download links
+**Download builds:** each relay serves only its own folder — DEV `:4503/api/builds/` lists `dev/`, PROD `:4501/api/builds/` lists `prod/`. A dev build looked for on 4501 will appear to be missing.
 
 **Android Studio (for debugging):**
 ```bash
