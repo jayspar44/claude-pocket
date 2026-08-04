@@ -5,6 +5,7 @@ import { useRelay } from '../hooks/useRelay';
 import { useInstance, normalizeCliType } from '../contexts/InstanceContext';
 import { isLiveConnectionState } from '../services/InstanceConnection';
 import { instancesToReconnectAfterStopAll } from '../services/stopAll';
+import { shouldReconnectAfterStopInstance } from '../services/stopInstance';
 import { healthApi, filesApi, instancesApi } from '../api/relay-api';
 import { version } from '../../../version.json';
 import { versionCode } from '../../android-version.json';
@@ -262,19 +263,27 @@ export default function Settings() {
     const wasLive = isLiveConnectionState(getInstanceState(instanceId).connectionState);
     try {
       disconnectInstance(instanceId);
-      await instancesApi.delete(instanceId);
+      const response = await instancesApi.delete(instanceId);
       // Re-fetch will happen via the interval.
       // A tab that was live comes back online, exactly as on the failure path
       // below and for the same reason - the sticky 'user' reason means nothing
       // else will reconnect it, and the Start control needs a connection. The
       // stop itself survives: the removal was userInitiated, so the manager
       // the next set-instance creates starts out declining to auto-start.
-      if (wasLive) connectInstance(instanceId);
+      if (shouldReconnectAfterStopInstance(wasLive, response?.status)) {
+        connectInstance(instanceId);
+      }
     } catch (error) {
       console.error('Failed to stop instance:', error);
       // The CLI survived the failed stop, so a tab that WAS live must not be
-      // left holding a sticky 'user' disconnect it can never recover from.
-      if (wasLive) connectInstance(instanceId);
+      // left holding a sticky 'user' disconnect it can never recover from -
+      // unless the relay answered 404, which means it held no manager for this
+      // id and recorded no stop, and reconnecting would arm a deferred start
+      // and spawn the CLI the user asked to be rid of. See
+      // shouldReconnectAfterStopInstance.
+      if (shouldReconnectAfterStopInstance(wasLive, error.response?.status)) {
+        connectInstance(instanceId);
+      }
       alert(error.response?.data?.error || 'Failed to stop instance');
     }
     setStoppingInstance(null);
