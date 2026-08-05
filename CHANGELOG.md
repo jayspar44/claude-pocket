@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+### [1.4.1](https://github.com/jayspar44/claude-pocket/compare/v1.4.0...v1.4.1) (2026-08-05)
+
+
+### Bug Fixes
+
+* **app:** confirm terminal dimensions right after the handshake ([a5a7255](https://github.com/jayspar44/claude-pocket/commit/a5a72554c9a151df2e507df114e71a9e92cc98c9))
+
 ## [1.4.0](https://github.com/jayspar44/claude-pocket/compare/v1.3.0...v1.4.0) (2026-08-05)
 
 
