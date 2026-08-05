@@ -38,6 +38,23 @@ function connectFully(conn) {
 }
 
 describe('InstanceConnection: drops and backoff', () => {
+  // The cost of a resume signal that never arrives. A tab that drained its
+  // ladder while backgrounded sits on the last rung, and the user watches
+  // "Reconnecting" for exactly that long - measured at 16s in production,
+  // before the tail was flattened. Asserted as a property, not a literal, so
+  // retuning the schedule cannot quietly reintroduce a long tail.
+  it('never makes the user wait more than 4s for a retry', () => {
+    expect(Math.max(...RECONNECT_DELAYS)).toBeLessThanOrEqual(4000);
+  });
+
+  // The total budget is what bounds retries against a genuinely dead relay;
+  // flattening the tail must not have widened it.
+  it('spends no more total time on the ladder than the old exponential one', () => {
+    const total = RECONNECT_DELAYS.reduce((a, b) => a + b, 0);
+    expect(total).toBeLessThanOrEqual(15000);
+    expect(RECONNECT_DELAYS).toHaveLength(MAX_RECONNECT_ATTEMPTS);
+  });
+
   beforeEach(() => FakeSocket.reset());
 
   it('an abrupt close enters reconnecting with reason dropped', () => {

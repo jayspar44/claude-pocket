@@ -504,18 +504,50 @@ export function InstanceProvider({ children }) {
       connectInstance(instanceId);
     };
 
+    // Coalesces the several signals below. They overlap heavily - a single
+    // return to the page can fire two or three - and resume() pings a live
+    // connection, so without this a burst of events is a burst of pings.
+    let lastResumeAt = 0;
+    const RESUME_COALESCE_MS = 500;
+
+    const onResumeSignal = () => {
+      if (document.hidden) return;
+      const now = Date.now();
+      if (now - lastResumeAt < RESUME_COALESCE_MS) return;
+      lastResumeAt = now;
+      reconnectIfNeeded();
+    };
+
     const handleVisibilityChange = () => {
       // Update visibility ref for web platform
       if (!Capacitor.isNativePlatform()) {
         isAppVisibleRef.current = document.visibilityState === 'visible';
       }
-
-      if (document.hidden) return;
-
-      reconnectIfNeeded();
+      onResumeSignal();
     };
 
+    // Four signals, because no single one is reliable across the platforms this
+    // runs on, and missing the signal is expensive: a tab whose ladder drained
+    // while backgrounded waits out a full retry rung before it comes back.
+    //
+    // Measured on Android Chrome mobile web: returning to a backgrounded page
+    // recovered only when the ladder's own rung fired, with recoveryAttempts=5
+    // on the handshake - proof the resume path had not run, because it calls
+    // connect(), which resets that counter to 0. visibilitychange alone was not
+    // enough there.
+    //
+    // - visibilitychange: the ordinary tab switch.
+    // - pageshow: a bfcache restore, where the page resumes without a fresh
+    //   load and visibilitychange may already have fired while still hidden.
+    // - focus: the window regaining focus, which covers restores that deliver
+    //   no visibility transition at all.
+    // - appStateChange: Capacitor's native foreground, which is not tied to the
+    //   document at all.
+    //
+    // They overlap by design; onResumeSignal coalesces the duplicates.
     document.addEventListener('visibilitychange', handleVisibilityChange);
+    window.addEventListener('pageshow', onResumeSignal);
+    window.addEventListener('focus', onResumeSignal);
 
     let appStateListener = null;
     if (Capacitor.isNativePlatform()) {
@@ -528,6 +560,8 @@ export function InstanceProvider({ children }) {
 
     return () => {
       document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener('pageshow', onResumeSignal);
+      window.removeEventListener('focus', onResumeSignal);
       appStateListener?.remove();
     };
   }, [connectInstance]);

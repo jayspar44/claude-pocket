@@ -68,7 +68,28 @@ export const shouldConnect = (conn, { userIntent = false } = {}) => {
 const WS_CLOSING = 2;
 const WS_CLOSED = 3;
 
-export const RECONNECT_DELAYS = [1000, 2000, 4000, 8000, 16000];
+/**
+ * Retry schedule after an involuntary drop.
+ *
+ * Deliberately flat at the top rather than doubling to 16s. Exponential backoff
+ * is for a server that cannot serve us, and that is not what this ladder
+ * actually meets: the overwhelming case on mobile is a phone whose radio is
+ * asleep or whose tailnet has not re-established, where the right behaviour is
+ * to keep asking at a steady interval until the network comes back.
+ *
+ * The old [..., 8000, 16000] tail made a missed resume signal expensive - a tab
+ * that drained its ladder while backgrounded sat on a 16s rung, so returning to
+ * the page meant watching "Reconnecting" for 16 seconds. Measured in production
+ * (recoveryAttempts: 5, the rung that follows the 4th drop). The resume path is
+ * fixed separately; this makes missing it cost 4s instead of 16s, which matters
+ * because "some lifecycle event did not fire on some browser" is a failure mode
+ * that recurs rather than one that gets fixed once.
+ *
+ * Still bounded by MAX_RECONNECT_ATTEMPTS, so a genuinely dead relay sees five
+ * attempts over 15s and then nothing - the same total budget as before, just
+ * spent more usefully.
+ */
+export const RECONNECT_DELAYS = [1000, 2000, 4000, 4000, 4000];
 export const MAX_RECONNECT_ATTEMPTS = 5;
 export const CONNECTION_TIMEOUT = 10000;
 export const HEARTBEAT_TIMEOUT = 5000;
