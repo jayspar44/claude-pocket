@@ -2,6 +2,19 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+## [1.4.0](https://github.com/jayspar44/claude-pocket/compare/v1.3.0...v1.4.0) (2026-08-05)
+
+
+### Features
+
+* **app:** report recovery latency to the relay on the handshake ([7aa5a1e](https://github.com/jayspar44/claude-pocket/commit/7aa5a1eb6aafa81ea02c0ca5388aaa4dd4881218))
+
+
+### Bug Fixes
+
+* **app:** catch the resume signal visibilitychange was missing ([14f389e](https://github.com/jayspar44/claude-pocket/commit/14f389e6d7ae9315a0d353661929c5f6bb1ab4ba))
+* **app:** reconnect on resume instead of waiting out a connect timeout ([adc0d11](https://github.com/jayspar44/claude-pocket/commit/adc0d1101e679d5ced1a7bcf417a7ae35cc00d3a))
+
 ## [1.3.0](https://github.com/jayspar44/claude-pocket/compare/v1.2.0...v1.3.0) (2026-08-04)
 
 
