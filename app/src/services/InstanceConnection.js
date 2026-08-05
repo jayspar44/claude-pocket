@@ -315,6 +315,10 @@ export class InstanceConnection {
       // This recovery is over; the next one measures from its own first attempt.
       this._recoveryStartedAt = 0;
       this._setState(S.CONNECTED);
+      // Only when the relay says nothing is running: a running PTY was already
+      // resized by set-instance, and a second resize is a second SIGWINCH -
+      // the repaint this branch has spent its time reducing, not adding.
+      if (!message.running) this._confirmDimensions();
     }
     if (message.type === 'output' || message.type === 'replay') {
       this.lastActivityAt = this.clock();
@@ -323,6 +327,29 @@ export class InstanceConnection {
       this.ptyProcessing = Boolean(message.processingStartTime);
     }
     this.onMessage(this.instanceId, message);
+  }
+
+  /**
+   * Confirm this terminal's dimensions immediately after the handshake.
+   *
+   * The relay does not spawn a CLI on set-instance alone. It defers, waits for
+   * a resize frame to confirm the terminal's real dimensions, and falls back
+   * after 3 seconds to whatever set-instance carried. Nothing was ever sending
+   * that frame: the terminal reports its size once, when it is created, which
+   * happens before this handshake completes - and resizeNotifier then
+   * suppresses any repeat of a size it has already sent, so there is no second
+   * one to catch. Measured in production: 45 of 46 spawns waited out the full
+   * fallback.
+   *
+   * One frame here costs nothing and ends both halves of that: the CLI starts
+   * at once instead of 3s later, at dimensions confirmed now rather than
+   * restored from storage and possibly stale by an orientation or font change.
+   */
+  _confirmDimensions() {
+    const { cols, rows } = this.getHandshakePayload() || {};
+    if (!Number.isFinite(cols) || !Number.isFinite(rows)) return;
+    if (cols <= 0 || rows <= 0) return;
+    this.send({ type: 'resize', cols, rows });
   }
 
   send(message) {

@@ -84,15 +84,18 @@ describe('InstanceConnection: connect and handshake', () => {
     conn._drop('network');
     conn._open();
     FakeSocket.last.fireOpen();
+    // lastSent would be the confirming resize the handshake triggers; the
+    // metrics ride on set-instance.
+    const handshakeOf = (sock) => sock.sent.filter((m) => m.type === 'set-instance').at(-1);
+    expect(handshakeOf(FakeSocket.last).recoveryAttempts).toBe(2);
     FakeSocket.last.fireMessage({ type: 'pty-status' });
-    expect(FakeSocket.last.lastSent.recoveryAttempts).toBe(2);
 
     conn._drop('network');          // a later, cheap one
     conn._open();                   // _drop only schedules; this is the retry
     FakeSocket.last.fireOpen();
 
     // 1, not 3: the count measures this recovery, not the tab's whole history.
-    expect(FakeSocket.last.lastSent.recoveryAttempts).toBe(1);
+    expect(handshakeOf(FakeSocket.last).recoveryAttempts).toBe(1);
   });
 
   it('does not let a handshake payload override type or instanceId', () => {
@@ -112,6 +115,43 @@ describe('InstanceConnection: connect and handshake', () => {
       recoveryMs: 0,
       recoveryAttempts: 0,
     });
+  });
+
+  // The relay defers spawning until a resize confirms the terminal's real
+  // dimensions, and falls back after 3s. Nothing else sends that frame - the
+  // terminal reports its size once, before this handshake, and the resize
+  // debounce suppresses a repeat - so 45 of 46 spawns waited out the full
+  // fallback in production.
+  it('confirms dimensions right after a handshake that found no running PTY', () => {
+    const { conn } = make();
+    conn.connect();
+    FakeSocket.last.fireOpen();
+    FakeSocket.last.fireMessage({ type: 'pty-status', running: false });
+
+    expect(FakeSocket.last.lastSent).toEqual({ type: 'resize', cols: 80, rows: 24 });
+  });
+
+  // A running PTY was already resized by set-instance. Confirming again is a
+  // second SIGWINCH, which makes a full-screen TUI repaint at geometry it is
+  // already at - the duplicate-output symptom, not a fix for it.
+  it('sends no confirming resize when the relay reports a running PTY', () => {
+    const { conn } = make();
+    conn.connect();
+    FakeSocket.last.fireOpen();
+    const afterHandshake = FakeSocket.last.sent.length;
+    FakeSocket.last.fireMessage({ type: 'pty-status', running: true });
+
+    expect(FakeSocket.last.sent).toHaveLength(afterHandshake);
+  });
+
+  it('sends no confirming resize when the handshake carries no usable size', () => {
+    const { conn } = make({ getHandshakePayload: () => ({ workingDir: '/tmp' }) });
+    conn.connect();
+    FakeSocket.last.fireOpen();
+    const afterHandshake = FakeSocket.last.sent.length;
+    FakeSocket.last.fireMessage({ type: 'pty-status', running: false });
+
+    expect(FakeSocket.last.sent).toHaveLength(afterHandshake);
   });
 
   it('stays connecting after open until pty-status arrives', () => {
