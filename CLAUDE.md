@@ -92,9 +92,9 @@ app/src/                         relay/src/
 │  ├─ terminal/TerminalView      ├─ pty-manager.js
 │  ├─ input/InputBar,QuickActions├─ pty-registry.js
 │  ├─ command/CommandPalette     ├─ websocket-handler.js
-│  ├─ StatusBar.jsx              ├─ ansi-preprocessor.js
-│  └─ files/FileBrowser          ├─ routes/commands,files,builds
-├─ contexts/Relay,Instance,Theme └─ ../test/ (node:test)
+│  ├─ StatusBar.jsx              ├─ routes/commands,files,builds
+│  └─ files/FileBrowser          └─ ../test/ (node:test)
+├─ contexts/Relay,Instance,Theme
 ├─ services/
 │  ├─ InstanceConnection.js  one socket + its timers, per instance
 │  ├─ ConnectionManager.js   the map + one shared heartbeat
