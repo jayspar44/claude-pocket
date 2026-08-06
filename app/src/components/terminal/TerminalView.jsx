@@ -541,6 +541,23 @@ const TerminalView = forwardRef(function TerminalView(
       const buffer = terminalRef.current.buffer.active;
       return buffer.viewportY >= buffer.baseY;
     },
+    // The terminal's real size right now, plus how many buffer rows xterm had
+    // to wrap. A TUI stream rendered at the width it was produced for wraps
+    // nothing - it never emits a row wider than the terminal. Wrapping is
+    // therefore the signature of a terminal narrower than the PTY that wrote
+    // the output, which is what shreds Claude Code's box borders. Measured
+    // offline: the same 62KB stream renders 0 wrapped rows at 57 columns and
+    // 38 at 56.
+    getGeometry: () => {
+      const terminal = terminalRef.current;
+      if (!terminal) return null;
+      const buffer = terminal.buffer.active;
+      let wrapped = 0;
+      for (let i = 0; i < buffer.length; i++) {
+        if (buffer.getLine(i)?.isWrapped) wrapped++;
+      }
+      return { cols: terminal.cols, rows: terminal.rows, wrapped };
+    },
   }));
 
   // Store scroll handler ref for cleanup and font size updates

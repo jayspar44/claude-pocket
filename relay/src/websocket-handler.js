@@ -252,6 +252,48 @@ class WebSocketHandler {
         break;
       }
 
+      // Diagnostic only - never touches the PTY. The client reports what xterm
+      // actually is; lastCols/lastRows are what the PTY was last told to be.
+      // Those two disagreeing is the one condition that shreds a TUI's line
+      // breaks, and nothing has ever been able to observe it: the relay only
+      // saw the client's own claims. Rendering the same stream offline gave 0
+      // wrapped rows at the width it was produced for and 38 one column
+      // narrower, so `wrapped` is the artifact count on the client's screen.
+      case 'geometry': {
+        const { cols, rows, wrapped } = message;
+        // has() rather than get(): get() would create a PtyManager, and a
+        // diagnostic must never be the thing that spawns an instance or trips
+        // the instance cap.
+        if (!cols || !rows || !ptyRegistry.has(instanceId)) break;
+
+        const ptyManager = ptyRegistry.get(instanceId);
+        const detail = {
+          instanceId,
+          clientId: ws.clientId,
+          xtermCols: cols,
+          xtermRows: rows,
+          ptyCols: ptyManager.lastCols,
+          ptyRows: ptyManager.lastRows,
+          wrapped,
+          status: ptyManager.status,
+        };
+
+        // lastCols is unset until the first spawn or resize, so before then
+        // there is no PTY size to disagree with - not a mismatch, just nothing
+        // to compare yet.
+        const sized = ptyManager.lastCols && ptyManager.lastRows;
+        if (sized && (cols !== ptyManager.lastCols || rows !== ptyManager.lastRows)) {
+          logger.warn(detail, 'Geometry mismatch: xterm differs from PTY');
+        } else if (wrapped > 0) {
+          // Agreed sizes but wrapped rows on screen. Shell output can wrap
+          // legitimately, so this is a lead rather than a fault.
+          logger.info(detail, 'Wrapped rows present at agreed geometry');
+        } else {
+          logger.debug(detail, 'Geometry check');
+        }
+        break;
+      }
+
       case 'interrupt': {
         const ptyManager = ptyRegistry.get(instanceId);
         ptyManager.interrupt();

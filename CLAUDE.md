@@ -248,7 +248,7 @@ npm run build          # Production build
 **WebSocket `/ws`:**
 | Direction | Message Types |
 |-----------|---------------|
-| Client→Server | `input` \| `submit` \| `resize` \| `interrupt` \| `restart` \| `status` \| `set-instance` \| `replay` \| `ping` |
+| Client→Server | `input` \| `submit` \| `resize` \| `interrupt` \| `restart` \| `status` \| `set-instance` \| `replay` \| `ping` \| `geometry` |
 | Server→Client | `output` \| `replay` \| `status` \| `pty-status` \| `pty-error` \| `pty-crash` \| `pty-restarting` \| `task-complete` \| `ready` \| `pong` |
 
 **`set-instance` carries `userStart: true` only when the user explicitly taps Start.** It is the one
