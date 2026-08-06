@@ -284,10 +284,23 @@ class WebSocketHandler {
         const sized = ptyManager.lastCols && ptyManager.lastRows;
         if (sized && (cols !== ptyManager.lastCols || rows !== ptyManager.lastRows)) {
           logger.warn(detail, 'Geometry mismatch: xterm differs from PTY');
-        } else if (wrapped > 0) {
-          // Agreed sizes but wrapped rows on screen. Shell output can wrap
-          // legitimately, so this is a lead rather than a fault.
-          logger.info(detail, 'Wrapped rows present at agreed geometry');
+          ws._lastGeometry = null; // so recovery logs as a change, not silence
+          break;
+        }
+
+        // The healthy case has to be observable at least once, or silence in
+        // the log cannot be told apart from the reports never arriving - which
+        // is exactly the hole the first deployment of this fell into. So the
+        // first report and every subsequent change get an info line, and an
+        // unchanging healthy terminal then falls quiet.
+        const signature = `${cols}x${rows}:${wrapped > 0}`;
+        if (ws._lastGeometry !== signature) {
+          ws._lastGeometry = signature;
+          logger.info(detail, wrapped > 0
+            // Agreed sizes but wrapped rows on screen. Shell output can wrap
+            // legitimately, so this is a lead rather than a fault.
+            ? 'Geometry agrees but rows are wrapped'
+            : 'Geometry agrees');
         } else {
           logger.debug(detail, 'Geometry check');
         }

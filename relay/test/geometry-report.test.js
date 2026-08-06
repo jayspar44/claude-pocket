@@ -98,10 +98,77 @@ test('agreeing geometry is not reported as a fault', async () => {
   pm.lastRows = 46;
 
   try {
-    const { warn, info } = await sendGeometry(id, { cols: 57, rows: 46, wrapped: 0 });
-
+    const { warn } = await sendGeometry(id, { cols: 57, rows: 46, wrapped: 0 });
     assert.equal(warn.length, 0, 'agreement must not warn, or the signal drowns');
-    assert.equal(info.length, 0, 'nothing wrapped, so there is no lead to raise either');
+  } finally {
+    ptyRegistry.remove(id);
+  }
+});
+
+// The first deployment of this logged the healthy case at debug, which is
+// suppressed at LOG_LEVEL=info. An empty log then meant either "everything
+// agrees" or "the reports never arrived", with no way to tell which - so the
+// instrument could not be trusted when it said nothing. One line per distinct
+// state fixes that without turning a 20s sample into a log firehose.
+test('the first healthy report is visible, and repeats of it are not', async () => {
+  const id = 'geo-alive';
+  const pm = ptyRegistry.get(id);
+  pm.lastCols = 57;
+  pm.lastRows = 46;
+  const ws = fakeWs();
+  const handler = Object.create(WebSocketHandler.prototype);
+  const frame = { type: 'geometry', instanceId: id, cols: 57, rows: 46, wrapped: 0 };
+
+  try {
+    let captured = captureLogs();
+    try {
+      await handler.handleMessage(ws, frame, fakeCtx());
+    } finally {
+      captured.restore();
+    }
+    assert.equal(captured.calls.info.length, 1, 'silence must never be the only evidence the reports arrive');
+
+    captured = captureLogs();
+    try {
+      await handler.handleMessage(ws, { ...frame }, fakeCtx());
+      await handler.handleMessage(ws, { ...frame }, fakeCtx());
+    } finally {
+      captured.restore();
+    }
+    assert.equal(captured.calls.info.length, 0, 'an unchanged healthy terminal must then fall quiet');
+  } finally {
+    ptyRegistry.remove(id);
+  }
+});
+
+// Recovering from a mismatch is a state change worth seeing: without it, a
+// terminal that drifted and then corrected itself would go quiet in exactly
+// the same way as one that never drifted.
+test('recovery from a mismatch is reported, not silently resumed', async () => {
+  const id = 'geo-recovery';
+  const pm = ptyRegistry.get(id);
+  pm.lastCols = 57;
+  pm.lastRows = 46;
+  const ws = fakeWs();
+  const handler = Object.create(WebSocketHandler.prototype);
+
+  try {
+    for (const geometry of [{ cols: 57, rows: 46 }, { cols: 56, rows: 46 }]) {
+      const c = captureLogs();
+      try {
+        await handler.handleMessage(ws, { type: 'geometry', instanceId: id, wrapped: 0, ...geometry }, fakeCtx());
+      } finally {
+        c.restore();
+      }
+    }
+
+    const captured = captureLogs();
+    try {
+      await handler.handleMessage(ws, { type: 'geometry', instanceId: id, cols: 57, rows: 46, wrapped: 0 }, fakeCtx());
+    } finally {
+      captured.restore();
+    }
+    assert.equal(captured.calls.info.length, 1, 'the return to a good size must be visible');
   } finally {
     ptyRegistry.remove(id);
   }
