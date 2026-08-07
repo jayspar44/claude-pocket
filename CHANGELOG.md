@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+### [1.4.2](https://github.com/jayspar44/claude-pocket/compare/v1.4.1...v1.4.2) (2026-08-07)
+
+
+### Bug Fixes
+
+* **relay:** make a healthy geometry report visible at least once ([f7ea55c](https://github.com/jayspar44/claude-pocket/commit/f7ea55cc5c1b1f0f4141154d7751ddf5e2d1d53d))
+
 ### [1.4.1](https://github.com/jayspar44/claude-pocket/compare/v1.4.0...v1.4.1) (2026-08-05)
 
 
