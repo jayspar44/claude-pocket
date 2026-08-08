@@ -5,6 +5,16 @@ const { execSync, execFile } = require('child_process');
 const config = require('./config');
 const logger = require('./logger');
 
+// Count newlines without materialising the whole buffer. appendToBuffer runs on
+// every PTY data chunk, so this must stay allocation-free.
+function countNewlines(str) {
+  let n = 0;
+  for (let i = 0; i < str.length; i++) {
+    if (str.charCodeAt(i) === 10) n++;
+  }
+  return n;
+}
+
 // Helper to get current git branch (fast, called on each status request)
 function getGitBranch(cwd) {
   if (!cwd) return null;
@@ -51,6 +61,7 @@ class PtyManager {
     this.ptyProcess = null;
     this.outputBuffer = [];
     this.outputBufferSize = 0;
+    this.outputBufferLines = 0;
     this.listeners = new Set();
     // Lifecycle: 'stopped' -> 'starting' -> 'running' -> 'stopped'.
     // 'starting' exists because ptyProcess is not assigned until after the CLI
@@ -486,18 +497,21 @@ class PtyManager {
   appendToBuffer(data) {
     this.outputBuffer.push(data);
     this.outputBufferSize += data.length;
+    this.outputBufferLines += countNewlines(data);
 
-    // Trim buffer if it exceeds max size
-    while (this.outputBufferSize > config.buffer.maxSize && this.outputBuffer.length > 1) {
+    // Trim oldest chunks until both caps are satisfied. Both counters are
+    // maintained incrementally: recomputing the line count from the joined
+    // buffer would be O(buffer) per chunk, and hoisting it out of the loop
+    // (as this previously did) makes the condition loop-invariant, which
+    // drains the buffer to a single chunk the first time the cap is crossed.
+    while (
+      (this.outputBufferSize > config.buffer.maxSize
+        || this.outputBufferLines > config.buffer.maxLines)
+      && this.outputBuffer.length > 1
+    ) {
       const removed = this.outputBuffer.shift();
       this.outputBufferSize -= removed.length;
-    }
-
-    // Also limit by line count (approximate)
-    const lineCount = this.outputBuffer.join('').split('\n').length;
-    while (lineCount > config.buffer.maxLines && this.outputBuffer.length > 1) {
-      const removed = this.outputBuffer.shift();
-      this.outputBufferSize -= removed.length;
+      this.outputBufferLines -= countNewlines(removed);
     }
 
     // Schedule persisting buffer to disk
@@ -511,6 +525,7 @@ class PtyManager {
   clearBuffer() {
     this.outputBuffer = [];
     this.outputBufferSize = 0;
+    this.outputBufferLines = 0;
     // Also delete persisted file (session-scoped, not across sessions)
     this.deletePersistFile();
   }
@@ -583,7 +598,7 @@ class PtyManager {
       stoppedByUser: this.stoppedByUser,
       pid: this.ptyProcess?.pid || null,
       bufferSize: this.outputBufferSize,
-      bufferLines: this.outputBuffer.join('').split('\n').length,
+      bufferLines: this.outputBufferLines,
       workingDir: this.currentWorkingDir,
       gitBranch: getGitBranch(this.currentWorkingDir),  // Dynamic git branch
       processingStartTime: this.processingStartTime,
@@ -656,7 +671,8 @@ class PtyManager {
 
       if (data.buffer && Array.isArray(data.buffer)) {
         this.outputBuffer = data.buffer;
-        this.outputBufferSize = data.buffer.join('').length;
+        this.outputBufferSize = data.buffer.reduce((n, chunk) => n + chunk.length, 0);
+        this.outputBufferLines = data.buffer.reduce((n, chunk) => n + countNewlines(chunk), 0);
         logger.info({
           lines: this.outputBuffer.length,
           size: this.outputBufferSize,
@@ -668,6 +684,7 @@ class PtyManager {
       // Don't fail - just start with empty buffer
       this.outputBuffer = [];
       this.outputBufferSize = 0;
+      this.outputBufferLines = 0;
     }
   }
 
