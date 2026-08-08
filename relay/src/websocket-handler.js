@@ -148,10 +148,29 @@ class WebSocketHandler {
       // happily watching and never re-attaches it, so the tab keeps saying
       // "Connected", input still reaches the CLI, and no output ever renders
       // again. Either this function changes nothing, or it completes.
-      const ptyManager = ptyRegistry.get(instanceId, undefined, cliType);
+      // Detach from the instance being left BEFORE resolving the new one:
+      // removeOldestIdle() only evicts an instance with no listeners, so
+      // holding on here makes the instance this client is leaving ineligible
+      // and turns a switch that used to succeed at the cap into a refusal.
+      //
+      // But a throw from get() must not leave the client detached from a PTY
+      // it was happily watching - that is what kept a tab reading "Connected"
+      // with a terminal that never rendered again. So the detach is undone on
+      // the way out: either this function changes nothing, or it completes.
+      const previousManager = ws.currentPtyManager;
+      const previousListener = ptyListener;
+      if (previousListener && previousManager) {
+        previousManager.removeListener(previousListener);
+      }
 
-      if (ptyListener && ws.currentPtyManager) {
-        ws.currentPtyManager.removeListener(ptyListener);
+      let ptyManager;
+      try {
+        ptyManager = ptyRegistry.get(instanceId, undefined, cliType);
+      } catch (error) {
+        if (previousListener && previousManager) {
+          previousManager.addListener(previousListener);
+        }
+        throw error;
       }
       ws.currentPtyManager = ptyManager;
 
@@ -370,13 +389,26 @@ class WebSocketHandler {
 
       case 'replay': {
         const ptyManager = ptyRegistry.get(instanceId);
-        // Same drain as the handshake path. Here skipUntilReplay is already
-        // false, so the flushed output frame does reach this client just ahead
-        // of the replay - harmless, because the client handles a replay with
-        // terminal.clear() plus a full rewrite, which erases it microseconds
-        // later. Wrapping this in setSkipReplay(true/false) instead would
-        // reintroduce a flag that a throw could leave stuck on.
-        const bufferedOutput = this.snapshotForReplay(ptyManager);
+        // Same drain as the handshake path, and the drained frame must be
+        // suppressed for THIS client the same way, because the replay blob
+        // already carries those bytes. An earlier version let the frame
+        // through on the theory that the client's terminal.clear() would
+        // erase it. It does not: xterm's clear() keeps the cursor's line as
+        // row 0, never resets the column, and no-ops entirely at
+        // ybase === 0 && y === 0 - so the flushed tail survived and the
+        // replay was written into it, leaving a merged partial line at the
+        // top of the terminal.
+        //
+        // try/finally rather than a bare pair of calls: the flag must not
+        // survive a throw out of the snapshot, which is the failure mode that
+        // freezes a terminal while it still reads "Connected".
+        ctx.setSkipReplay(true);
+        let bufferedOutput;
+        try {
+          bufferedOutput = this.snapshotForReplay(ptyManager);
+        } finally {
+          ctx.setSkipReplay(false);
+        }
         if (bufferedOutput) {
           this.send(ws, { type: 'replay', data: bufferedOutput, instanceId });
         }

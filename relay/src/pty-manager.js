@@ -431,6 +431,14 @@ class PtyManager {
     // would spawn the CLI the user just stopped. An explicit stop disarms it.
     this.deferredStartDir = null;
 
+    // Ahead of the early returns, not after them. onExit nulls ptyProcess
+    // while the process's final burst is still queued, so the !ptyProcess path
+    // is reachable with a batch armed - and it is followed by clearBuffer() on
+    // the restart and delete routes. The timer would then broadcast a tail that
+    // is no longer in the replay buffer, inverting the invariant the replay
+    // snapshot depends on: that everything queued is already buffered.
+    this.flushBatch();
+
     if (this.status === 'starting') {
       logger.info({ instanceId: this.instanceId }, 'Cancelling in-flight PTY start');
       this.status = 'stopped';
@@ -442,8 +450,6 @@ class PtyManager {
     }
 
     logger.info(`Stopping ${this.cliLabel} process`);
-    // Flush any pending batched output (flushBatch clears its own timer)
-    this.flushBatch();
     // Flush any pending buffer save
     if (this.saveTimer) {
       clearTimeout(this.saveTimer);

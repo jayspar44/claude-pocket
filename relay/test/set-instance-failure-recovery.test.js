@@ -152,3 +152,43 @@ test('a resize that throws mid-handshake does not suppress output forever', asyn
     pm.stop();
   }
 });
+
+test('the instance being left is detached before the new one is resolved', async () => {
+  const idA = 'recovery-F';
+  const pmA = runningManager(idA);
+  register(idA, pmA);
+  await pmA.start('/tmp', 80, 24);
+
+  const realGet = ptyRegistry.get;
+  try {
+    const handler = Object.create(WebSocketHandler.prototype);
+    const ws = recordingWs();
+    const ctx = await boundClient(handler, ws, idA);
+    assert.equal(pmA.listeners.size, 1, 'precondition: bound to A');
+
+    // removeOldestIdle() only evicts an instance with no listeners, so holding
+    // this client's listener on A across the lookup would make A ineligible and
+    // turn a switch that used to succeed at the cap into a refusal.
+    let listenersOnAWhileResolving = null;
+    ptyRegistry.get = function (id, ...rest) {
+      if (id === 'recovery-G') listenersOnAWhileResolving = pmA.listeners.size;
+      return realGet.call(this, id, ...rest);
+    };
+
+    await handler.handleMessage(
+      ws,
+      { type: 'set-instance', instanceId: 'recovery-G', workingDir: '/tmp', cliType: 'claude', cols: 80, rows: 24 },
+      ctx
+    );
+
+    assert.equal(
+      listenersOnAWhileResolving, 0,
+      'the departing instance must be evictable while the new one is resolved'
+    );
+  } finally {
+    ptyRegistry.get = realGet;
+    unregister(idA);
+    unregister('recovery-G');
+    pmA.stop();
+  }
+});
