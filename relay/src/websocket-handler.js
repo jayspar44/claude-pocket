@@ -43,44 +43,7 @@ class WebSocketHandler {
       // Send connection status
       this.send(ws, { type: 'status', connected: true, clientId });
 
-      // Flag to skip batched output until replay is sent
-      // This prevents duplicates from the 50ms batch window
-      let skipUntilReplay = true;
-      let ptyListener = null;
-
-      // Setup PTY listener for this client
-      const setupPtyListener = (instanceId, cliType) => {
-        // Remove old listener if switching instances
-        if (ptyListener && ws.currentPtyManager) {
-          ws.currentPtyManager.removeListener(ptyListener);
-        }
-
-        const ptyManager = ptyRegistry.get(instanceId, undefined, cliType);
-        ws.currentPtyManager = ptyManager;
-
-        ptyListener = (message) => {
-          if (skipUntilReplay && message.type === 'output') {
-            return;
-          }
-          // Include instanceId in outgoing messages
-          this.send(ws, { ...message, instanceId });
-        };
-        ptyManager.addListener(ptyListener);
-        ws.ptyListener = ptyListener;
-
-        return ptyManager;
-      };
-
-      // Send replay for the given instance
-      const sendReplay = (ptyManager, instanceId) => {
-        const bufferedOutput = ptyManager.getBufferedOutput();
-        if (bufferedOutput) {
-          logger.info({ clientId, instanceId, bufferLength: bufferedOutput.length }, 'Sending replay');
-          this.send(ws, { type: 'replay', data: bufferedOutput, instanceId });
-        }
-        skipUntilReplay = false;
-        this.send(ws, { type: 'pty-status', ...ptyManager.getStatus() });
-      };
+      const ctx = this.createClientContext(ws);
 
       // Initial setup with default instance
       // Wait for set-instance message before setting up PTY
@@ -98,12 +61,7 @@ class WebSocketHandler {
         // handleMessage is async. An unhandled rejection here terminates the
         // process under Node's default --unhandled-rejections=throw, taking
         // every PTY session with it.
-        this.handleMessage(ws, message, {
-          setupPtyListener,
-          sendReplay,
-          skipUntilReplay: () => skipUntilReplay,
-          setSkipReplay: (v) => { skipUntilReplay = v; },
-        }).catch((error) => {
+        this.handleMessage(ws, message, ctx).catch((error) => {
           logger.error(
             { error: error.message, clientId, type: message.type },
             'Failed to handle WebSocket message'
@@ -171,6 +129,68 @@ class WebSocketHandler {
     this.wss.close();
   }
 
+  // Extracted from the connection handler so the replay/listener wiring can be
+  // driven directly in tests - the same reason handleSetInstance and
+  // runDeferredStartFallback are methods. Nothing outside this scope reads the
+  // closed-over state: ws.on('close') goes through ws.ptyListener and
+  // ws.currentPtyManager, which setupPtyListener assigns.
+  createClientContext(ws) {
+    const clientId = ws.clientId;
+    // Skip batched output until the replay is sent, so the 50ms batch window
+    // cannot deliver bytes the replay blob already carries.
+    let skipUntilReplay = true;
+    let ptyListener = null;
+
+    const setupPtyListener = (instanceId, cliType) => {
+      if (ptyListener && ws.currentPtyManager) {
+        ws.currentPtyManager.removeListener(ptyListener);
+      }
+      const ptyManager = ptyRegistry.get(instanceId, undefined, cliType);
+      ws.currentPtyManager = ptyManager;
+
+      ptyListener = (message) => {
+        if (skipUntilReplay && message.type === 'output') {
+          return;
+        }
+        // Include instanceId in outgoing messages
+        this.send(ws, { ...message, instanceId });
+      };
+      ptyManager.addListener(ptyListener);
+      ws.ptyListener = ptyListener;
+
+      return ptyManager;
+    };
+
+    const sendReplay = (ptyManager, instanceId) => {
+      const bufferedOutput = this.snapshotForReplay(ptyManager);
+      if (bufferedOutput) {
+        logger.info({ clientId, instanceId, bufferLength: bufferedOutput.length }, 'Sending replay');
+        this.send(ws, { type: 'replay', data: bufferedOutput, instanceId });
+      }
+      skipUntilReplay = false;
+      this.send(ws, { type: 'pty-status', ...ptyManager.getStatus() });
+    };
+
+    return {
+      setupPtyListener,
+      sendReplay,
+      skipUntilReplay: () => skipUntilReplay,
+      setSkipReplay: (v) => { skipUntilReplay = v; },
+    };
+  }
+
+  // The batch queue always holds bytes that are ALREADY in the replay buffer:
+  // onData appends to the buffer before it queues for broadcast. Snapshotting
+  // with a batch still pending therefore ships those bytes twice - once inside
+  // the replay blob, once when the 50ms timer fires - which is what made the
+  // client render the same tail twice after every reconnect. Draining first is
+  // what makes the two disjoint, and it is why skipUntilReplay finally does
+  // what its comment always claimed.
+  snapshotForReplay(ptyManager) {
+    ptyManager.flushBatch();
+    return ptyManager.getBufferedOutput();
+  }
+
   async handleMessage(ws, message, ctx) {
     const { type, instanceId: msgInstanceId } = message;
 
@@ -202,6 +222,12 @@ class WebSocketHandler {
         try {
           await this.handleSetInstance(ws, message, ctx);
         } catch (error) {
+          // Whatever threw, output must not stay suppressed. handshakeFailed is
+          // only honoured by a client still in CONNECTING; the Start button
+          // re-sends set-instance over an already-CONNECTED socket, and such a
+          // client ignores this frame entirely. Leaving skipUntilReplay true
+          // there drops every output frame forever while the tab still reads
+          // "Connected".
           logger.error(
             { clientId: ws.clientId, instanceId: message.instanceId, error: error.message },
             'set-instance failed; answering with a handshake-failed error'
@@ -259,6 +285,8 @@ class WebSocketHandler {
       // saw the client's own claims. Rendering the same stream offline gave 0
       // wrapped rows at the width it was produced for and 38 one column
       // narrower, so `wrapped` is the artifact count on the client's screen.
+      // It counts viewport rows only, so that offline "38" - measured over a
+      // whole 62KB stream - is not directly comparable to what arrives here.
       case 'geometry': {
         const { cols, rows, wrapped } = message;
         // has() rather than get(): get() would create a PtyManager, and a
@@ -334,7 +362,13 @@ class WebSocketHandler {
 
       case 'replay': {
         const ptyManager = ptyRegistry.get(instanceId);
-        const bufferedOutput = ptyManager.getBufferedOutput();
+        // Same drain as the handshake path. Here skipUntilReplay is already
+        // false, so the flushed output frame does reach this client just ahead
+        // of the replay - harmless, because the client handles a replay with
+        // terminal.clear() plus a full rewrite, which erases it microseconds
+        // later. Wrapping this in setSkipReplay(true/false) instead would
+        // reintroduce a flag that a throw could leave stuck on.
+        const bufferedOutput = this.snapshotForReplay(ptyManager);
         if (bufferedOutput) {
           this.send(ws, { type: 'replay', data: bufferedOutput, instanceId });
         }

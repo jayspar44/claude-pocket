@@ -442,11 +442,8 @@ class PtyManager {
     }
 
     logger.info(`Stopping ${this.cliLabel} process`);
-    // Flush any pending batched output
-    if (this.batchTimer) {
-      clearTimeout(this.batchTimer);
-      this.flushBatch();
-    }
+    // Flush any pending batched output (flushBatch clears its own timer)
+    this.flushBatch();
     // Flush any pending buffer save
     if (this.saveTimer) {
       clearTimeout(this.saveTimer);
@@ -567,6 +564,16 @@ class PtyManager {
   }
 
   flushBatch() {
+    // Clear the timer here rather than at each call site: flushBatch is called
+    // directly as well as from its own timer - stop() does it, and a replay
+    // drains the queue before snapshotting the buffer. Nulling batchTimer
+    // without clearing it leaves an armed timer that fires into the next batch
+    // window, and queueOutput then schedules another on top, so the 50ms
+    // coalescing decays into one stray timer per manual flush.
+    if (this.batchTimer) {
+      clearTimeout(this.batchTimer);
+      this.batchTimer = null;
+    }
     if (this.batchQueue) {
       logger.debug({ length: this.batchQueue.length }, 'Flushing output batch');
       this.broadcast({ type: 'output', data: this.batchQueue });
