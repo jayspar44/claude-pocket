@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+### [1.4.4](https://github.com/jayspar44/claude-pocket/compare/v1.4.3...v1.4.4) (2026-08-08)
+
+
+### Bug Fixes
+
+* **app:** hold terminal geometry still while the keyboard is open ([f5164de](https://github.com/jayspar44/claude-pocket/commit/f5164de75f03ed04e09a9d450fde629e7332aa7f))
+* **relay:** bound the output buffer by bytes instead of blank repaint rows ([77cd489](https://github.com/jayspar44/claude-pocket/commit/77cd4893b4645ce3984582ed2505daae51018f29))
+
 ### [1.4.3](https://github.com/jayspar44/claude-pocket/compare/v1.4.2...v1.4.3) (2026-08-08)
 
 
