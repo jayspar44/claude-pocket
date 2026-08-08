@@ -85,3 +85,41 @@ test('clearBuffer resets every counter', () => {
   assert.equal(pm.outputBufferSize, 0);
   assert.equal(pm.outputBufferLines, 0);
 });
+
+// The cap that binds must be the byte cap, not the line cap.
+//
+// maxLines counts newlines in the raw stream, and a full-screen TUI pads every
+// repainted frame with blank rows, so most of those newlines carry nothing. At
+// the old 4500-line cap live buffers were 9-17% non-empty and held 75KB against
+// a 5MB limit: the line cap threw away real history while the byte budget sat
+// almost untouched. Reverting maxLines to a value near the client's scrollback
+// row count fails this test, which is the whole point of it.
+test('a repaint-heavy TUI stream is bounded by bytes, not by line count', () => {
+  const pm = new PtyManager('buffer-ratio', 'claude');
+
+  // Shaped like what Ink emits: a short styled fragment, then blank rows
+  // padding the frame out to the terminal height. Batched per append because a
+  // real PTY read carries several frames, and because the trim shifts one entry
+  // per append - a chunk per line would make this quadratic.
+  const frame = '\u001b[38;2;215;119;87m*\u001b[39m working\r\n' + '\r\n'.repeat(8);
+  const chunk = frame.repeat(20);
+
+  // Bounded: the trim keeps outputBufferSize under the cap by construction, so
+  // looping until it exceeds the cap would never terminate.
+  const appends = Math.ceil((config.buffer.maxSize * 2) / chunk.length);
+  for (let i = 0; i < appends; i++) pm.appendToBuffer(chunk);
+
+  assert.ok(
+    pm.outputBufferSize <= config.buffer.maxSize,
+    'the byte cap must be the one holding the buffer down'
+  );
+  assert.ok(
+    pm.outputBufferLines < config.buffer.maxLines,
+    `the line cap must not bind first (lines ${pm.outputBufferLines} vs cap ${config.buffer.maxLines})`
+  );
+
+  // And what survives has to be worth replaying: more rendered content than the
+  // client's xterm scrollback can even show, so the client is the real limit.
+  const content = pm.getBufferedOutput().split('\n').filter((l) => l.trim()).length;
+  assert.ok(content > 5000, `expected > 5000 content lines to survive, got ${content}`);
+});

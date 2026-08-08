@@ -32,8 +32,25 @@ const config = {
 
   // Output buffer configuration (for session resumption)
   buffer: {
-    maxLines: 4500, // Nearly matches client xterm.js scrollback (5000)
-    maxSize: 5 * 1024 * 1024, // 5MB max buffer size
+    // Size is the binding cap; the line cap is only a backstop.
+    //
+    // maxLines counts newlines in the raw PTY stream, and a full-screen TUI
+    // pads every repainted frame with blank rows - so those newlines are
+    // mostly not content. Measured on live buffers sitting at the old 4500-line
+    // cap: 9-17% of the lines were non-empty, at 12-18 bytes each. A session
+    // that had not yet hit the cap ran 84% non-empty at 44 bytes. So the cap
+    // was evicting real history down to roughly 400-700 visible lines while the
+    // buffer held 75KB against a 5MB limit - 1.5% of its byte budget. The old
+    // comment here claimed 4500 lines "nearly matches client xterm.js
+    // scrollback (5000)", which was the mistaken premise: raw stream newlines
+    // are nowhere near rendered rows.
+    //
+    // At those ratios 1MB holds ~9000 content rows, comfortably past the
+    // client's 5000-row scrollback - so the client is the real limit, which is
+    // what we want. The cost is that a replay after a long session is up to
+    // 1MB rather than ~75KB.
+    maxLines: 100000, // Backstop for a degenerate all-newline stream only
+    maxSize: 1024 * 1024, // 1MB - the cap that actually binds
     // Use port-specific filename to avoid conflicts between DEV/PROD relays
     persistPath: `.claude-pocket/output-buffer-${parseInt(process.env.PORT, 10) || 4501}.json`,
     saveDebounceMs: 500, // Debounce buffer saves
