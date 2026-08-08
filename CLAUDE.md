@@ -76,9 +76,21 @@ npm run lint         # both packages — there is no root lint:app / lint:relay
 
 ## Environment Variables
 
-Relay variables: `relay/CLAUDE.md`. App build-time variables: `app/.env.production`.
+Relay variables: `relay/CLAUDE.md`.
 
-**Port auto-detection:** `ecosystem.config.js` sets PORT based on folder name (`-dev` suffix → DEV ports)
+**App build-time variables live in `app/.env.production`, which is gitignored** — a fresh clone has
+none, and `npm run aab:prod` then silently falls back to the hardcoded defaults in
+`app/src/api/relay-api.js` and ships pointing at the wrong relay. Values differ per checkout (a
+`-dev` folder holds DEV values), so recreate the file with these keys:
+
+| Variable | Meaning |
+|----------|---------|
+| `VITE_APP_ENV` | `dev` or `prod` — drives the env badge in the app |
+| `VITE_RELAY_HOST` | Tailscale hostname of the relay |
+| `VITE_PROD_APP_PORT` / `VITE_PROD_RELAY_PORT` | 4500 / 4501 |
+| `VITE_DEV_APP_PORT` / `VITE_DEV_RELAY_PORT` | 4502 / 4503 |
+| `VITE_RELAY_URL` | `ws://<host>:<relay port>/ws` — fallback when auto-detect fails |
+| `VITE_RELAY_API_URL` | `http://<host>:<relay port>` — same fallback |
 
 ## API
 
