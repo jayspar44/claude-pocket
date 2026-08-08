@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { InstanceConnection, CONNECTION_STATES, shouldConnect } from '../InstanceConnection';
+import { InstanceConnection, CONNECTION_STATES, shouldConnect, MAX_RECONNECT_ATTEMPTS } from '../InstanceConnection';
 import { FakeSocket, READY } from './fakeSocket';
 
 function makeTimers() {
@@ -211,7 +211,7 @@ describe('shouldConnect: reasons are read, not just written', () => {
   it('reconnects after the ladder is exhausted', () => {
     const { conn } = make();
     connectFully(conn);
-    conn.attempts = 5;                          // MAX_RECONNECT_ATTEMPTS
+    conn.attempts = MAX_RECONNECT_ATTEMPTS;     // ladder spent
     FakeSocket.last.fireAbruptClose();
     expect(conn.state).toBe(CONNECTION_STATES.DISCONNECTED);
     expect(conn.disconnectReason).toBe('dropped');

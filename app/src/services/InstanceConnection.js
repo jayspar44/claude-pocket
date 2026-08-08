@@ -43,7 +43,7 @@ export const STICKY_DISCONNECT_REASONS = Object.freeze(['user', 'idle']);
  *   DESTROYED can never be reopened.
  * - RECONNECTING is deliberately reconnectable. connect() cancels the pending
  *   retry and starts a fresh ladder, so a resume mid-backoff comes back at once
- *   instead of waiting out a 16s rung.
+ *   instead of waiting out the rung in flight.
  * - DISCONNECTED for a sticky reason stays down unless there is user intent.
  *   Without that gate every app foreground resurrects the session the user just
  *   stopped; the reason is then written but never read, and "disconnect sticks"
@@ -85,12 +85,20 @@ const WS_CLOSED = 3;
  * because "some lifecycle event did not fire on some browser" is a failure mode
  * that recurs rather than one that gets fixed once.
  *
- * Still bounded by MAX_RECONNECT_ATTEMPTS, so a genuinely dead relay sees five
- * attempts over 15s and then nothing - the same total budget as before, just
- * spent more usefully.
+ * Still bounded by MAX_RECONNECT_ATTEMPTS: nine attempts spanning 31s. That is
+ * the same total the old [1,2,4,8,16] ladder spent - the five-rung version that
+ * replaced it silently halved the budget to 15s while its comment claimed the
+ * total was unchanged. 15s does not outlast a relay restart (deploy.sh does
+ * pm2 delete + pm2 start), and running /deploy from the phone is the primary
+ * workflow: the app never backgrounds, so no resume signal fires, and every tab
+ * drains its ladder and strands on "Offline" until each one is tapped by hand.
+ * The budget is bought back with more rungs rather than longer ones, so the
+ * flat tail - and the 4s cost of a missed resume - survives intact.
  */
-export const RECONNECT_DELAYS = [1000, 2000, 4000, 4000, 4000];
-export const MAX_RECONNECT_ATTEMPTS = 5;
+export const RECONNECT_DELAYS = [1000, 2000, 4000, 4000, 4000, 4000, 4000, 4000, 4000];
+// Derived, not repeated: the two must stay equal or the ladder either stops
+// short of its own schedule or repeats its last rung past the end of it.
+export const MAX_RECONNECT_ATTEMPTS = RECONNECT_DELAYS.length;
 export const CONNECTION_TIMEOUT = 10000;
 export const HEARTBEAT_TIMEOUT = 5000;
 
@@ -473,9 +481,9 @@ export class InstanceConnection {
    * A set-instance the relay answered but could not satisfy.
    *
    * Not _drop: the ladder exists for losses a retry might fix, and this one is
-   * deterministic until the user frees an instance on the relay. Five 10s
-   * connect timeouts and a 1/2/4/8/16s ladder would spend a minute rediscovering
-   * an answer already in hand, with a blank terminal throughout.
+   * deterministic until the user frees an instance on the relay. Nine 10s
+   * connect timeouts and a 31s ladder would spend two minutes rediscovering an
+   * answer already in hand, with a blank terminal throughout.
    *
    * Not CONNECTED either, which is the trap this replaces: that state tells
    * shouldConnect to leave the connection alone, hides StatusBar's Reconnect
