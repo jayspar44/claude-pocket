@@ -72,10 +72,22 @@ describe('InstanceConnection.resume', () => {
     expect(socket.sent.at(-1)).toEqual({ type: 'ping' });
   });
 
-  // The whole point of the probe is that it resolves fast. The 5s heartbeat
-  // deadline is a background health check on a connection with no reason to be
-  // suspect; here the user is watching and waiting.
-  it('gives the probe a much shorter deadline than the heartbeat', () => {
+  // The probe fires the instant the app foregrounds, while the radio is still
+  // waking and the tailnet path is re-establishing, so an ordinary slow first
+  // round trip must not read as a dead socket. Dropping there is not "one extra
+  // reconnect": the reconnect replays, and the client handles a replay with
+  // terminal.clear() plus a full rewrite - a blank terminal and a scroll jump.
+  // Asserted as a floor rather than a literal so the deadline cannot be tuned
+  // back down without this failing.
+  it('tolerates a slow first round trip after a foreground', () => {
+    expect(RESUME_PROBE_TIMEOUT).toBeGreaterThanOrEqual(4000);
+    expect(RESUME_PROBE_TIMEOUT).toBeLessThan(HEARTBEAT_TIMEOUT);
+  });
+
+  // Still resolves inside one heartbeat cycle. The 5s heartbeat deadline is a
+  // background health check on a connection with no reason to be suspect; here
+  // the user is watching and waiting.
+  it('gives the probe a shorter deadline than the heartbeat', () => {
     const { conn, timers } = make();
     connectFully(conn);
 

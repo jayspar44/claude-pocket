@@ -109,10 +109,19 @@ export const HEARTBEAT_TIMEOUT = 5000;
  * heartbeat is a background health check on a connection with no reason to be
  * suspect, while a resume follows a period where the socket was frozen and may
  * have been killed without a close event ever being delivered. The user is
- * looking at the screen waiting for it, so the cost of waiting is visible and
- * the cost of being wrong is one extra reconnect.
+ * looking at the screen waiting for it, so the cost of waiting is visible.
+ *
+ * But not aggressively shorter. The probe fires the instant the app foregrounds,
+ * while the radio is still being promoted out of idle and the tailnet path is
+ * re-establishing, and a round trip over 2s there is ordinary rather than
+ * evidence of a dead socket. The cost of being wrong is also not "one extra
+ * reconnect": the reconnect replays, and the client handles a replay with
+ * terminal.clear() plus a full rewrite, so the terminal blanks and the scroll
+ * position jumps to the bottom under the user's eyes - the exact churn this
+ * probe exists to avoid. Detection stays well inside one heartbeat cycle
+ * (25s interval + 5s timeout).
  */
-export const RESUME_PROBE_TIMEOUT = 2000;
+export const RESUME_PROBE_TIMEOUT = 4000;
 
 /**
  * A connect younger than this when the page resumes is left alone.
@@ -405,8 +414,8 @@ export class InstanceConnection {
    *
    * - CONNECTED: probe. The socket may well be fine, and recycling every
    *   healthy connection on every glance at another browser tab would cost a
-   *   reconnect and a full replay each time. A ping with a 2s deadline settles
-   *   it without disturbing a live one.
+   *   reconnect and a full replay each time. A ping with a short deadline
+   *   settles it without disturbing a live one.
    * - CONNECTING: a connect that has been pending across a background is not
    *   going to complete - it is the stalled case above. Replace it outright
    *   rather than waiting out the connect timeout. Fresh connects are exempt
