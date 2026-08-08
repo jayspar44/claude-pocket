@@ -142,10 +142,17 @@ class WebSocketHandler {
     let ptyListener = null;
 
     const setupPtyListener = (instanceId, cliType) => {
+      // Resolve the manager BEFORE detaching anything. get() throws when the
+      // instance cap is reached and nothing is evictable; removing the old
+      // listener ahead of that throw detaches this client from the PTY it was
+      // happily watching and never re-attaches it, so the tab keeps saying
+      // "Connected", input still reaches the CLI, and no output ever renders
+      // again. Either this function changes nothing, or it completes.
+      const ptyManager = ptyRegistry.get(instanceId, undefined, cliType);
+
       if (ptyListener && ws.currentPtyManager) {
         ws.currentPtyManager.removeListener(ptyListener);
       }
-      const ptyManager = ptyRegistry.get(instanceId, undefined, cliType);
       ws.currentPtyManager = ptyManager;
 
       ptyListener = (message) => {
@@ -228,6 +235,7 @@ class WebSocketHandler {
           // client ignores this frame entirely. Leaving skipUntilReplay true
           // there drops every output frame forever while the tab still reads
           // "Connected".
+          ctx.setSkipReplay(false);
           logger.error(
             { clientId: ws.clientId, instanceId: message.instanceId, error: error.message },
             'set-instance failed; answering with a handshake-failed error'
@@ -444,11 +452,17 @@ class WebSocketHandler {
       recoveryAttempts: message.recoveryAttempts,
     }, 'Client switching instance');
 
+    // setupPtyListener first: only once it returns is this socket genuinely
+    // bound to the new instance. Assigning ws.instanceId ahead of the bind
+    // leaves a refused switch pointing the socket at an instance it holds no
+    // listener for - and handleMessage falls back to ws.instanceId for any
+    // frame that carries none (the app's bare 'replay' and 'geometry' frames
+    // do), so a later frame would resolve, and create, the wrong manager.
+    const ptyManager = ctx.setupPtyListener(newInstanceId, cliType);
+
     ws.instanceId = newInstanceId;
     ws.cliType = cliType;
     ctx.setSkipReplay(true);
-
-    const ptyManager = ctx.setupPtyListener(newInstanceId, cliType);
 
     // Decided here, reported after the replay below. sendReplay ends with
     // a pty-status, and the client clears ptyError on any pty-status - so
