@@ -18,15 +18,28 @@ const server = http.createServer(app);
 // Initialize WebSocket handler
 const wsHandler = new WebSocketHandler(server);
 
-// CORS Configuration - allow all origins
+// CORS Configuration - enforces config.cors.allowedOrigins (ALLOWED_ORIGINS).
 app.use((req, res, next) => {
   const origin = req.headers.origin;
-  if (origin) {
+  const allowed = config.cors.allowedOrigins;
+
+  // The response varies by Origin under both branches, so a shared cache must
+  // never replay one origin's response to another.
+  res.setHeader('Vary', 'Origin');
+
+  if (!allowed) {
+    // No allowlist: reflect, so already-deployed clients keep working - but
+    // without Allow-Credentials. A reflected origin plus credentials is the
+    // pairing browsers refuse to let you spell as '*', and nothing in this
+    // project sends a cookie or an Authorization header.
+    res.setHeader('Access-Control-Allow-Origin', origin || '*');
+  } else if (origin && allowed.includes(origin)) {
     res.setHeader('Access-Control-Allow-Origin', origin);
-  } else {
-    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Credentials', 'true');
   }
-  res.setHeader('Access-Control-Allow-Credentials', 'true');
+  // Unlisted origin: no Access-Control-Allow-Origin at all, so the browser
+  // discards the response before page JS can read it.
+
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
 

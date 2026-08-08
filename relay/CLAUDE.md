@@ -19,7 +19,7 @@ the process env beats anything in `relay/.env` — that is what the *injected* r
 | `ANTIGRAVITY_COMMAND` | agy | |
 | `CODEX_COMMAND` | codex | |
 | `MAX_INSTANCES` | 10 | Max concurrent PTYs; published in `/api/health`, which the app mirrors as its tab cap once that fetch succeeds (it retries on each connect) |
-| `ALLOWED_ORIGINS` | * | **Currently unread — setting it restricts nothing.** `config.cors` has no consumers; `index.js` hand-rolls CORS that reflects any `Origin` back with `Access-Control-Allow-Credentials: true` |
+| `ALLOWED_ORIGINS` | * | Comma-separated CORS allowlist, enforced in `index.js`. `*`/unset reflects any origin but sends no `Access-Control-Allow-Credentials`; an explicit list refuses everything not on it. The APK's origin is `https://localhost` (`androidScheme: https`), not `capacitor://localhost` |
 | `LOG_LEVEL` | info | |
 | `BUILDS_BASE` | `../claude-pocket-aabs` | Sibling of the repo |
 | `BUILDS_DIR` | `$BUILDS_BASE/dev` or `/prod` by folder | What `/api/builds` serves |
