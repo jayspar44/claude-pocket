@@ -37,6 +37,7 @@ map keyed by instanceId that implies a socket's existence; that was the cause of
 ```bash
 npm run install-all && cp relay/.env.example relay/.env
 npm run dev:local    # app:4500, relay:4501
+npm run lint         # both packages — there is no root lint:app / lint:relay
 ```
 
 ## Testing
@@ -73,41 +74,11 @@ npm run dev:local    # app:4500, relay:4501
   relay change that alters what the client sees (close codes, new frame fields) has to stay
   compatible with builds already on phones.
 
-## NPM Scripts
-
-Full list: `npm run` or `package.json`. Non-obvious ones:
-
-```bash
-npm run lint           # Check code quality (NOT lint:app or lint:relay)
-npm run dev:local      # Full local dev environment
-npm run build          # Production build
-```
-
 ## Environment Variables
 
-| Location | Variable | Default |
-|----------|----------|---------|
-| `relay/.env` | `HOST` | 0.0.0.0 |
-| | `PORT` | 4501 (4503 for DEV, set by `ecosystem.config.js`) |
-| | `CLAUDE_COMMAND` | claude |
-| | `MAX_INSTANCES` | 10 — max concurrent PTYs; published in `/api/health`, which the app mirrors as its tab cap once that fetch succeeds (it retries on each connect) |
-| | `ALLOWED_ORIGINS` | * |
-| | `SHELL` | /bin/zsh |
-| | `NODE_ENV` | development |
-| | `LOG_LEVEL` | info |
-| | `BUILDS_BASE` | `../claude-pocket-aabs` (sibling of the repo) |
-| | `BUILDS_DIR` | `$BUILDS_BASE/dev` or `/prod` by folder — what `/api/builds` serves |
-| `app/.env.production` | `VITE_RELAY_HOST` | minibox.rattlesnake-mimosa.ts.net |
-| | `VITE_PROD_APP_PORT` | 4500 |
-| | `VITE_PROD_RELAY_PORT` | 4501 |
-| | `VITE_DEV_APP_PORT` | 4502 |
-| | `VITE_DEV_RELAY_PORT` | 4503 |
-| | `VITE_RELAY_URL` | ws://minibox...:4501/ws |
-| | `VITE_RELAY_API_URL` | http://minibox...:4501 |
+Relay variables: `relay/CLAUDE.md`. App build-time variables: `app/.env.production`.
 
 **Port auto-detection:** `ecosystem.config.js` sets PORT based on folder name (`-dev` suffix → DEV ports)
-
-**Production files:** `relay/.env.production` | `app/.env.production`
 
 ## API
 
@@ -140,12 +111,7 @@ the error shown — it does not retry, and it is not sticky, so selecting the ta
 - App: React Context for state, Tailwind for styling, `api/relay-api.js` for REST
 - Relay: Pino logger, JSON WebSocket protocol, multi-instance PTY with buffer
 
-**Commits:** `<type>: <description>`
-
-| Type | Bump | Type | Bump |
-|------|------|------|------|
-| `feat:` | MINOR | `fix:` | PATCH |
-| `feat!:` | MAJOR | `chore:/docs:/refactor:` | None |
+**Commits:** `<type>: <description>` (conventional commits; `standard-version` derives the bump)
 
 ## Versioning
 
@@ -155,7 +121,7 @@ Uses `standard-version`; the `release:*` scripts in `package.json` are the entry
 
 ## Slash Commands
 
-Available commands are listed to each session automatically; definitions live in `.claude/commands/` and `~/.claude/commands/`. Task detail for builds, deployment and CLI setup now lives in `.claude/skills/`.
+Definitions live in `.claude/commands/` and `~/.claude/commands/`; task detail for builds, deployment and CLI setup lives in `.claude/skills/`.
 
 **Workflows:**
 - **Dev:** `git checkout -b feature/<name> develop` → code → `/commit-push` → `/code-review` → `/pr-flow` → `npm run release`
