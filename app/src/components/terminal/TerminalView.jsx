@@ -558,7 +558,12 @@ const TerminalView = forwardRef(function TerminalView(
       if (!terminal) return null;
       const buffer = terminal.buffer.active;
       let wrapped = 0;
-      const start = buffer.viewportY;
+      // Anchored at baseY, not viewportY: the live screen is what the PTY is
+      // painting, and it is what the relay compares against its own geometry.
+      // Keying off the viewport would make the count depend on where the user
+      // happens to be scrolled, so scrolling up into unwrapped history would
+      // report a healthy terminal while the region below was shredding.
+      const start = buffer.baseY;
       const end = Math.min(start + terminal.rows, buffer.length);
       for (let i = start; i < end; i++) {
         if (buffer.getLine(i)?.isWrapped) wrapped++;

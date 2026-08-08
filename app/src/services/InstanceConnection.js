@@ -85,7 +85,12 @@ const WS_CLOSED = 3;
  * because "some lifecycle event did not fire on some browser" is a failure mode
  * that recurs rather than one that gets fixed once.
  *
- * Still bounded by MAX_RECONNECT_ATTEMPTS: nine attempts spanning 31s. That is
+ * Still bounded by MAX_RECONNECT_ATTEMPTS: nine attempts whose sleeps total
+ * 31s. Wall time to give up is longer - each attempt can also burn a 10s
+ * CONNECTION_TIMEOUT against a relay that accepts sockets but never answers
+ * set-instance - so the worst case moved from roughly 65s to roughly 121s. That
+ * is the price of not stranding tabs, and _refuse still short-circuits the one
+ * failure the relay can actually name. That is
  * the same total the old [1,2,4,8,16] ladder spent - the five-rung version that
  * replaced it silently halved the budget to 15s while its comment claimed the
  * total was unchanged. 15s does not outlast a relay restart (deploy.sh does
@@ -105,7 +110,8 @@ export const HEARTBEAT_TIMEOUT = 5000;
 /**
  * How long a resume probe waits for a pong before declaring the socket dead.
  *
- * Much shorter than HEARTBEAT_TIMEOUT because the situation is different: the
+ * Shorter than HEARTBEAT_TIMEOUT, though not by much, because the situation is
+ * different: the
  * heartbeat is a background health check on a connection with no reason to be
  * suspect, while a resume follows a period where the socket was frozen and may
  * have been killed without a close event ever being delivered. The user is

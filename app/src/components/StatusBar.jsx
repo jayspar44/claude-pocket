@@ -106,11 +106,17 @@ function StatusBar({ connectionState, ptyStatus, workingDir, ptyError, onReconne
 
         {/* Right side: Reconnect + Settings */}
         <div className="flex items-center gap-2">
+          {/* The Reconnect button is deliberately enabled while reconnecting.
+              onReconnect is connect(), which cancels the pending ladder rung
+              and reopens at once - the single most useful thing a user staring
+              at a stalled tab can do. Disabling it meant waiting out the whole
+              automatic ladder, and lengthening that ladder to cover a relay
+              restart doubled the window with no manual way out. The spinner
+              still shows that a retry is in flight. */}
           {showReconnect && onReconnect && (
             <button
               onClick={onReconnect}
-              disabled={isReconnecting}
-              className="flex items-center gap-1 px-2 py-1 text-xs font-medium text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50 rounded-md transition-colors"
+              className="flex items-center gap-1 px-2 py-1 text-xs font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-md transition-colors"
             >
               <RefreshCw className={`w-4 h-4 ${isReconnecting ? 'animate-spin' : ''}`} />
               <span>Reconnect</span>

@@ -114,8 +114,8 @@ describe('InstanceConnection: drops and backoff', () => {
     }
     expect(conn.state).toBe(CONNECTION_STATES.DISCONNECTED);
     expect(conn.error).toMatch(/multiple attempts/i);
-    // All five rungs, in order - an off-by-one in either direction (giving up
-    // early and stranding the 16s rung, or retrying past the ceiling) fails here.
+    // All nine rungs, in order - an off-by-one in either direction (giving up
+    // early and stranding the last rung, or retrying past the ceiling) fails here.
     expect(delaysUsed).toEqual(RECONNECT_DELAYS);
   });
 
@@ -185,7 +185,7 @@ describe('InstanceConnection: drops and backoff', () => {
 
     conn.connect();                               // app resume / tab select
     expect(conn.attempts).toBe(0);
-    // A full five rungs again, and it still terminates.
+    // A full nine rungs again, and it still terminates.
     expect(drainLadder(conn, timers)).toEqual(RECONNECT_DELAYS);
     expect(conn.state).toBe(CONNECTION_STATES.DISCONNECTED);
   });
@@ -209,7 +209,7 @@ describe('InstanceConnection: drops and backoff', () => {
     expect(conn.state).toBe(CONNECTION_STATES.DISCONNECTED);
     expect(conn.error).toMatch(/multiple attempts/i);
     expect(delaysUsed).toEqual(RECONNECT_DELAYS);
-    // Six sockets: the first attempt plus five rungs. A seventh means the
+    // Six sockets: the first attempt plus nine rungs. A seventh means the
     // counter reset somewhere on the retry path.
     expect(FakeSocket.instances).toHaveLength(MAX_RECONNECT_ATTEMPTS + 1);
   });
