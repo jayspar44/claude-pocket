@@ -541,19 +541,26 @@ const TerminalView = forwardRef(function TerminalView(
       const buffer = terminalRef.current.buffer.active;
       return buffer.viewportY >= buffer.baseY;
     },
-    // The terminal's real size right now, plus how many buffer rows xterm had
+    // The terminal's real size right now, plus how many *visible* rows xterm had
     // to wrap. A TUI stream rendered at the width it was produced for wraps
     // nothing - it never emits a row wider than the terminal. Wrapping is
     // therefore the signature of a terminal narrower than the PTY that wrote
-    // the output, which is what shreds Claude Code's box borders. Measured
-    // offline: the same 62KB stream renders 0 wrapped rows at 57 columns and
-    // 38 at 56.
+    // the output, which is what shreds Claude Code's box borders.
+    //
+    // Viewport only, which is what "artifacts on the user's screen" means and
+    // what the relay's own comment says it logs. The whole-buffer walk this
+    // replaces ran to scrollback (5000 rows), and xterm's getLine() allocates a
+    // fresh BufferLineApiView per call, so it churned ~5000 short-lived objects
+    // on the phone's UI thread every 20s for a diagnostic nothing on the client
+    // reads.
     getGeometry: () => {
       const terminal = terminalRef.current;
       if (!terminal) return null;
       const buffer = terminal.buffer.active;
       let wrapped = 0;
-      for (let i = 0; i < buffer.length; i++) {
+      const start = buffer.viewportY;
+      const end = Math.min(start + terminal.rows, buffer.length);
+      for (let i = start; i < end; i++) {
         if (buffer.getLine(i)?.isWrapped) wrapped++;
       }
       return { cols: terminal.cols, rows: terminal.rows, wrapped };
