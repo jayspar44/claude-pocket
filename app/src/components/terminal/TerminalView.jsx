@@ -2,6 +2,7 @@ import { useEffect, useRef, useImperativeHandle, forwardRef, useState, useCallba
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { ChevronDown } from 'lucide-react';
+import { computeKeyboardShift, distributeTopScroll } from './keyboardGeometry';
 import { createResizeNotifier } from '../../services/resizeNotifier';
 import '@xterm/xterm/css/xterm.css';
 
@@ -226,14 +227,17 @@ const getCellHeight = (terminal, fontSize) => {
  * Unified touch/pen scroll handler using Pointer Events API
  */
 class TerminalScrollHandler {
-  constructor(container, terminal, fontSize) {
+  constructor(container, terminal, fontSize, shiftController = null) {
     this.container = container;
     this.terminal = terminal;
     this.fontSize = fontSize;
+    // Owns the keyboard lift, so scrolling can spend it as extra range at the
+    // top of the buffer rather than leaving those rows unreachable.
+    this.shiftController = shiftController;
 
     this.velocityTracker = new VelocityTracker();
     this.momentumScroller = new MomentumScroller(
-      (lines) => this.terminal.scrollLines(lines),
+      (lines) => this.scrollByPixels(-lines * this.cellHeight),
       () => this.getBounds()
     );
 
@@ -271,16 +275,52 @@ class TerminalScrollHandler {
     };
   }
 
+  // Measured from the screen element, not the container. getBoundingClientRect
+  // reports post-transform coordinates, so the keyboard lift needs no term here
+  // at all. It also fixes a pre-existing drift: the container rect includes
+  // .xterm's 16px of padding and fit()'s leftover remainder, so dividing it by
+  // the row count has always been slightly wrong.
   getCellFromEvent(e) {
-    const rect = this.container.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
-    const cellWidth = rect.width / this.terminal.cols;
-    const cellHeight = rect.height / this.terminal.rows;
+    const screen = this.terminal.element?.querySelector('.xterm-screen');
+    const rect = (screen || this.container).getBoundingClientRect();
+    const cell = this.terminal._core?._renderService?.dimensions?.css?.cell;
+    const cellWidth = cell?.width || (rect.width / this.terminal.cols);
+    const cellHeight = cell?.height || (rect.height / this.terminal.rows);
+    if (!(cellWidth > 0) || !(cellHeight > 0)) return { col: 0, row: 0 };
+
+    const col = Math.floor((e.clientX - rect.left) / cellWidth);
+    const row = Math.floor((e.clientY - rect.top) / cellHeight);
     return {
-      col: Math.floor(x / cellWidth),
-      row: Math.floor(y / cellHeight) + this.terminal.buffer.active.viewportY,
+      col: Math.max(0, Math.min(this.terminal.cols - 1, col)),
+      row: Math.max(0, Math.min(this.terminal.rows - 1, row))
+        + this.terminal.buffer.active.viewportY,
     };
+  }
+
+  // The single scroll path. Positive px reveals older content.
+  scrollByPixels(pxTowardOlder) {
+    let px = pxTowardOlder;
+    const ctl = this.shiftController;
+
+    if (ctl) {
+      const current = ctl.get();
+      const { shift, deltaPx } = distributeTopScroll({
+        deltaPx: px,
+        shift: current,
+        maxShift: ctl.getMax(),
+        atTop: this.getBounds().atTop,
+      });
+      if (shift !== current) ctl.set(shift);
+      px = deltaPx;
+    }
+
+    if (px === 0) return;
+    this.accumulatedScroll -= px;
+    const lines = Math.trunc(this.accumulatedScroll / this.cellHeight);
+    if (lines !== 0) {
+      this.terminal.scrollLines(lines);
+      this.accumulatedScroll -= lines * this.cellHeight;
+    }
   }
 
   bindEvents() {
@@ -384,14 +424,8 @@ class TerminalScrollHandler {
       const velocity = deltaY / deltaTime; // px/ms
       this.velocityTracker.addSample(velocity);
 
-      // Direct scroll: finger down (positive deltaY) = scroll content up (negative lines)
-      this.accumulatedScroll -= deltaY;
-      const linesToScroll = Math.trunc(this.accumulatedScroll / this.cellHeight);
-
-      if (linesToScroll !== 0) {
-        this.terminal.scrollLines(linesToScroll);
-        this.accumulatedScroll -= linesToScroll * this.cellHeight;
-      }
+      // Finger down (positive deltaY) reveals older content.
+      this.scrollByPixels(deltaY);
     }
 
     this.lastY = e.clientY;
@@ -501,21 +535,41 @@ class TerminalScrollHandler {
 }
 
 const TerminalView = forwardRef(function TerminalView(
-  { onResize, fontSize = 14, className = '' },
+  { onResize, fontSize = 14, className = '', keyboardRef = null, keyboardEpoch = 0 },
   ref
 ) {
   const containerRef = useRef(null);
   const terminalRef = useRef(null);
   const fitAddonRef = useRef(null);
   const isAtBottomRef = useRef(true);
+  // How far the grid is currently lifted, and how far it could be. Refs, not
+  // state: these are written from a ResizeObserver and a pointer handler, and
+  // a re-render per frame of a drag would be absurd.
+  const shiftRef = useRef(0);
+  const maxShiftRef = useRef(0);
+  const syncRef = useRef(null);
   const [showScrollButton, setShowScrollButton] = useState(false);
+
+  // The lift itself. A transform rather than container scrollTop: xterm's
+  // helper textarea lives at left:-9999em and gets focused, and focusing an
+  // element inside a scroll container makes the browser scroll it into view -
+  // which would silently reset the lift mid-session. Under overflow:hidden
+  // plus a transform that cannot happen.
+  const applyShift = useCallback((px) => {
+    const clamped = Math.max(0, Math.min(px, maxShiftRef.current));
+    if (clamped === shiftRef.current) return;
+    shiftRef.current = clamped;
+    const el = terminalRef.current?.element;
+    if (el) el.style.transform = clamped ? `translateY(${-clamped}px)` : '';
+  }, []);
 
   const scrollToBottom = useCallback(() => {
     if (terminalRef.current) {
+      applyShift(maxShiftRef.current);
       terminalRef.current.scrollToBottom();
       setShowScrollButton(false);
     }
-  }, []);
+  }, [applyShift]);
 
   // Expose terminal methods to parent
   useImperativeHandle(ref, () => ({
@@ -533,6 +587,10 @@ const TerminalView = forwardRef(function TerminalView(
     fit: () => fitAddonRef.current?.fit(),
     getTerminal: () => terminalRef.current,
     scrollToBottom: () => {
+      // Restore the lift too: this can be called while parked at the top with
+      // some of it spent, and "bottom" means the bottom of the grid as well as
+      // the bottom of the buffer.
+      applyShift(maxShiftRef.current);
       terminalRef.current?.scrollToBottom();
       setShowScrollButton(false);
     },
@@ -609,7 +667,12 @@ const TerminalView = forwardRef(function TerminalView(
     const scrollHandler = new TerminalScrollHandler(
       containerRef.current,
       terminal,
-      fontSize
+      fontSize,
+      {
+        get: () => shiftRef.current,
+        getMax: () => maxShiftRef.current,
+        set: (px) => applyShift(px),
+      }
     );
     scrollHandlerRef.current = scrollHandler;
 
@@ -636,23 +699,51 @@ const TerminalView = forwardRef(function TerminalView(
     // relay's deferred PTY start is waiting on it.
     resizeNotifier.resize(terminal.cols, terminal.rows);
 
-    // Handle resize
-    const resizeObserver = new ResizeObserver(() => {
-      requestAnimationFrame(() => {
-        if (fitAddonRef.current && containerRef.current) {
-          fitAddonRef.current.fit();
-          // Update cell height after resize
-          scrollHandlerRef.current?.updateCellHeight();
-          if (terminalRef.current) {
-            resizeNotifier.resize(terminalRef.current.cols, terminalRef.current.rows);
-          }
-        }
+    // Every path that can change the terminal's geometry goes through here.
+    //
+    // While the keyboard is up, BOTH the fit and the notify are suppressed.
+    // Suppressing only the notify would be worse than doing nothing: fit()
+    // would shrink xterm's grid while the PTY stayed at its old size, which
+    // makes the relay log a geometry mismatch every 20s forever and triggers
+    // xterm's own buffer reflow - itself a source of duplicated output. The
+    // two must stay equal, so neither moves.
+    const syncTerminalGeometry = () => {
+      const term = terminalRef.current;
+      const box = containerRef.current;
+      const fit = fitAddonRef.current;
+      if (!term || !box || !fit) return;
+
+      const frozen = keyboardRef?.current?.frozen === true;
+
+      if (!frozen) {
+        fit.fit();
+        scrollHandlerRef.current?.updateCellHeight();
+      }
+
+      // Recomputed unconditionally, so there is no separate apply/clear pair
+      // to keep in sync: unfrozen, the grid matches the container and this
+      // settles to 0 on its own.
+      const previousMax = maxShiftRef.current;
+      maxShiftRef.current = computeKeyboardShift({
+        gridHeight: term.element?.offsetHeight ?? 0,
+        containerHeight: box.clientHeight,
       });
+      // Keep whatever the user has spent at the top, but re-clamp it. A fully
+      // unspent lift follows the maximum.
+      applyShift(shiftRef.current >= previousMax ? maxShiftRef.current : shiftRef.current);
+
+      if (!frozen) resizeNotifier.resize(term.cols, term.rows);
+    };
+    syncRef.current = syncTerminalGeometry;
+
+    const resizeObserver = new ResizeObserver(() => {
+      requestAnimationFrame(syncTerminalGeometry);
     });
 
     resizeObserver.observe(containerRef.current);
 
     return () => {
+      syncRef.current = null;
       scrollHandlerRef.current?.destroy();
       scrollHandlerRef.current = null;
       resizeObserver.disconnect();
@@ -663,16 +754,28 @@ const TerminalView = forwardRef(function TerminalView(
       terminalRef.current = null;
       fitAddonRef.current = null;
     };
-  }, [fontSize, onResize]);
+  }, [fontSize, onResize, keyboardRef, applyShift]);
 
-  // Update font size if it changes
+  // Update font size if it changes. Routed through syncTerminalGeometry rather
+  // than fitting directly: a font change alters cell height, so it changes both
+  // the row count and the grid height, and only that function knows whether the
+  // geometry is currently frozen.
   useEffect(() => {
     if (terminalRef.current) {
       terminalRef.current.options.fontSize = fontSize;
-      fitAddonRef.current?.fit();
       scrollHandlerRef.current?.setFontSize(fontSize);
+      syncRef.current?.();
     }
   }, [fontSize]);
+
+  // Backstop. A freeze transition normally comes with a container size change,
+  // so the ResizeObserver covers it - but a keyboard that opens and closes
+  // inside one delivery cycle never changes the observed size, and would leave
+  // a stale lift behind. Safe to run spuriously: fit() no-ops on unchanged
+  // dimensions and the notifier drops a repeat of the size it last sent.
+  useEffect(() => {
+    syncRef.current?.();
+  }, [keyboardEpoch]);
 
   return (
     <div className={`relative w-full h-full ${className}`}>
