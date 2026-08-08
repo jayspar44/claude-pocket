@@ -2,6 +2,24 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+### [1.4.3](https://github.com/jayspar44/claude-pocket/compare/v1.4.2...v1.4.3) (2026-08-08)
+
+
+### Bug Fixes
+
+* **app:** keep Reconnect usable, and the wrap count independent of scroll ([5df5de5](https://github.com/jayspar44/claude-pocket/commit/5df5de5d5151a2b809357aa95cad4b1fc668fefa))
+* **app:** restore the reconnect budget a relay restart needs ([9cd7a3c](https://github.com/jayspar44/claude-pocket/commit/9cd7a3cf536684372a2e3e7f20268474eec53e24))
+* **app:** stop a cold-radio resume probe dropping a live socket ([64bf09e](https://github.com/jayspar44/claude-pocket/commit/64bf09e0f9c23981b77400c346596db7403ddec7))
+* **relay:** drain the pending output batch before snapshotting a replay ([b50b6f7](https://github.com/jayspar44/claude-pocket/commit/b50b6f7bac1fee2de1cd6836392f8670cbc3322f))
+* **relay:** keep a failed set-instance from freezing the terminal ([14b98e5](https://github.com/jayspar44/claude-pocket/commit/14b98e511857e4a9acc950ad3ace6a2e491bf879))
+* **relay:** stop output buffer collapsing to a single chunk ([b7f3225](https://github.com/jayspar44/claude-pocket/commit/b7f3225edb0de95c2f3f82d88608eaf2d07daf5b))
+* **relay:** suppress the drained batch for the client that asked to replay ([a877599](https://github.com/jayspar44/claude-pocket/commit/a877599431f16fab5cb40802683d97da420ae52d))
+
+
+### Performance
+
+* **app:** bound the geometry walk to the viewport ([9e0d5ed](https://github.com/jayspar44/claude-pocket/commit/9e0d5ed1edf473505f042deeb9fb9e42cdfb3dd6))
+
 ### [1.4.2](https://github.com/jayspar44/claude-pocket/compare/v1.4.1...v1.4.2) (2026-08-07)
 
 

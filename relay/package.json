@@ -1,6 +1,6 @@
 {
   "name": "claude-pocket-relay",
-  "version": "1.4.2",
+  "version": "1.4.3",
   "description": "Relay server for Claude Pocket",
   "main": "src/index.js",
   "private": true,
