@@ -2,6 +2,15 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+## [1.5.0](https://github.com/jayspar44/claude-pocket/compare/v1.4.4...v1.5.0) (2026-08-09)
+
+
+### Bug Fixes
+
+* **relay:** enforce ALLOWED_ORIGINS instead of reflecting every origin ([a4d7c4d](https://github.com/jayspar44/claude-pocket/commit/a4d7c4d3bef7dc1e67d6ebde7a236fae9623d335))
+* **relay:** reset the client screen before replaying the output buffer ([13c8765](https://github.com/jayspar44/claude-pocket/commit/13c876595a8f1bf30b08abf2b073ac03b21aac0b))
+* **relay:** revert CORS enforcement, complete the replay screen reset ([bf24255](https://github.com/jayspar44/claude-pocket/commit/bf2425562ff63ef86a726b3f6eca2bb82f353202))
+
 ### [1.4.4](https://github.com/jayspar44/claude-pocket/compare/v1.4.3...v1.4.4) (2026-08-08)
 
 
