@@ -1,7 +1,7 @@
 import { useRef, useCallback, useState, useEffect } from 'react';
 import { TerminalView } from '../components/terminal';
 import { useTerminalRelay, useRelay } from '../hooks/useRelay';
-import { useViewportHeight } from '../hooks/useViewportHeight';
+import { useViewportMetrics } from '../hooks/useViewportHeight';
 import InputBar from '../components/input/InputBar';
 import CommandAutocomplete from '../components/input/CommandAutocomplete';
 import QuickActions from '../components/input/QuickActions';
@@ -16,40 +16,38 @@ function Terminal() {
   const terminalRef = useRef(null);
   const containerRef = useRef(null);
   const inputBarRef = useRef(null);
-  const prevViewportHeightRef = useRef(null);
   const wasAtBottomRef = useRef(true);
   const { connectionState, ptyStatus, sendInput, sendResize, sendInterrupt, submitInput, clearAndReplay } = useTerminalRelay(terminalRef);
   const { connect, activeInstance, activeInstanceId, ptyError, instances, taskComplete } = useRelay();
-  const viewportHeight = useViewportHeight();
+  const { height: viewportHeight, keyboardRef, keyboardEpoch } = useViewportMetrics();
   const [fontSize] = useState(() => {
     const stored = storage.get('fontSize');
     return stored ? parseInt(stored, 10) : 12;
   });
 
-  // Refit terminal when viewport changes (keyboard show/hide)
+  // Keep the view pinned to the bottom across a keyboard transition.
+  //
+  // No fit() here any more. TerminalView's own ResizeObserver fits on the same
+  // layout change, and it is the only path that also tells the PTY - so this
+  // one could shrink the grid without notifying, leaving xterm and the PTY at
+  // different sizes, which is exactly the state the relay warns about forever.
+  //
+  // Keyed on the epoch rather than a height comparison, because a shrink alone
+  // cannot tell a keyboard from browser chrome and the classification can.
   useEffect(() => {
-    if (terminalRef.current) {
-      const prevHeight = prevViewportHeightRef.current;
-      const keyboardOpened = prevHeight && viewportHeight < prevHeight;
-
-      // Track if we were at bottom before viewport change
-      if (!keyboardOpened) {
-        wasAtBottomRef.current = terminalRef.current.isAtBottom?.() ?? true;
-      }
-
-      // Small delay to let layout settle
-      requestAnimationFrame(() => {
-        terminalRef.current.fit?.();
-
-        // If keyboard opened and we were at bottom, scroll to bottom
-        if (keyboardOpened && wasAtBottomRef.current) {
-          terminalRef.current.scrollToBottom?.();
-        }
-      });
-
-      prevViewportHeightRef.current = viewportHeight;
+    if (!terminalRef.current) return;
+    if (wasAtBottomRef.current) {
+      requestAnimationFrame(() => terminalRef.current?.scrollToBottom?.());
     }
-  }, [viewportHeight]);
+  }, [keyboardEpoch]);
+
+  // Sampled while the geometry is settled, so the flag above reflects where the
+  // user was before a keyboard transition moved anything.
+  useEffect(() => {
+    if (terminalRef.current && !keyboardRef.current?.frozen) {
+      wasAtBottomRef.current = terminalRef.current.isAtBottom?.() ?? true;
+    }
+  }, [viewportHeight, keyboardRef]);
 
   // Bottom sheet states
   const [showCommands, setShowCommands] = useState(false);
@@ -86,9 +84,17 @@ function Terminal() {
   // directly in useTerminalRelay hook for proper instance routing
 
   const handleResize = useCallback((cols, rows) => {
+    // The PTY is always told the truth. Persistence is not: these dims become
+    // the spawn geometry for the next session via the handshake, and a size
+    // measured while the keyboard was up would spawn the CLI into a ten-row
+    // terminal. The freeze already suppresses most of those, but the ghost
+    // keyboard path and a rotation taken with the keyboard open still deliver
+    // genuinely small sizes.
     sendResize(cols, rows);
-    storage.setJSON('terminal-dims', { cols, rows });
-  }, [sendResize]);
+    if (!keyboardRef.current?.frozen) {
+      storage.setJSON('terminal-dims', { cols, rows });
+    }
+  }, [sendResize, keyboardRef]);
 
   const handleSend = useCallback((text) => {
     if (ctrlActive && text.length > 0) {
@@ -219,6 +225,8 @@ function Terminal() {
             ref={terminalRef}
             onResize={handleResize}
             fontSize={fontSize}
+            keyboardRef={keyboardRef}
+            keyboardEpoch={keyboardEpoch}
           />
         )}
       </div>

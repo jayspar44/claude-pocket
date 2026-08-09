@@ -2,6 +2,143 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+## [1.5.0](https://github.com/jayspar44/claude-pocket/compare/v1.4.4...v1.5.0) (2026-08-09)
+
+
+### Bug Fixes
+
+* **relay:** enforce ALLOWED_ORIGINS instead of reflecting every origin ([a4d7c4d](https://github.com/jayspar44/claude-pocket/commit/a4d7c4d3bef7dc1e67d6ebde7a236fae9623d335))
+* **relay:** reset the client screen before replaying the output buffer ([13c8765](https://github.com/jayspar44/claude-pocket/commit/13c876595a8f1bf30b08abf2b073ac03b21aac0b))
+* **relay:** revert CORS enforcement, complete the replay screen reset ([bf24255](https://github.com/jayspar44/claude-pocket/commit/bf2425562ff63ef86a726b3f6eca2bb82f353202))
+
+### [1.4.4](https://github.com/jayspar44/claude-pocket/compare/v1.4.3...v1.4.4) (2026-08-08)
+
+
+### Bug Fixes
+
+* **app:** hold terminal geometry still while the keyboard is open ([f5164de](https://github.com/jayspar44/claude-pocket/commit/f5164de75f03ed04e09a9d450fde629e7332aa7f))
+* **relay:** bound the output buffer by bytes instead of blank repaint rows ([77cd489](https://github.com/jayspar44/claude-pocket/commit/77cd4893b4645ce3984582ed2505daae51018f29))
+
+### [1.4.3](https://github.com/jayspar44/claude-pocket/compare/v1.4.2...v1.4.3) (2026-08-08)
+
+
+### Bug Fixes
+
+* **app:** keep Reconnect usable, and the wrap count independent of scroll ([5df5de5](https://github.com/jayspar44/claude-pocket/commit/5df5de5d5151a2b809357aa95cad4b1fc668fefa))
+* **app:** restore the reconnect budget a relay restart needs ([9cd7a3c](https://github.com/jayspar44/claude-pocket/commit/9cd7a3cf536684372a2e3e7f20268474eec53e24))
+* **app:** stop a cold-radio resume probe dropping a live socket ([64bf09e](https://github.com/jayspar44/claude-pocket/commit/64bf09e0f9c23981b77400c346596db7403ddec7))
+* **relay:** drain the pending output batch before snapshotting a replay ([b50b6f7](https://github.com/jayspar44/claude-pocket/commit/b50b6f7bac1fee2de1cd6836392f8670cbc3322f))
+* **relay:** keep a failed set-instance from freezing the terminal ([14b98e5](https://github.com/jayspar44/claude-pocket/commit/14b98e511857e4a9acc950ad3ace6a2e491bf879))
+* **relay:** stop output buffer collapsing to a single chunk ([b7f3225](https://github.com/jayspar44/claude-pocket/commit/b7f3225edb0de95c2f3f82d88608eaf2d07daf5b))
+* **relay:** suppress the drained batch for the client that asked to replay ([a877599](https://github.com/jayspar44/claude-pocket/commit/a877599431f16fab5cb40802683d97da420ae52d))
+
+
+### Performance
+
+* **app:** bound the geometry walk to the viewport ([9e0d5ed](https://github.com/jayspar44/claude-pocket/commit/9e0d5ed1edf473505f042deeb9fb9e42cdfb3dd6))
+
+### [1.4.2](https://github.com/jayspar44/claude-pocket/compare/v1.4.1...v1.4.2) (2026-08-07)
+
+
+### Bug Fixes
+
+* **relay:** make a healthy geometry report visible at least once ([f7ea55c](https://github.com/jayspar44/claude-pocket/commit/f7ea55cc5c1b1f0f4141154d7751ddf5e2d1d53d))
+
+### [1.4.1](https://github.com/jayspar44/claude-pocket/compare/v1.4.0...v1.4.1) (2026-08-05)
+
+
+### Bug Fixes
+
+* **app:** confirm terminal dimensions right after the handshake ([a5a7255](https://github.com/jayspar44/claude-pocket/commit/a5a72554c9a151df2e507df114e71a9e92cc98c9))
+
+## [1.4.0](https://github.com/jayspar44/claude-pocket/compare/v1.3.0...v1.4.0) (2026-08-05)
+
+
+### Features
+
+* **app:** report recovery latency to the relay on the handshake ([7aa5a1e](https://github.com/jayspar44/claude-pocket/commit/7aa5a1eb6aafa81ea02c0ca5388aaa4dd4881218))
+
+
+### Bug Fixes
+
+* **app:** catch the resume signal visibilitychange was missing ([14f389e](https://github.com/jayspar44/claude-pocket/commit/14f389e6d7ae9315a0d353661929c5f6bb1ab4ba))
+* **app:** reconnect on resume instead of waiting out a connect timeout ([adc0d11](https://github.com/jayspar44/claude-pocket/commit/adc0d1101e679d5ced1a7bcf417a7ae35cc00d3a))
+
+## [1.3.0](https://github.com/jayspar44/claude-pocket/compare/v1.2.0...v1.3.0) (2026-08-04)
+
+
+### Features
+
+* **app:** add ConnectionManager with one shared heartbeat ([46a6471](https://github.com/jayspar44/claude-pocket/commit/46a6471ff7326f89a3d13d21749e4c8768ce7f80))
+* **app:** add InstanceConnection with connect and handshake ([f2bddd3](https://github.com/jayspar44/claude-pocket/commit/f2bddd38c1416ef3f89037e391172cdbf1b55340))
+* **app:** align the tab limit to the relay's instance cap ([dad96c1](https://github.com/jayspar44/claude-pocket/commit/dad96c1c175bc2982f3348d7f3e6e67e30470a1d))
+* **app:** reconnect on every involuntary close, with a real ladder ([b357f73](https://github.com/jayspar44/claude-pocket/commit/b357f73b74dec07bb70fa5187c7fd875b29dfc13)), closes [#8](https://github.com/jayspar44/claude-pocket/issues/8)
+* **app:** record why a connection is down, plus idle and teardown ([4912c24](https://github.com/jayspar44/claude-pocket/commit/4912c24aefffb7dc0ac2cfcc99dd13a25f286063))
+
+
+### Bug Fixes
+
+* address code review findings on orphaned-WebSocket fix ([09dce64](https://github.com/jayspar44/claude-pocket/commit/09dce648cd3c2e21e7d06ee54c05f5cedf5e0e41))
+* **app:** bound how long a resize burst can withhold a size ([bd224df](https://github.com/jayspar44/claude-pocket/commit/bd224dfbed90b051089810ce5ebf81613122491d))
+* **app:** complete the handshake on pty-error, not pty-status alone ([bccbbff](https://github.com/jayspar44/claude-pocket/commit/bccbbff8d62428ebf067943e9af897e01be309ac))
+* **app:** connect to the new relay url, not a stale one ([5caeb67](https://github.com/jayspar44/claude-pocket/commit/5caeb67e3d26a8a195eb69940dd448ece3a70e6a))
+* **app:** debounce terminal resize before it reaches the PTY ([01b65cf](https://github.com/jayspar44/claude-pocket/commit/01b65cfa3690a0908facb0846426d903c3666124))
+* **app:** do not reconnect a tab the relay never stopped ([6fb08b0](https://github.com/jayspar44/claude-pocket/commit/6fb08b0f4720b3e24d51023d2642fb7863a80c68))
+* **app:** keep the foreground service while any connection retries ([3e6b173](https://github.com/jayspar44/claude-pocket/commit/3e6b173bb599b193afb56b0f080d3fb80eaf2ee9))
+* **app:** keep the tab online after Stop so Start comes back ([922e121](https://github.com/jayspar44/claude-pocket/commit/922e121ed62fd8a9a042a62584b263e800ae195c))
+* **app:** let the relay decide the instance cap instead of guessing ([ba56b3e](https://github.com/jayspar44/claude-pocket/commit/ba56b3e77a348a8eb214b2a740ac035e0fa4f801))
+* **app:** let the relay's instance cap arrive after a failed fetch ([f3f1056](https://github.com/jayspar44/claude-pocket/commit/f3f1056b379f57a9441fd6cd0282404c34ddf809))
+* **app:** make a stopped session survive an app resume ([cdb526b](https://github.com/jayspar44/claude-pocket/commit/cdb526b9ceca1918ea91bfde68c886eed54e0355))
+* **app:** make the foreground-service flag follow intent ([3f6a2c3](https://github.com/jayspar44/claude-pocket/commit/3f6a2c3e7a4c4992a3ccfd26146c61deb8188727))
+* **app:** reconnect only the tabs Stop All actually stopped ([3e8be8a](https://github.com/jayspar44/claude-pocket/commit/3e8be8a0c39c4d30c968a70386ada72638a8ee3c))
+* **app:** release the foreground service on provider unmount ([24cfef5](https://github.com/jayspar44/claude-pocket/commit/24cfef566ba3b23e950a56f3c8f1b670df862142))
+* **app:** require a handshake payload at construction ([d659a31](https://github.com/jayspar44/claude-pocket/commit/d659a3112dfc6e49dfad3887bbb1be4f8025c8a3))
+* **app:** restore only a tab that was live before the stop ([7efb3b7](https://github.com/jayspar44/claude-pocket/commit/7efb3b7df2a03fd338db3e056e2ecb57b9d9c832))
+* **app:** revive every connection on resume, not just one ([fda895a](https://github.com/jayspar44/claude-pocket/commit/fda895a54f58c61c6982afc8c35648dae383bde8))
+* **app:** say that Stop All blocks tab auto-restart ([b5b510f](https://github.com/jayspar44/claude-pocket/commit/b5b510f20bb65778cfc67703c439be97554556a6))
+* **app:** send Start through set-instance again ([9524a74](https://github.com/jayspar44/claude-pocket/commit/9524a7423cedab8bc920282721f23b4c5cac7930))
+* **app:** start a fresh reconnect ladder on an external connect ([33fbdc6](https://github.com/jayspar44/claude-pocket/commit/33fbdc68e4c1434d73f86a2a36a0912575111bb0))
+* **app:** start a stopped session via the start API ([076720b](https://github.com/jayspar44/claude-pocket/commit/076720b8b1a0f81f963cc7ade742de2fd9dbb4fd))
+* **app:** stop leaving a stopped session able to respawn ([1965425](https://github.com/jayspar44/claude-pocket/commit/19654253574dd0da60c9574c99002bfbdfa332c9))
+* **app:** stopping sessions no longer resurrects them ([70afa4d](https://github.com/jayspar44/claude-pocket/commit/70afa4d2e3abae67b51207496e479037573c1d6b))
+* **app:** tell the user to delete a tab, not stop a session ([33f882d](https://github.com/jayspar44/claude-pocket/commit/33f882df3c8c060d9ed2876fc0da04d173e523fb))
+* **app:** treat a socket with no close event as gone ([ac23117](https://github.com/jayspar44/claude-pocket/commit/ac231176833a2e76d0c6d9c7563dbc70803b22cf))
+* bin the registry-level stop record, and two defects around it ([3678ad6](https://github.com/jayspar44/claude-pocket/commit/3678ad6614a2873df504bed44e1a7600d5e06801))
+* correct stale update-skip comment in pty-manager ([0bbb338](https://github.com/jayspar44/claude-pocket/commit/0bbb3383ba8e2b9219e87c69d3d784c93e4d743f))
+* end a refused set-instance in disconnected, not connected ([e296728](https://github.com/jayspar44/claude-pocket/commit/e296728dffac4ae1b3dd5783bc441afed138f8c4))
+* prevent handshake payload from overriding type/instanceId ([c79008d](https://github.com/jayspar44/claude-pocket/commit/c79008d1a49086d7ef006dee1a95ff9d5a6fc626))
+* **relay:** a failed pty.spawn() must not crash the whole relay ([601ee17](https://github.com/jayspar44/claude-pocket/commit/601ee177596868aaed7c8763592ac1855591a9f8))
+* **relay:** a non-numeric MAX_INSTANCES no longer disables the cap ([5cd077a](https://github.com/jayspar44/claude-pocket/commit/5cd077ac6723368780adc5c282d40ab4a8a6f629))
+* **relay:** a superseded PTY start must not spawn ([bc676bd](https://github.com/jayspar44/claude-pocket/commit/bc676bd5125495e90981627a924ed99480fcf4ad))
+* **relay:** a superseded start must not reset the live attempt ([5db04a5](https://github.com/jayspar44/claude-pocket/commit/5db04a5a2725f3ebc9bc9a831814694b97f93c0b))
+* **relay:** add a starting state to the PTY lifecycle ([0be9451](https://github.com/jayspar44/claude-pocket/commit/0be94512906a93e6d4b8158b65bcea7a44652af7))
+* **relay:** an explicit stop disarms a pending deferred start ([fac01e1](https://github.com/jayspar44/claude-pocket/commit/fac01e1a5769f208a4022426d217bf6007424bd1))
+* **relay:** an explicitly stopped session does not auto-restart ([24ed67a](https://github.com/jayspar44/claude-pocket/commit/24ed67a3c8cc8c9769ed44149914bf0ae0b99a02))
+* **relay:** bound remembered user stops without expiring them ([06ce7c8](https://github.com/jayspar44/claude-pocket/commit/06ce7c82c1209d472a851a29b31f7c65ecd1b471))
+* **relay:** do not evict a starting PTY manager; publish the instance cap ([9ccbb19](https://github.com/jayspar44/claude-pocket/commit/9ccbb19ee3aeabfe21c71e241027b28efecdd99a))
+* **relay:** do not pass CLAUDE_CODE_CHILD_SESSION to spawned CLIs ([19928b3](https://github.com/jayspar44/claude-pocket/commit/19928b304115f0f9c05b2834baa5e5c5aff3ce5d))
+* **relay:** record client dimensions from set-instance during starting ([aa4bd2d](https://github.com/jayspar44/claude-pocket/commit/aa4bd2dcfc6ec6f648900c9d8467568b5a3431c5))
+* **relay:** reject non-object WebSocket frames before dispatch ([42727a6](https://github.com/jayspar44/claude-pocket/commit/42727a63463a76533dab51b96bf51cb619f0c70c))
+* **relay:** release WebSockets on shutdown ([ba09a09](https://github.com/jayspar44/claude-pocket/commit/ba09a0984e6d29441c3724a5ef205687ff43b636))
+* **relay:** remember an explicit stop across remove() so it survives DELETE ([4ebb62a](https://github.com/jayspar44/claude-pocket/commit/4ebb62a85222ed36519f3434453dfcb50e13ad2c))
+* **relay:** say why a set-instance declined to auto-start ([a98eb44](https://github.com/jayspar44/claude-pocket/commit/a98eb441cdd41fd5cf834934b573e8c5f5b28642))
+* **relay:** send the missing-working-dir error after the replay ([7c73f67](https://github.com/jayspar44/claude-pocket/commit/7c73f67f37bdd5e844901864ba2367fdcbdf2794))
+* **relay:** stale geometry and a live process must not survive ([44ab4c6](https://github.com/jayspar44/claude-pocket/commit/44ab4c6ecfd4b08d7aed62951b0626b44d535cb2))
+* **relay:** start routes must treat a starting PTY as busy ([aba3128](https://github.com/jayspar44/claude-pocket/commit/aba312829ca8b610303caca042b95ddd7c638dc4))
+* **relay:** stop expiring the user-stop record after 30 minutes ([60c44aa](https://github.com/jayspar44/claude-pocket/commit/60c44aac761ac606582bef8b02ab1c709bec9555))
+* **relay:** stop route must record the stop in the registry ([1904d4f](https://github.com/jayspar44/claude-pocket/commit/1904d4f4bc7ec01d1b99edccb4e0293ec3a23390))
+* **relay:** treat a starting PTY as busy at every decision point ([8629e29](https://github.com/jayspar44/claude-pocket/commit/8629e29859031b149c64c77150d3b0004e9206bc))
+* **relay:** two set-instance defects around stop and dimensions ([c6576da](https://github.com/jayspar44/claude-pocket/commit/c6576da3df90447167a34441361653029a24b1aa))
+* **relay:** unref the PTY registry's idle-cleanup interval ([035ea78](https://github.com/jayspar44/claude-pocket/commit/035ea78dc39408873e232504b2fc88262739f37d))
+* replace orphan-sweep heuristic with deterministic supersede ([b0b30d9](https://github.com/jayspar44/claude-pocket/commit/b0b30d91a2edea50a54c59771c17fe7414f6d5b2))
+* restore five-rung reconnect ladder, fix off-by-one in test ([4bf5f49](https://github.com/jayspar44/claude-pocket/commit/4bf5f49519c59557ae9ffa6ff2c96af80a45b975))
+* stop duplicated terminal output from orphaned WebSockets ([#8](https://github.com/jayspar44/claude-pocket/issues/8)) ([bd782f5](https://github.com/jayspar44/claude-pocket/commit/bd782f51c8ab8820b4d3cf4a59019ca7247fa1e9))
+
+
+### Performance
+
+* **app:** run the heartbeat only while a connection is live ([45ede30](https://github.com/jayspar44/claude-pocket/commit/45ede30d20241d67da8b2707cc59243d63a773be))
+
 ## [1.2.0](https://github.com/jayspar44/claude-pocket/compare/v1.1.0...v1.2.0) (2026-05-30)
 
 

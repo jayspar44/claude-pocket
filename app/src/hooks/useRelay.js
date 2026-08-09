@@ -5,6 +5,11 @@ export function useRelay() {
   return useRelayContext();
 }
 
+// How often the client tells the relay what xterm actually is. Purely
+// diagnostic, so it is sampled rather than driven by resize events: the bug
+// being hunted is a size the relay was never told about, which no event marks.
+export const GEOMETRY_REPORT_MS = 20000;
+
 export function useTerminalRelay(terminalRef) {
   const {
     connectionState,
@@ -115,6 +120,26 @@ export function useTerminalRelay(terminalRef) {
       subscribedInstanceRef.current = null;
     };
   }, [activeInstanceId, isConnected, addInstanceMessageListener, sendToInstance, terminalRef]);
+
+  // Report xterm's real dimensions so the relay can compare them against the
+  // size the PTY is genuinely rendering for. Until now the relay only ever saw
+  // the size the client claimed at its last resize, so a terminal that drifted
+  // narrower than the PTY - a dropped resize, a stale persisted size at spawn -
+  // was invisible on both sides. Nothing on the client consumes this.
+  useEffect(() => {
+    if (!isConnected || !activeInstanceId) return;
+
+    const report = () => {
+      const geometry = terminalRef.current?.getGeometry?.();
+      if (geometry) {
+        sendToInstance(activeInstanceId, { type: 'geometry', ...geometry });
+      }
+    };
+
+    report();
+    const timer = setInterval(report, GEOMETRY_REPORT_MS);
+    return () => clearInterval(timer);
+  }, [isConnected, activeInstanceId, sendToInstance, terminalRef]);
 
   const handleInput = useCallback((data) => {
     sendInput(data);

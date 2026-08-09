@@ -1,8 +1,9 @@
 const PtyManager = require('./pty-manager');
 const logger = require('./logger');
+const config = require('./config');
 
 // Maximum number of concurrent PTY instances
-const MAX_INSTANCES = 10;
+const MAX_INSTANCES = config.pty.maxInstances;
 
 // Idle timeout for cleanup (30 minutes)
 const IDLE_TIMEOUT_MS = 30 * 60 * 1000;
@@ -10,13 +11,32 @@ const IDLE_TIMEOUT_MS = 30 * 60 * 1000;
 // Default instance ID for backward compatibility
 const DEFAULT_INSTANCE_ID = 'default';
 
+// "The user stopped this session" lives on the PtyManager object
+// (PtyManager.stoppedByUser) and nowhere else. It therefore lasts exactly as
+// long as that manager does: a relay restart or an idle eviction forgets it,
+// and the next set-instance for that id is free to auto-start.
+//
+// An earlier revision tried to outlive the manager with a registry-level map
+// of stopped ids. It was rewritten four times - expiring too eagerly, then
+// never expiring, then evictable in a way that silently resurrected a stopped
+// CLI - and each attempt to bound it broke something else. The map is gone.
+// Callers that need a stop to stick must keep the manager alive
+// (POST /api/pty/stop) rather than removing it; the app no longer reconnects a
+// tab after a removal, so nothing re-sends set-instance for a manager-less id.
+
 class PtyRegistry {
   constructor() {
     this.instances = new Map(); // instanceId -> PtyManager
-    this.lastAccessTime = new Map(); // instanceId -> timestamp
+    // instanceId -> timestamp. Every key here has a matching key in
+    // this.instances; get() maintains that invariant, and remove() is the
+    // only thing that deletes from either.
+    this.lastAccessTime = new Map();
 
-    // Start idle cleanup interval
+    // Start idle cleanup interval. This is a background maintenance timer,
+    // not user-facing work, so it must not hold the event loop open on its
+    // own (e.g. keeping `node --test` or a script running forever).
     this.cleanupInterval = setInterval(() => this.cleanupIdleInstances(), 60000);
+    this.cleanupInterval.unref();
   }
 
   /**
@@ -30,11 +50,9 @@ class PtyRegistry {
     // Use default instance ID if not provided (backward compatibility)
     const id = instanceId || DEFAULT_INSTANCE_ID;
 
-    // Update access time
-    this.lastAccessTime.set(id, Date.now());
-
     // Return existing instance if available
     if (this.instances.has(id)) {
+      this.lastAccessTime.set(id, Date.now());
       const instance = this.instances.get(id);
       // Update working dir if provided and different
       if (workingDir && instance.currentWorkingDir !== workingDir) {
@@ -42,9 +60,9 @@ class PtyRegistry {
           'Working directory changed, will apply on restart');
         instance.pendingWorkingDir = workingDir;
       }
-      // Update cliType if provided and different (only when not running)
+      // Update cliType if provided and different (only when not running/starting)
       if (cliType && instance.cliType !== cliType) {
-        if (!instance.isRunning) {
+        if (!instance.isBusy) {
           logger.info({ instanceId: id, oldCliType: instance.cliType, newCliType: cliType },
             'CLI type changed');
           instance.cliType = cliType;
@@ -61,6 +79,13 @@ class PtyRegistry {
       // Try to remove oldest idle instance
       const removed = this.removeOldestIdle();
       if (!removed) {
+        // Nothing has been written for this id yet, and that is deliberate:
+        // lastAccessTime is only ever cleaned by remove(), which needs a
+        // matching entry in this.instances, so a timestamp written for an
+        // instance that was then never created would be uncollectable - it
+        // survives idle cleanup (which requires `instance &&`) and grows the
+        // map once per rejected connect for the life of the process. Write
+        // the timestamp only on the paths that end with a live instance.
         throw new Error(`Maximum instances (${MAX_INSTANCES}) reached`);
       }
     }
@@ -69,6 +94,7 @@ class PtyRegistry {
     logger.info({ instanceId: id, workingDir }, 'Creating new PTY instance');
     const instance = new PtyManager(id, cliType);
     this.instances.set(id, instance);
+    this.lastAccessTime.set(id, Date.now());
 
     return instance;
   }
@@ -84,6 +110,10 @@ class PtyRegistry {
 
   /**
    * Remove and stop a PTY instance
+   * Removing destroys the PtyManager, and with it any stoppedByUser flag: the
+   * next get() for this id builds a manager that will auto-start again. Where
+   * a stop has to survive, keep the manager and call PtyManager.stop()
+   * (POST /api/pty/stop) instead of removing it.
    * @param {string} instanceId - The instance identifier
    * @returns {boolean} Whether an instance was removed
    */
@@ -138,8 +168,8 @@ class PtyRegistry {
       const idleTime = now - lastAccess;
       const instance = this.instances.get(id);
 
-      // Don't remove running instances or instances with connected clients
-      if (instance && !instance.isRunning && instance.listeners.size === 0 && idleTime > IDLE_TIMEOUT_MS) {
+      // Don't remove busy (running or starting) instances or instances with connected clients
+      if (instance && !instance.isBusy && instance.listeners.size === 0 && idleTime > IDLE_TIMEOUT_MS) {
         toRemove.push(id);
       }
     }
@@ -152,6 +182,7 @@ class PtyRegistry {
     if (toRemove.length > 0) {
       logger.info({ removed: toRemove.length, remaining: this.instances.size }, 'Idle instance cleanup complete');
     }
+
   }
 
   /**
@@ -164,8 +195,8 @@ class PtyRegistry {
 
     for (const [id, lastAccess] of this.lastAccessTime) {
       const instance = this.instances.get(id);
-      // Only consider stopped instances with no listeners
-      if (instance && !instance.isRunning && instance.listeners.size === 0 && lastAccess < oldestTime) {
+      // Only consider stopped (not busy) instances with no listeners
+      if (instance && !instance.isBusy && instance.listeners.size === 0 && lastAccess < oldestTime) {
         oldestId = id;
         oldestTime = lastAccess;
       }

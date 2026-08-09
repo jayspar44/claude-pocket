@@ -3,7 +3,10 @@
     { "filename": "version.json", "type": "json" },
     { "filename": "package.json", "type": "json" },
     { "filename": "app/package.json", "type": "json" },
-    { "filename": "relay/package.json", "type": "json" }
+    { "filename": "relay/package.json", "type": "json" },
+    { "filename": "package-lock.json", "type": "json" },
+    { "filename": "app/package-lock.json", "type": "json" },
+    { "filename": "relay/package-lock.json", "type": "json" }
   ],
   "tagPrefix": "v",
   "types": [
