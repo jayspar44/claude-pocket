@@ -73,6 +73,9 @@ npm run lint         # both packages — there is no root lint:app / lint:relay
   in. Check it before trusting `relay/.env`, and before making any config value newly load-bearing:
   a stale `ALLOWED_ORIGINS` still live in PM2 from an old `.env.example` is why CORS enforcement was
   reverted.
+- **CORS is open by design and the `cors` package is deliberately not a dependency.** One user on a
+  private tailnet has no origin worth allowlisting, and enforcing one broke the app silently — so
+  the few header lines in `relay/src/index.js` are the whole story. Don't reinstall it.
 - **The relay and app deploy independently, but the same person ships both.** A protocol change
   that needs a matching app release is fine — cut both. What is *not* fine is a relay change that
   fails silently on the client: the WebSocket is not subject to CORS, so a REST-layer break leaves
