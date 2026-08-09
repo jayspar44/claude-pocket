@@ -18,28 +18,26 @@ const server = http.createServer(app);
 // Initialize WebSocket handler
 const wsHandler = new WebSocketHandler(server);
 
-// CORS Configuration - enforces config.cors.allowedOrigins (ALLOWED_ORIGINS).
+// CORS is deliberately open: reflect whatever origin asks.
+//
+// This is one person, one phone and one Mac mini on a private tailnet, so an
+// origin allowlist protects nothing worth protecting - and it is actively
+// dangerous here. An earlier revision enforced ALLOWED_ORIGINS and took the
+// app's whole REST surface down within the hour: PM2 snapshots the deploying
+// shell's env and replays it on every restart, so all four processes were
+// still carrying a stale list from an old .env.example that named neither the
+// APK's real origin (https://localhost - androidScheme "https") nor the
+// tailnet web app. The terminal kept working, because the WebSocket is not
+// subject to CORS, and every refused request logged a clean 200. Invisible.
+//
+// ALLOWED_ORIGINS is therefore read by nothing. See relay/test/cors-open.test.js.
+//
+// No Access-Control-Allow-Credentials: nothing in the app sends a cookie or an
+// Authorization header, so granting it would be decoration.
 app.use((req, res, next) => {
   const origin = req.headers.origin;
-  const allowed = config.cors.allowedOrigins;
-
-  // The response varies by Origin under both branches, so a shared cache must
-  // never replay one origin's response to another.
   res.setHeader('Vary', 'Origin');
-
-  if (!allowed) {
-    // No allowlist: reflect, so already-deployed clients keep working - but
-    // without Allow-Credentials. A reflected origin plus credentials is the
-    // pairing browsers refuse to let you spell as '*', and nothing in this
-    // project sends a cookie or an Authorization header.
-    res.setHeader('Access-Control-Allow-Origin', origin || '*');
-  } else if (origin && allowed.includes(origin)) {
-    res.setHeader('Access-Control-Allow-Origin', origin);
-    res.setHeader('Access-Control-Allow-Credentials', 'true');
-  }
-  // Unlisted origin: no Access-Control-Allow-Origin at all, so the browser
-  // discards the response before page JS can read it.
-
+  res.setHeader('Access-Control-Allow-Origin', origin || '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
 

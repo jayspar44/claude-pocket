@@ -12,13 +12,24 @@ const logger = require('./logger');
 // clamps at row 0 lands BELOW the block it meant to overwrite and both copies
 // survive; that is the duplicated paragraph on the dev build.
 //
-// ESC[3J (erase scrollback) is the load-bearing part. The client does call
-// terminal.clear() first, but xterm keeps the cursor's line as row 0, never
-// resets the column, and no-ops entirely at ybase === 0 && y === 0 - so without
-// this the trimmed history stays in scrollback and a cursor-up can still reach
-// it. This does not make replay faithful: frames referring to trimmed rows are
+// The blob is a mid-stream capture whose own mode-setting prefix was trimmed
+// off the front, so it silently assumes three things that must be restored
+// explicitly - in this order, because each depends on the last:
+//
+//   ESC[?1049l  leave the alternate screen buffer. codex is a full-screen TUI;
+//               without this a Refresh erases the alt buffer instead, and the
+//               CLI gets no event telling it to repaint.
+//   ESC[r       drop any scroll region. Inside one, ESC[H reaches the region's
+//               top row, not row 0, and the blob's cursor-up clamps there too.
+//   ESC[0m      reset colours BEFORE erasing. ESC[2J fills with the CURRENT
+//               background, so erasing under a live highlight or an Ink spinner
+//               frame paints every row in that colour and every cell the blob
+//               does not overwrite keeps it.
+//   ESC[H ESC[2J ESC[3J   home, erase screen, erase scrollback.
+//
+// This does not make replay faithful: frames referring to trimmed rows are
 // unreconstructable either way. It bounds the damage to one screen.
-const SCREEN_RESET = '\x1b[H\x1b[2J\x1b[3J';
+const SCREEN_RESET = '\x1b[?1049l\x1b[r\x1b[0m\x1b[H\x1b[2J\x1b[3J';
 
 class WebSocketHandler {
   // JSON.parse succeeds on null, numbers, strings and arrays. handleMessage
@@ -230,12 +241,12 @@ class WebSocketHandler {
   // what its comment always claimed.
   snapshotForReplay(ptyManager) {
     ptyManager.flushBatch();
-    const buffered = ptyManager.getBufferedOutput();
-    // Empty stays empty: both call sites treat a falsy snapshot as "send no
-    // replay frame", and a bare reset would blank a terminal for an instance
-    // that has produced nothing yet.
-    if (!buffered) return buffered;
-    return SCREEN_RESET + buffered;
+    // Always prefixed, even when the buffer is empty. POST /api/pty/stop clears
+    // the buffer and the app reconnects immediately, and the client only calls
+    // terminal.clear() when a replay frame actually arrives - so returning ''
+    // here is exactly the case where the previous session's output stays on
+    // screen and the new one repaints on top of it.
+    return SCREEN_RESET + ptyManager.getBufferedOutput();
   }
 
   async handleMessage(ws, message, ctx) {

@@ -68,11 +68,15 @@ npm run lint         # both packages — there is no root lint:app / lint:relay
   `!isBusy && listeners === 0`, and `isBusy` covers `starting` as well as `running`. So dropping
   every WebSocket from an instance cannot kill its CLI — the buffer replays on reconnect. Useful for
   clearing stuck connections on a live relay.
-- **PM2's `pm2 jlist` shows the env each process was launched with** — the fastest way to see what a
-  deploy captured.
-- **The relay and app deploy independently.** An older APK can be talking to a newer relay, so a
-  relay change that alters what the client sees (close codes, new frame fields) has to stay
-  compatible with builds already on phones.
+- **PM2 replays the env each process was launched with, including values you have since deleted.**
+  `pm2 jlist` shows what a process actually captured — the fastest way to see what a deploy baked
+  in. Check it before trusting `relay/.env`, and before making any config value newly load-bearing:
+  a stale `ALLOWED_ORIGINS` still live in PM2 from an old `.env.example` is why CORS enforcement was
+  reverted.
+- **The relay and app deploy independently, but the same person ships both.** A protocol change
+  that needs a matching app release is fine — cut both. What is *not* fine is a relay change that
+  fails silently on the client: the WebSocket is not subject to CORS, so a REST-layer break leaves
+  a working terminal, a clean 200 in the relay log, and no error anywhere.
 
 ## Environment Variables
 

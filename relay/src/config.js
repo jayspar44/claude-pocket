@@ -61,21 +61,6 @@ const config = {
     thresholdMs: 10000,      // 10s for testing (was 60000)
   },
 
-  // CORS configuration. The relay authenticates nobody, so this is the only
-  // thing between a page the operator happens to visit and a REST surface that
-  // spawns PTYs and reads the filesystem.
-  //
-  // null means "no allowlist" - ALLOWED_ORIGINS unset or '*'. That stays
-  // permissive on purpose: tightening the default would lock out every APK
-  // already on a phone, which reaches the relay from a Capacitor origin no
-  // operator has listed. index.js compensates by never pairing a reflected
-  // origin with a credentials grant.
-  cors: {
-    allowedOrigins:
-      process.env.ALLOWED_ORIGINS && process.env.ALLOWED_ORIGINS !== '*'
-        ? process.env.ALLOWED_ORIGINS.split(',').map((o) => o.trim()).filter(Boolean)
-        : null,
-  },
 
   // WebSocket configuration
   ws: {
