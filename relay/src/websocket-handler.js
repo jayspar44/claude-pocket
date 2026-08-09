@@ -4,6 +4,22 @@ const { DEFAULT_INSTANCE_ID } = require('./pty-registry');
 const config = require('./config');
 const logger = require('./logger');
 
+// Put the client's screen into a known state before the replay blob is written
+// into it. The buffer is a raw, cursor-addressed TUI stream that trimming cuts
+// at an arbitrary chunk boundary, so it routinely opens mid-repaint - a live
+// buffer here began with ESC[10A, ten rows that trimming had already discarded.
+// Replayed against a screen that still holds content, a repaint whose cursor-up
+// clamps at row 0 lands BELOW the block it meant to overwrite and both copies
+// survive; that is the duplicated paragraph on the dev build.
+//
+// ESC[3J (erase scrollback) is the load-bearing part. The client does call
+// terminal.clear() first, but xterm keeps the cursor's line as row 0, never
+// resets the column, and no-ops entirely at ybase === 0 && y === 0 - so without
+// this the trimmed history stays in scrollback and a cursor-up can still reach
+// it. This does not make replay faithful: frames referring to trimmed rows are
+// unreconstructable either way. It bounds the damage to one screen.
+const SCREEN_RESET = '\x1b[H\x1b[2J\x1b[3J';
+
 class WebSocketHandler {
   // JSON.parse succeeds on null, numbers, strings and arrays. handleMessage
   // destructures its argument, so anything that is not a plain object must be
@@ -214,7 +230,12 @@ class WebSocketHandler {
   // what its comment always claimed.
   snapshotForReplay(ptyManager) {
     ptyManager.flushBatch();
-    return ptyManager.getBufferedOutput();
+    const buffered = ptyManager.getBufferedOutput();
+    // Empty stays empty: both call sites treat a falsy snapshot as "send no
+    // replay frame", and a bare reset would blank a terminal for an instance
+    // that has produced nothing yet.
+    if (!buffered) return buffered;
+    return SCREEN_RESET + buffered;
   }
 
   async handleMessage(ws, message, ctx) {
