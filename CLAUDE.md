@@ -6,13 +6,13 @@ Mobile-first client for Claude Code CLI via WebSocket relay.
 
 **Always check hostname before running commands:**
 ```bash
-hostname  # MiniBox.local = on minibox, run commands directly
+hostname  # starts with minibox (any case; suffix varies by network) = on minibox, run commands directly
           # Other = local Mac, use SSH for minibox commands
 ```
 
 | Running From | Minibox Commands |
 |--------------|------------------|
-| Minibox (`hostname` = `MiniBox.local`) | Run directly: `pm2 status`, `./scripts/deploy.sh` |
+| Minibox | Run directly: `pm2 status`, `./scripts/deploy.sh` |
 | Local Mac | Use SSH: `ssh minibox "pm2 status"` |
 
 **Common scenario:** SSH from phone → minibox → `claude`. You're ON minibox, no SSH needed.
