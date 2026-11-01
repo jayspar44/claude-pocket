@@ -73,7 +73,7 @@ RELAY_SERVICE="claude-pocket-relay-dev"
 Add helper functions to detect if running locally on minibox:
 
 ```bash
-# Check if already on minibox (hostname varies by network: MiniBox.local, minibox.lan)
+# Check if already on minibox (hostname suffix varies by network)
 is_on_minibox() {
   [[ "$(hostname)" == "MiniBox"* ]] || [[ "$(hostname -s 2>/dev/null)" == minibox* ]]
 }
