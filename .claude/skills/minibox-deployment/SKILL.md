@@ -38,12 +38,10 @@ ssh minibox "cd ~/Documents/projects/claude-pocket && ./scripts/deploy.sh"
 
 **PM2 Commands:** `pm2 status` | `pm2 logs` | `pm2 restart all` | `pm2 stop all` | `pm2 delete all` | `pm2 monit`
 
-**Auto-start on boot (first time only):**
-```bash
-pm2 startup    # Follow instructions to run sudo command
-pm2 save       # Save process list
-```
+**Auto-start at login:** `~/Library/LaunchAgents/pm2.jayspar.plist` runs `pm2 resurrect` once at login (log: `~/.pm2/launchd.log`). It restores the list from the last `pm2 save`, which `deploy.sh` runs.
 
-**Disable auto-start:** `pm2 unstartup`
+- **Login, not boot:** auto-login is deliberately off, so after a reboot nothing starts, Tailscale included, until someone logs in at the Mac.
+- **Written by hand, not `pm2 startup`:** that command needs sudo only for its own root check, and its template sets `KeepAlive` on a command that exits.
+- **Disable:** `launchctl bootout gui/$(id -u)/pm2.jayspar`, then delete the plist.
 
 **Config files per folder:** `ecosystem.config.js` | `relay/.env.production` | `app/.env.production`
